@@ -1,0 +1,31 @@
+# Python virtual environment
+venv/
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node modules (if frontend tools ever used)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Database local files (if ever used)
+*.sqlite3
+
+# Build / distribution
+dist/
+build/
+*.egg-info

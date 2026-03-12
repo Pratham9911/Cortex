@@ -1,0 +1,2 @@
+cd cortex-backend
+venv\Scripts\activate
