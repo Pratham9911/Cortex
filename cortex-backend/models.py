@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+# from narwhals import Boolean
+
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey , Boolean
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql import func
 from database import Base
 
@@ -46,3 +49,40 @@ class ProjectInvite(Base):
     status = Column(String, default="pending")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    document_id = Column(Integer, primary_key=True, index=True)
+
+    project_id = Column(Integer, ForeignKey("projects.project_id"), nullable=False)
+
+    title = Column(String, nullable=False)
+    description = Column(String)
+
+    source_team = Column(String)
+
+    owner_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+
+    tags = Column(ARRAY(String))
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DocumentVersion(Base):
+    __tablename__ = "document_versions"
+
+    version_id = Column(Integer, primary_key=True, index=True)
+
+    document_id = Column(Integer, ForeignKey("documents.document_id"), nullable=False)
+
+    version_number = Column(Integer, nullable=False)
+
+    storage_path = Column(String, nullable=False)
+
+    is_active = Column(Boolean, default=True)
+
+    uploaded_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())

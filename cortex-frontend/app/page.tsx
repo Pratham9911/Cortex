@@ -9,6 +9,7 @@ import { FAQSection } from "@/components/faq-section"
 import { CTASection } from "@/components/cta-section"
 import { FooterSection } from "@/components/footer-section"
 import { AnimatedSection } from "@/components/animated-section"
+import { CortexBento } from "@/components/cortex-bento"
 
 export default function LandingPage() {
   return (
@@ -26,6 +27,7 @@ export default function LandingPage() {
         <AnimatedSection className="relative z-10 max-w-[1320px]  px-6 mt-[411px] md:mt-[400px]" delay={0.1}>
           <SocialProof />
         </AnimatedSection>
+
         <AnimatedSection id="features-section" className="relative z-10 max-w-[1320px]  " delay={0.2}>
           <BentoSection />
         </AnimatedSection>
@@ -47,11 +49,20 @@ export default function LandingPage() {
           <TestimonialGridSection />
         </AnimatedSection>
         <AnimatedSection id="faq-section" className="relative z-10 max-w-[1320px] mx-auto mt-8 md:mt-16" delay={0.2}>
+
           <FAQSection />
         </AnimatedSection>
-        <AnimatedSection className="relative z-10 max-w-[1320px] mx-auto mt-8 md:mt-16" delay={0.2}>
-          <CTASection />
-        </AnimatedSection>
+       <AnimatedSection
+  id="cta-section"
+  className="relative z-10 max-w-[1320px] mx-auto mt-8 md:mt-16 px-6"
+  delay={0.2}
+>
+  {/* <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-10 items-start"> */}
+    <CortexBento />
+    {/* <CTASection /> */}
+  {/* </div> */}
+</AnimatedSection>
+
         <AnimatedSection className="relative z-10 max-w-[1320px] mx-auto mt-8 md:mt-16" delay={0.2}>
           <FooterSection />
         </AnimatedSection>
