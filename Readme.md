@@ -130,10 +130,10 @@ Everything in the system belongs to one of these.
 # 🧩 Tech Stack
 
 * **Frontend:** React
-* **Backend:** Express / Node.js
+* **Backend:** Python (FastAPI)
 * **Database:** PostgreSQL
 * **Graph DB:** Neo4j
-* **Queue:** Redis / BullMQ
+* **Queue:** Redis 
 * **AI Layer:** Embeddings + LLM APIs
 
 ---
