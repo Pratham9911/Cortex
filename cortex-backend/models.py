@@ -1,8 +1,15 @@
-# from narwhals import Boolean
-
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey , Boolean
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DateTime,
+    ForeignKey,
+    Boolean,
+    UniqueConstraint
+)
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql import func
+from pgvector.sqlalchemy import Vector
 from database import Base
 
 
@@ -31,8 +38,13 @@ class ProjectMember(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.project_id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    role = Column(String, nullable=False)  # admin | member
+    role = Column(String, nullable=False)   # admin | member
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_project_user"),
+    )
+
 
 class ProjectInvite(Base):
     __tablename__ = "project_invites"
@@ -41,7 +53,6 @@ class ProjectInvite(Base):
     project_id = Column(Integer, ForeignKey("projects.project_id"), nullable=False)
 
     email = Column(String, nullable=False)
-
     token = Column(String, unique=True, nullable=False)
 
     invited_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
@@ -61,13 +72,25 @@ class Document(Base):
     title = Column(String, nullable=False)
     description = Column(String)
 
-    source_team = Column(String)
-
     owner_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
 
     tags = Column(ARRAY(String))
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    download_access_level = Column(
+    String,
+    default="member"
+)
+
+    search_access_level = Column(
+    String,
+    default="member"
+)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "title", name="uq_project_document_title"),
+    )
 
 
 class DocumentVersion(Base):
@@ -81,8 +104,56 @@ class DocumentVersion(Base):
 
     storage_path = Column(String, nullable=False)
 
+    file_name = Column(String, nullable=False)
+    mime_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+
     is_active = Column(Boolean, default=True)
 
     uploaded_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
 
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+    activated_by = Column(
+    Integer,
+    ForeignKey("users.user_id"),
+    nullable=True
+    )
+
+    activated_at = Column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("document_id", "version_number", name="uq_document_version"),
+    )
+
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    chunk_id = Column(Integer, primary_key=True, index=True)
+
+    version_id = Column(
+        Integer,
+        ForeignKey("document_versions.version_id"),
+        nullable=False
+    )
+    project_id = Column(
+    Integer,
+    ForeignKey("projects.project_id"),
+    nullable=False
+    )
+    chunk_index = Column(Integer, nullable=False)
+
+    content = Column(String, nullable=False)
+    page_number = Column(Integer, nullable=True)
+    embedding = Column(Vector(1024))
+    
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
