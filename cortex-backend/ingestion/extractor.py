@@ -51,7 +51,8 @@ def extract_text(document_id: int, user_id: int, db: Session):
     # ----------------------------------------
     version = db.query(DocumentVersion).filter(
         DocumentVersion.document_id == document_id,
-        DocumentVersion.is_active == True
+        DocumentVersion.is_active == True,
+        DocumentVersion.is_deleted == False
     ).first()
 
     if not version:

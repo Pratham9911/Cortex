@@ -28,7 +28,7 @@ export default function Home() {
       <Navigation />
       <HeroSection isReady={heroReady} />
       <FeaturesSection />
-      <HowItWorksSection />
+      {/* <HowItWorksSection /> */}
       <InfrastructureSection />
       <MetricsSection />
       <IntegrationsSection />

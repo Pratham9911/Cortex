@@ -5,24 +5,14 @@ import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { AnimatedSphere } from "./animated-sphere";
 
-const words = ["create", "build", "scale", "ship"];
-
 export function HeroSection({ isReady = true }: { isReady?: boolean }) {
   const [isVisible, setIsVisible] = useState(false);
-  const [wordIndex, setWordIndex] = useState(0);
 
   useEffect(() => {
     if (isReady) {
       setIsVisible(true);
     }
   }, [isReady]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setWordIndex((prev) => (prev + 1) % words.length);
-    }, 2500);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <section className="relative min-h-screen flex flex-col justify-center overflow-hidden">
@@ -73,42 +63,21 @@ export function HeroSection({ isReady = true }: { isReady?: boolean }) {
             isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
           }`}
         >
-          <span className="inline-flex items-center gap-3 text-sm font-mono text-muted-foreground">
+            <span className="inline-flex items-center gap-3 text-sm font-mono text-muted-foreground">
             <span className="w-8 h-px bg-foreground/30" />
-            The platform for modern teams
+            The AI Workspace for Intelligent Teams
           </span>
         </div>
         
         {/* Main headline */}
         <div className="mb-12">
           <h1 
-            className={`text-[clamp(3rem,12vw,10rem)] font-display leading-[0.9] tracking-tight transition-all duration-1000 ${
+            className={`text-[clamp(2.2rem,8vw,6rem)] font-display leading-[0.95] tracking-tight transition-all duration-1000 ${
               isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
             }`}
           >
-            <span className="block">The platform</span>
-            <span className="block">
-              to{" "}
-              <span className="relative inline-block">
-                <span 
-                  key={wordIndex}
-                  className="inline-flex"
-                >
-                  {words[wordIndex].split("").map((char, i) => (
-                    <span
-                      key={`${wordIndex}-${i}`}
-                      className="inline-block animate-char-in"
-                      style={{
-                        animationDelay: `${i * 50}ms`,
-                      }}
-                    >
-                      {char}
-                    </span>
-                  ))}
-                </span>
-                <span className="absolute -bottom-2 left-0 right-0 h-3 bg-foreground/10" />
-              </span>
-            </span>
+            <span className="block">Unified knowledge,</span>
+            <span className="block">intelligent team</span>
           </h1>
         </div>
         
@@ -119,8 +88,8 @@ export function HeroSection({ isReady = true }: { isReady?: boolean }) {
               isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
-            Your toolkit to stop configuring and start innovating. 
-            Securely build, deploy, and scale the best experiences.
+            Build, search, connect, and scale AI-powered workflows across your
+            team&apos;s documents, tools, and knowledge.
           </p>
           
           {/* CTAs */}
@@ -150,31 +119,43 @@ export function HeroSection({ isReady = true }: { isReady?: boolean }) {
       
       {/* Stats marquee - full width outside container */}
       <div 
-        className={`absolute bottom-24 left-0 right-0 transition-all duration-700 delay-500 ${
+        className={`absolute bottom-10 left-0 right-0 transition-all duration-700 delay-500 ${
           isVisible ? "opacity-100" : "opacity-0"
         }`}
       >
-        <div className="flex gap-16 marquee whitespace-nowrap">
-          {[...Array(2)].map((_, i) => (
-            <div key={i} className="flex gap-16">
-              {[
-                { value: "20 days", label: "saved on builds", company: "NETFLIX" },
-                { value: "98%", label: "faster deployment", company: "STRIPE" },
-                { value: "300%", label: "throughput increase", company: "LINEAR" },
-                { value: "6x", label: "faster to ship", company: "NOTION" },
-              ].map((stat) => (
-                <div key={`${stat.company}-${i}`} className="flex items-baseline gap-4">
-                  <span className="text-4xl lg:text-5xl font-display">{stat.value}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {stat.label}
-                    <span className="block font-mono text-xs mt-1">{stat.company}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
+  <div className="flex gap-16 marquee whitespace-nowrap">
+    {[...Array(2)].map((_, i) => (
+      <div key={i} className="flex gap-16">
+        {[
+          { value: "95%", label: "faster knowledge retrieval", company: "CORTEX" },
+
+          { value: "10x", label: "quicker document search", company: "AI SEARCH" },
+
+          { value: "80%", label: "less manual context switching", company: "WORKSPACES" },
+
+          { value: "24/7", label: "AI-powered assistance", company: "INTELLIGENCE" },
+        ].map((stat) => (
+          <div
+            key={`${stat.company}-${i}`}
+            className="flex items-baseline gap-4"
+          >
+            <span className="text-4xl lg:text-5xl font-display">
+              {stat.value}
+            </span>
+
+            <span className="text-sm text-muted-foreground">
+              {stat.label}
+
+              <span className="block font-mono text-xs mt-1">
+                {stat.company}
+              </span>
+            </span>
+          </div>
+        ))}
       </div>
+    ))}
+  </div>
+</div>
       
       {/* Scroll indicator */}
       

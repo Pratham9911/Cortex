@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from pydantic import BaseModel, Field
-
+from sqlalchemy import func, case
 from database import SessionLocal
-from models import Project, ProjectMember
+from routers.audit import create_audit_log
+from models import Project, ProjectMember, User , Team, TeamMember
 from dependencies import get_current_user
 
 
@@ -27,6 +28,9 @@ def create_project(
     db: Session = Depends(get_db)
 ):
 
+    # ----------------------------------------
+    # Create project
+    # ----------------------------------------
     new_project = Project(
         name=request.name,
         created_by=user_id
@@ -36,6 +40,9 @@ def create_project(
     db.commit()
     db.refresh(new_project)
 
+    # ----------------------------------------
+    # Add creator as admin
+    # ----------------------------------------
     project_member = ProjectMember(
         project_id=new_project.project_id,
         user_id=user_id,
@@ -43,35 +50,140 @@ def create_project(
     )
 
     db.add(project_member)
+
+    # ----------------------------------------
+    # Create default "general" team
+    # ----------------------------------------
+    general_team = Team(
+        project_id=new_project.project_id,
+        name="general",
+        created_by=user_id
+    )
+
+    db.add(general_team)
+    db.commit()
+    db.refresh(general_team)
+
+    # ----------------------------------------
+    # Add admin to general team
+    # ----------------------------------------
+    general_team_member = TeamMember(
+        team_id=general_team.team_id,
+        user_id=user_id,
+        added_by=user_id
+    )
+
+    db.add(general_team_member)
+
+    # ----------------------------------------
+    # Audit log
+    # ----------------------------------------
+    user = db.query(User).filter(
+        User.user_id == user_id
+    ).first()
+
+    create_audit_log(
+        db=db,
+        project_id=new_project.project_id,
+        user_id=user_id,
+        action="create",
+        detail=f"{user.name} created project '{new_project.name}'"
+    )
+
+    # ----------------------------------------
+    # Final commit
+    # ----------------------------------------
     db.commit()
 
     return {
         "message": "Project created successfully",
         "project_id": new_project.project_id
     }
-
-@router.get("/getProjects")
+@router.get("/getprojects")
 def list_projects(
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
 
-    memberships = db.query(ProjectMember).filter(
-        ProjectMember.user_id == user_id
-    ).all()
+    membership_alias = aliased(ProjectMember)
 
-    projects = []
+    # total members INCLUDING admins
+    member_count_expr = func.count(
+        ProjectMember.user_id
+    ).label("member_count")
 
-    for membership in memberships:
-        project = db.query(Project).filter(
-            Project.project_id == membership.project_id
-        ).first()
+    # only admins count
+    admin_count_expr = func.sum(
+        case(
+            (ProjectMember.role == "admin", 1),
+            else_=0
+        )
+    ).label("admin_count")
 
-        projects.append({
+    projects = (
+        db.query(
+            Project.project_id,
+            Project.name,
+            Project.created_at,
+            Project.created_by,
+
+            User.name.label("created_by_name"),
+
+            membership_alias.role.label("current_user_role"),
+
+            member_count_expr,
+            admin_count_expr
+        )
+
+        # all project members for counting
+        .join(
+            ProjectMember,
+            Project.project_id == ProjectMember.project_id
+        )
+
+        # creator info
+        .join(
+            User,
+            User.user_id == Project.created_by
+        )
+
+        # current logged-in user's membership
+        .join(
+            membership_alias,
+            (membership_alias.project_id == Project.project_id) &
+            (membership_alias.user_id == user_id)
+        )
+
+        .group_by(
+            Project.project_id,
+            Project.name,
+            Project.created_at,
+            Project.created_by,
+            User.name,
+            membership_alias.role
+        )
+
+        .all()
+    )
+
+    return [
+        {
             "project_id": project.project_id,
+
             "name": project.name,
-            "role": membership.role
-        })
 
-    return projects
+            "created_by": {
+                "user_id": project.created_by,
+                "name": project.created_by_name
+            },
 
+            "member_count": project.member_count,
+
+            "admin_count": project.admin_count,
+
+            "current_user_role": project.current_user_role,
+
+            "created_at": project.created_at
+        }
+        for project in projects
+    ]

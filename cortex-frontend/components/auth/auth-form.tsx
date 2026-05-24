@@ -38,7 +38,7 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
   useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (token) {
-      router.push("/dashboard")
+      router.push("/workspace")
     }
   }, [router])
 
@@ -100,7 +100,7 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
         const loginData = await loginResponse.json()
         localStorage.setItem("access_token", loginData.access_token)
         localStorage.setItem("token_type", loginData.token_type)
-        router.push("/dashboard")
+        router.push("/workspace")
       } else {
         // Call Login endpoint
         const response = await fetch(`${apiUrl}/login`, {
@@ -122,7 +122,7 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
         const data = await response.json()
         localStorage.setItem("access_token", data.access_token)
         localStorage.setItem("token_type", data.token_type)
-        router.push("/dashboard")
+        router.push("/workspace")
       }
     } catch (error: any) {
       setErrorMsg(error.message || "An error occurred during authentication.")
@@ -142,7 +142,7 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
       
       // Redirect to dashboard
       setTimeout(() => {
-        router.push("/dashboard")
+        router.push("/workspace")
       }, 500)
     } catch (err: any) {
       setErrorMsg("An error occurred with Google login.")

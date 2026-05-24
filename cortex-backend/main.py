@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine
 from models import Base, User
 from dependencies import get_current_user
-from routers import auth , projects , invites , documents
+from routers import auth , projects  , documents , teams , folder , inbox
 
 app = FastAPI()
 
@@ -19,8 +19,10 @@ app.add_middleware(
 
 Base.metadata.create_all(bind=engine)
 app.include_router(projects.router)
-app.include_router(invites.router)
 app.include_router(auth.router)
+app.include_router(teams.router)
+app.include_router(folder.router)
+app.include_router(inbox.router)
 app.include_router(documents.router)
 
 def get_db():

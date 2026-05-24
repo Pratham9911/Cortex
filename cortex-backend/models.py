@@ -46,20 +46,6 @@ class ProjectMember(Base):
     )
 
 
-class ProjectInvite(Base):
-    __tablename__ = "project_invites"
-
-    invite_id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.project_id"), nullable=False)
-
-    email = Column(String, nullable=False)
-    token = Column(String, unique=True, nullable=False)
-
-    invited_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-
-    status = Column(String, default="pending")
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Document(Base):
@@ -87,7 +73,15 @@ class Document(Base):
     String,
     default="member"
 )
-
+    allowed_team_ids = Column(
+    ARRAY(Integer),
+    nullable=True
+)
+    folder_id = Column(
+    Integer,
+    ForeignKey("folders.folder_id"),
+    nullable=True
+)
     __table_args__ = (
         UniqueConstraint("project_id", "title", name="uq_project_document_title"),
     )
@@ -125,7 +119,22 @@ class DocumentVersion(Base):
         DateTime(timezone=True),
         nullable=True
     )
-
+   
+    is_deleted = Column(
+        Boolean,
+        default=False
+    )
+    
+    deleted_at = Column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    
+    deleted_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=True
+    )
     __table_args__ = (
         UniqueConstraint("document_id", "version_number", name="uq_document_version"),
     )
@@ -157,3 +166,209 @@ class DocumentChunk(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
+
+
+class Folder(Base):
+    __tablename__ = "folders"
+
+    folder_id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id"),
+        nullable=False
+    )
+
+    name = Column(
+        String,
+        nullable=False
+    )
+
+    created_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "name",
+            name="uq_project_folder_name"
+        ),
+    )
+class ProjectAuditLog(Base):
+    __tablename__ = "project_audit_logs"
+
+    log_id = Column(Integer, primary_key=True, index=True)
+
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id"),
+        nullable=False
+    )
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False
+    )
+
+    action = Column(String, nullable=False)
+
+    detail = Column(String, nullable=False)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+class Team(Base):
+    __tablename__ = "teams"
+
+    team_id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id"),
+        nullable=False
+    )
+
+    name = Column(
+        String,
+        nullable=False
+    )
+
+    created_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "name",
+            name="uq_project_team_name"
+        ),
+    )
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    team_id = Column(
+        Integer,
+        ForeignKey("teams.team_id"),
+        nullable=False
+    )
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False
+    )
+
+    added_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False
+    )
+
+    added_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "team_id",
+            "user_id",
+            name="uq_team_member"
+        ),
+    )
+
+
+
+class InboxMessage(Base):
+    __tablename__ = "inbox_messages"
+
+    message_id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    receiver_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False
+    )
+
+    sender_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=True
+    )
+
+    type = Column(
+        String,
+        nullable=False
+    )
+    # invite
+    # notice
+    # system
+
+    title = Column(
+        String,
+        nullable=False
+    )
+
+    message = Column(
+        String,
+        nullable=False
+    )
+
+    related_project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id"),
+        nullable=True
+    )
+
+    status = Column(
+        String,
+        default="unread"
+    )
+    # unread
+    # read
+    # accepted
+    # rejected
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
