@@ -1,10 +1,11 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from database import SessionLocal, engine
 from models import Base, User
 from dependencies import get_current_user
-from routers import auth , projects  , documents , teams , folder , inbox
+from routers import auth , projects  , documents , teams , folder , inbox, user_profiles
 
 app = FastAPI()
 
@@ -17,6 +18,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Run schema migration for user avatar column
+db = SessionLocal()
+try:
+    db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR;"))
+    db.commit()
+except Exception as e:
+    print(f"Schema migration error: {e}")
+    db.rollback()
+finally:
+    db.close()
+
 Base.metadata.create_all(bind=engine)
 app.include_router(projects.router)
 app.include_router(auth.router)
@@ -24,6 +36,7 @@ app.include_router(teams.router)
 app.include_router(folder.router)
 app.include_router(inbox.router)
 app.include_router(documents.router)
+app.include_router(user_profiles.router)
 
 def get_db():
     db = SessionLocal()

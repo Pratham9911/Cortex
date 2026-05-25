@@ -286,6 +286,7 @@ def upload_document(
         "path": file_path
     }
 
+
 @router.get("/projects/{project_id}/documents")
 def list_documents(
     project_id: int,
@@ -389,8 +390,6 @@ def list_documents(
         })
 
     return result
-
-@router.post("/documents/{document_id}/versions/upload")
 
 
 @router.post("/documents/{document_id}/versions/upload")

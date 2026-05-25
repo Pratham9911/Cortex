@@ -4,8 +4,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from database import SessionLocal
 from models import User
-from auth_utils import hash_password, verify_password
-from jwt_utils import create_access_token
+from supabase_client import supabase
 
 
 router = APIRouter()
@@ -32,39 +31,49 @@ class LoginRequest(BaseModel):
 
 @router.post("/register")
 def register_user(request: RegisterRequest, db: Session = Depends(get_db)):
-
-    existing_user = db.query(User).filter(User.email == request.email).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    hashed_password = hash_password(request.password)
-
-    new_user = User(
-        name=request.name,
-        email=request.email,
-        password_hash=hashed_password
-    )
-
-    db.add(new_user)
-    db.commit()
-
-    return {"message": "User registered successfully"}
+    try:
+        # Call Supabase signup
+        res = supabase.auth.sign_up({
+            "email": request.email,
+            "password": request.password,
+            "options": {
+                "data": {
+                    "name": request.name
+                }
+            }
+        })
+        
+        if not res or not res.user:
+            raise HTTPException(status_code=400, detail="Registration failed")
+            
+        return {
+            "message": "User registered successfully. Please verify your email if email confirmation is enabled.",
+            "user_id": res.user.id
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/login")
 def login_user(request: LoginRequest, db: Session = Depends(get_db)):
-
-    user = db.query(User).filter(User.email == request.email).first()
-
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    if not verify_password(request.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    token = create_access_token({"user_id": user.user_id})
-
-    return {
-        "access_token": token,
-        "token_type": "bearer"
-    }
+    try:
+        # Call Supabase sign in with password
+        res = supabase.auth.sign_in_with_password({
+            "email": request.email,
+            "password": request.password
+        })
+        
+        if not res or not res.session:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+            
+        return {
+            "access_token": res.session.access_token,
+            "refresh_token": res.session.refresh_token,
+            "token_type": "bearer",
+            "expires_in": res.session.expires_in
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "invalid_credentials" in error_msg.lower() or "invalid login credentials" in error_msg.lower():
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail=error_msg)

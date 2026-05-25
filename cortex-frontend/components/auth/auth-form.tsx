@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Mail, Lock, User } from "lucide-react"
+import { supabase } from "@/lib/supabase"
 
 interface AuthFormProps extends React.ComponentPropsWithoutRef<"div"> {
   isRegister?: boolean
@@ -42,10 +43,13 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
     }
   }, [router])
 
+  const [successMsg, setSuccessMsg] = useState("")
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setErrorMsg("")
+    setSuccessMsg("")
 
     if (isRegister && password !== confirmPassword) {
       setErrorMsg("Passwords do not match")
@@ -60,69 +64,43 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      
       if (isRegister) {
-        // 1. Call Register endpoint
-        const regResponse = await fetch(`${apiUrl}/register`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name,
-            email,
-            password,
-          }),
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              name: name || email.split("@")[0]
+            }
+          }
         })
 
-        if (!regResponse.ok) {
-          const errorData = await regResponse.json()
-          throw new Error(errorData.detail || "Registration failed")
+        if (error) throw error
+
+        if (data.user && !data.session) {
+          setSuccessMsg("Registration successful! Please check your email for the confirmation link.")
+          setLoading(false)
+          return
         }
 
-        // 2. Automatically login after successful registration
-        const loginResponse = await fetch(`${apiUrl}/login`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email,
-            password,
-          }),
-        })
-
-        if (!loginResponse.ok) {
-          throw new Error("Registration succeeded but auto-login failed. Please log in manually.")
+        if (data.session) {
+          localStorage.setItem("access_token", data.session.access_token)
+          localStorage.setItem("token_type", "bearer")
+          router.push("/workspace")
         }
-
-        const loginData = await loginResponse.json()
-        localStorage.setItem("access_token", loginData.access_token)
-        localStorage.setItem("token_type", loginData.token_type)
-        router.push("/workspace")
       } else {
-        // Call Login endpoint
-        const response = await fetch(`${apiUrl}/login`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email,
-            password,
-          }),
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password
         })
 
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.detail || "Invalid email or password")
-        }
+        if (error) throw error
 
-        const data = await response.json()
-        localStorage.setItem("access_token", data.access_token)
-        localStorage.setItem("token_type", data.token_type)
-        router.push("/workspace")
+        if (data.session) {
+          localStorage.setItem("access_token", data.session.access_token)
+          localStorage.setItem("token_type", "bearer")
+          router.push("/workspace")
+        }
       }
     } catch (error: any) {
       setErrorMsg(error.message || "An error occurred during authentication.")
@@ -131,21 +109,20 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
     }
   }
 
-  // Google Login is static for now
-  const handleGoogleLogin = () => {
+  const handleGoogleLogin = async () => {
     setLoading(true)
     setErrorMsg("")
+    setSuccessMsg("")
     try {
-      // Set a mock access token in localStorage to simulate successful authentication
-      localStorage.setItem("access_token", "mock_google_oauth_token_cortex_static")
-      localStorage.setItem("token_type", "bearer")
-      
-      // Redirect to dashboard
-      setTimeout(() => {
-        router.push("/workspace")
-      }, 500)
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: window.location.origin + "/workspace"
+        }
+      })
+      if (error) throw error
     } catch (err: any) {
-      setErrorMsg("An error occurred with Google login.")
+      setErrorMsg(err.message || "An error occurred with Google login.")
       setLoading(false)
     }
   }
@@ -154,6 +131,27 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
 
   return (
     <div className={cn("flex flex-col items-center justify-center gap-3 w-full max-w-sm px-4 animate-in fade-in duration-500 relative", className)} {...props}>
+      {successMsg && (
+        <div className="fixed top-4 inset-x-0 flex justify-center z-50">
+          <div className={cn("bg-emerald-100 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-600 rounded-md p-4 max-w-md w-full shadow-lg", isDark ? "dark" : "")}>
+            <p className="text-center">{successMsg}</p>
+            <button
+              className="mt-2 w-full bg-emerald-600 dark:bg-emerald-500 text-white rounded py-1"
+              onClick={() => setSuccessMsg("")}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+      {successMsg && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+          <div className={cn("bg-white dark:bg-gray-800 rounded-lg p-6 shadow-lg max-w-sm w-full", isDark ? "text-white" : "text-gray-900")}>
+            <p className="text-center">{successMsg}</p>
+            <button className={cn("mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700", isDark ? "" : "")} onClick={() => setSuccessMsg("")}>OK</button>
+          </div>
+        </div>
+      )}
       {/* Brand Icon and Header */}
       <Link href="/" className="flex items-center gap-2 hover:opacity-85 transition-opacity mb-0.5">
         <Image 
@@ -388,6 +386,18 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
                         : "text-red-600 bg-red-50 border-red-200"
                     )}>
                       {errorMsg}
+                    </div>
+                  )}
+
+                  {/* Success feedback */}
+                  {successMsg && (
+                    <div className={cn(
+                      "text-[11px] p-2 rounded-md border flex items-center justify-center text-center animate-in fade-in zoom-in-95",
+                      isDark 
+                        ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" 
+                        : "text-emerald-600 bg-emerald-50 border-emerald-200"
+                    )}>
+                      {successMsg}
                     </div>
                   )}
   

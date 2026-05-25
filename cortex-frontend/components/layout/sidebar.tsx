@@ -10,7 +10,7 @@ import {
   Search, Inbox, Bell, LayoutGrid, BarChart3, LineChart,
   FileText, Receipt, Building2, Trash2, Sparkles,
   Sliders, Moon, Sun, Palette, HelpCircle, ChevronsUpDown,
-  PanelLeftClose, LogOut, User, X
+  PanelLeftClose, LogOut, User, X, Settings
 } from "lucide-react"
 
 interface SidebarProps {
@@ -21,13 +21,14 @@ interface SidebarProps {
 }
 
 const MENU_ITEMS = [
-  { id: "Dashboard",  label: "Dashboard",  icon: LayoutGrid },
-  { id: "Analytics",  label: "Analytics",  icon: BarChart3  },
-  { id: "Reporting",  label: "Reporting",  icon: LineChart  },
-  { id: "Documents",  label: "Documents",  icon: FileText   },
-  { id: "Projects",   label: "Projects",   icon: Receipt    },
-  { id: "Teams",      label: "Teams",      icon: Building2  },
-  { id: "Trash",      label: "Trash",      icon: Trash2     },
+  { id: "Dashboard",  label: "Dashboard",        icon: LayoutGrid },
+  { id: "Analytics",  label: "Analytics",        icon: BarChart3  },
+  { id: "Reporting",  label: "Reporting",        icon: LineChart  },
+  { id: "Documents",  label: "Documents",        icon: FileText   },
+  { id: "Projects",   label: "Projects",         icon: Receipt    },
+  { id: "ProjectSettings", label: "Project settings", icon: Settings },
+  { id: "Teams",      label: "Teams",            icon: Building2  },
+  { id: "Trash",      label: "Trash",            icon: Trash2     },
 ]
 
 /* ─── Shared inner content used by both desktop & mobile ─── */
@@ -81,6 +82,7 @@ function SidebarContent({
       Reporting: "/reports",
       Documents: "/documents",
       Projects: "/projects",
+      ProjectSettings: "/project-settings",
       Teams: "/teams",
       Trash: "/trash",
     }
@@ -92,16 +94,39 @@ function SidebarContent({
   }
 
   useEffect(() => {
-    const pathToActive: Record<string, string> = {
-      "/dashboard": "Dashboard",
-      "/analytics": "Analytics",
-      "/reports": "Reporting",
-      "/documents": "Documents",
-      "/projects": "Projects",
-      "/teams": "Teams",
-      "/trash": "Trash",
+    if (pathname.startsWith("/teams")) {
+      setActive("Teams")
+      return
     }
-    setActive(pathToActive[pathname] ?? "Dashboard")
+    if (pathname.startsWith("/dashboard")) {
+      setActive("Dashboard")
+      return
+    }
+    if (pathname.startsWith("/analytics")) {
+      setActive("Analytics")
+      return
+    }
+    if (pathname.startsWith("/reports")) {
+      setActive("Reporting")
+      return
+    }
+    if (pathname.startsWith("/documents")) {
+      setActive("Documents")
+      return
+    }
+    if (pathname.startsWith("/projects")) {
+      setActive("Projects")
+      return
+    }
+    if (pathname.startsWith("/project-settings")) {
+      setActive("ProjectSettings")
+      return
+    }
+    if (pathname.startsWith("/trash")) {
+      setActive("Trash")
+      return
+    }
+    setActive("Dashboard")
   }, [pathname])
 
   const handleProfileTrigger = () => {
@@ -302,7 +327,22 @@ function SidebarContent({
             )}
           >
             <span className="flex items-center gap-2 overflow-hidden">
-              <span className="w-7 h-7 rounded-full bg-zinc-600 text-white text-[11px] font-extrabold flex items-center justify-center shrink-0 select-none uppercase">
+              {user?.avatar_url ? (
+                <img
+                  src={user.avatar_url}
+                  alt={user.name || "User Avatar"}
+                  className="w-7 h-7 rounded-full object-cover shrink-0"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none"
+                    const fallback = e.currentTarget.nextElementSibling as HTMLElement
+                    if (fallback) fallback.style.display = "flex"
+                  }}
+                />
+              ) : null}
+              <span
+                className="w-7 h-7 rounded-full bg-zinc-600 text-white text-[11px] font-extrabold flex items-center justify-center shrink-0 select-none uppercase"
+                style={user?.avatar_url ? { display: "none" } : {}}
+              >
                 {user?.name ? user.name.slice(0, 2) : "CX"}
               </span>
               {!isCollapsed && (
@@ -345,7 +385,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
   }, [isMobileOpen])
 
   const panelClass = cn(
-    "h-full flex flex-col p-3 overflow-y-auto",
+    "h-full flex flex-col p-3 overflow-y-auto font-quicksand",
     isDark ? "bg-[#121215] border-zinc-800" : "bg-[#f7f7f8] border-zinc-200"
   )
 
@@ -357,7 +397,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
         isCollapsed ? "w-[68px]" : "w-[260px]",
         isDark ? "border-zinc-800" : "border-zinc-200"
       )}>
-        <div className={panelClass} style={{ height: "100vh" }}>
+        <div className={panelClass} style={{ height: "100vh", fontWeight: 400 }}>
           <SidebarContent isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} setIsMobileOpen={setIsMobileOpen} />
         </div>
       </aside>
@@ -379,7 +419,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
             >
               <X className="w-4 h-4" />
             </button>
-            <div className="h-full p-3 overflow-y-scroll overscroll-contain touch-pan-y">
+            <div className="h-full p-3 overflow-y-scroll overscroll-contain touch-pan-y" style={{ fontWeight: 400 }}>
               <SidebarContent isCollapsed={false} setIsCollapsed={() => {}} setIsMobileOpen={setIsMobileOpen} />
             </div>
           </aside>

@@ -67,9 +67,10 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
     <ProtectedRoute>
       <div
         className={cn(
-          "min-h-screen flex transition-colors duration-300",
+          "min-h-screen flex transition-colors duration-300 font-quicksand",
           isDark ? "bg-[#0A0A0A] text-white" : "bg-slate-50 text-slate-900"
         )}
+        style={{ fontWeight: 400 }}
       >
         <Sidebar
           isCollapsed={isCollapsed}
@@ -169,9 +170,10 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
           <CommandDialog
             open={commandOpen}
             onOpenChange={setCommandOpen}
-            className={cn("sm:max-w-[860px]", isDark ? "border-zinc-700 bg-[#1b1d23] text-zinc-100" : "bg-white")}
+            className={cn("sm:max-w-[860px] font-quicksand", isDark ? "border-zinc-700 bg-[#1b1d23] text-zinc-100" : "bg-white")}
             title="Search Commands"
             description="Run a command or search..."
+            style={{ fontWeight: 400 }}
           >
             <CommandInput placeholder="Run a command or search..." />
             <CommandList className="max-h-[560px]">

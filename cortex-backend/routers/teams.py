@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
+from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -36,6 +37,25 @@ def get_db():
 # ---------------------------------------------------
 class CreateTeamRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=50)
+    description: str = Field(..., min_length=5, max_length=300)
+    tags: Optional[List[str]] = Field(default=None)
+
+    @validator("tags", each_item=True)
+    def validate_tag_item(cls, tag: str):
+        normalized = tag.strip()
+        if not normalized:
+            raise ValueError("Tags cannot be empty")
+        if len(normalized) > 30:
+            raise ValueError("Each tag must be 30 characters or fewer")
+        return normalized
+
+    @validator("tags")
+    def validate_tag_count(cls, tags: Optional[List[str]]):
+        if tags is None:
+            return tags
+        if len(tags) > 3:
+            raise ValueError("A team can have at most 3 tags")
+        return tags
 
 
 class AddTeamMemberRequest(BaseModel):
@@ -100,6 +120,8 @@ def create_team(
     new_team = Team(
         project_id=project_id,
         name=request.name.strip(),
+        description=request.description.strip(),
+        tags=[tag.strip() for tag in request.tags] if request.tags else None,
         created_by=user_id
     )
 
@@ -125,7 +147,14 @@ def create_team(
 
     return {
         "message": "Team created successfully",
-        "team_id": new_team.team_id
+        "team_id": new_team.team_id,
+        "team": {
+            "team_id": new_team.team_id,
+            "name": new_team.name,
+            "description": new_team.description,
+            "tags": new_team.tags,
+            "created_at": new_team.created_at
+        }
     }
 
 
@@ -284,6 +313,8 @@ def get_teams(
         result.append({
             "team_id": team.team_id,
             "name": team.name,
+            "description": team.description,
+            "tags": team.tags,
             "member_count": member_count,
             "created_at": team.created_at
         })
@@ -348,6 +379,7 @@ def get_team_members(
             "user_id": user.user_id,
             "name": user.name,
             "email": user.email,
+            "avatar_url": user.avatar_url,
             "added_at": member.added_at
         })
 

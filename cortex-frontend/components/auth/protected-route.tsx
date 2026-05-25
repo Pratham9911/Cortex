@@ -2,12 +2,14 @@
 
 import { useEffect, useState, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
+import { supabase } from "@/lib/supabase"
 
 interface User {
   user_id: number
   email?: string
   name?: string
   created_at?: string
+  avatar_url?: string
 }
 
 interface AuthContextType {
@@ -31,71 +33,99 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const logout = () => {
+  const clearSession = () => {
     localStorage.removeItem("access_token")
     localStorage.removeItem("token_type")
     setUser(null)
     router.push("/login")
   }
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      const token = localStorage.getItem("access_token")
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut()
+    } catch (error) {
+      console.error("Error signing out from Supabase:", error)
+    }
+    clearSession()
+  }
+
+  const syncBackendUser = async (token: string, avatarUrl?: string) => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const response = await fetch(`${apiUrl}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (response.status === 401) {
+        clearSession()
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error(`Failed to sync backend user: ${response.statusText}`)
+      }
+
+      const data = await response.json()
       
-      if (!token) {
-        router.push("/login")
-        return
+      const userData: User = {
+        user_id: data.user_id,
+        name: data.name || "Cortex Explorer",
+        email: data.email || "explorer@cortex.com",
+        created_at: data.created_at,
+        avatar_url: avatarUrl
       }
+      
+      setUser(userData)
+    } catch (error) {
+      console.error("Backend synchronization failed:", error)
+    }
+  }
 
-      // Handle the static Google OAuth token simulation
-      if (token === "mock_google_oauth_token_cortex_static") {
-        setUser({
-          user_id: 1,
-          name: "Google Explorer",
-          email: "google.explorer@cortex.static.com",
-          created_at: new Date().toISOString()
-        })
-        setLoading(false)
-        return
-      }
+  useEffect(() => {
+    let active = true
 
+    const checkInitialSession = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-        const response = await fetch(`${apiUrl}/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
-
-        if (!response.ok) {
-          localStorage.removeItem("access_token")
-          localStorage.removeItem("token_type")
-          router.push("/login")
-          return
-        }
-
-        const data = await response.json()
+        const { data: { session } } = await supabase.auth.getSession()
         
-        // Ensure name is present, default to Email User if none returned
-        const userData: User = {
-          user_id: data.user_id,
-          name: data.name || "Cortex Explorer",
-          email: data.email || "explorer@cortex.com",
-          created_at: data.created_at
+        if (!active) return
+
+        if (session) {
+          localStorage.setItem("access_token", session.access_token)
+          localStorage.setItem("token_type", "bearer")
+          await syncBackendUser(session.access_token, session.user?.user_metadata?.avatar_url)
+        } else {
+          clearSession()
         }
-        
-        setUser(userData)
       } catch (error) {
-        console.error("Auth verification failed", error)
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("token_type")
-        router.push("/login")
+        console.error("Error checking initial session:", error)
+        if (active) clearSession()
       } finally {
-        setLoading(false)
+        if (active) setLoading(false)
       }
     }
 
-    checkAuth()
+    checkInitialSession()
+
+    // Listen for auth state changes (login, logout, token refresh, etc.)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!active) return
+
+      if (session) {
+        localStorage.setItem("access_token", session.access_token)
+        localStorage.setItem("token_type", "bearer")
+        await syncBackendUser(session.access_token, session.user?.user_metadata?.avatar_url)
+      } else {
+        clearSession()
+      }
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
   }, [router])
 
   if (loading) {

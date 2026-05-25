@@ -141,6 +141,8 @@ function WorkspaceContent() {
     return sorted
   }, [projects, query, sortBy])
 
+  const noProjects = !loading && filteredProjects.length === 0
+
   const openProject = (project: Project) => {
     localStorage.setItem("selected_project_id", String(project.project_id))
     localStorage.setItem("selected_project_name", project.name)
@@ -179,7 +181,7 @@ function WorkspaceContent() {
   }
 
   return (
-    <main className={cn("min-h-screen", isDark ? "bg-[#0d0f14] text-white" : "bg-[#f5f7fb] text-slate-900")}>
+    <main className={cn("min-h-screen font-quicksand", isDark ? "bg-[#0d0f14] text-white" : "bg-[#f5f7fb] text-slate-900")} style={{ fontWeight: 400 }}>
       <header className={cn("sticky top-0 z-30 border-b", isDark ? "border-zinc-800/70 bg-[#0d0f14]" : "border-slate-200 bg-white")}>
         <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between px-3 md:px-5">
           <div className="flex items-center gap-3">
@@ -235,12 +237,25 @@ function WorkspaceContent() {
             </DropdownMenu>
 
             <div className="relative" ref={profileRef}>
-              <button onClick={() => setProfileOpen((s) => !s)} className={cn("rounded-full border p-1", isDark ? "border-zinc-700" : "border-slate-300")}>
+              <button onClick={() => setProfileOpen((s) => !s)} className={cn("rounded-full border p-1 overflow-hidden", isDark ? "border-zinc-700" : "border-slate-300")}>
+                {user?.avatar_url ? (
+                  <img
+                    src={user.avatar_url}
+                    alt={user.name || "User Avatar"}
+                    className="h-8 w-8 rounded-full object-cover shrink-0"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none"
+                      const fallback = e.currentTarget.nextElementSibling as HTMLElement
+                      if (fallback) fallback.style.display = "flex"
+                    }}
+                  />
+                ) : null}
                 <span
                   className={cn(
                     "flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold",
                     isDark ? "bg-zinc-100 text-zinc-900" : "bg-zinc-900 text-white"
                   )}
+                  style={user?.avatar_url ? { display: "none" } : {}}
                 >
                   {user?.name?.slice(0, 2).toUpperCase() || "CX"}
                 </span>
@@ -340,6 +355,23 @@ function WorkspaceContent() {
               <Card key={i} className={cn("h-[260px] animate-pulse rounded-xl border", isDark ? "border-zinc-700 bg-[#14161d]" : "border-slate-200 bg-slate-100")} />
             ))}
           </div>
+        ) : noProjects ? (
+          <div className={cn(
+            "mt-10 rounded-3xl border border-dashed px-8 py-12 text-center",
+            isDark ? "border-zinc-700 bg-[#111318]" : "border-slate-200 bg-white"
+          )}>
+            <div className="mx-auto max-w-md">
+              <Image
+                src="/illustraions/empty_box.svg"
+                alt="No projects yet"
+                width={180}
+                height={180}
+                className="mx-auto"
+              />
+              <h2 className={cn("mt-8 text-2xl font-semibold", isDark ? "text-white" : "text-slate-900")}>No projects yet</h2>
+              <p className={cn("mt-3 text-sm leading-6", isDark ? "text-zinc-400" : "text-slate-600")}>Create or join a project to start collaborating and building in Cortex.</p>
+            </div>
+          </div>
         ) : view === "grid" ? (
           <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filteredProjects.map((project) => (
@@ -405,7 +437,7 @@ function WorkspaceContent() {
       </section>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className={cn("sm:max-w-md", isDark ? "border-zinc-700 bg-[#171920] text-white" : "")}>
+        <DialogContent className={cn("sm:max-w-md font-quicksand", isDark ? "border-zinc-700 bg-[#171920] text-white" : "")} style={{ fontWeight: 400 }}>
           <DialogHeader>
             <DialogTitle className="text-xl font-bold">Create new project</DialogTitle>
             <DialogDescription className={cn(isDark ? "text-zinc-400" : "text-slate-600")}>
@@ -435,9 +467,10 @@ function WorkspaceContent() {
       <CommandDialog
         open={commandOpen}
         onOpenChange={setCommandOpen}
-        className={cn("sm:max-w-[860px]", isDark ? "border-zinc-700 bg-[#1b1d23] text-zinc-100" : "bg-white")}
+        className={cn("sm:max-w-[860px] font-quicksand", isDark ? "border-zinc-700 bg-[#1b1d23] text-zinc-100" : "bg-white")}
         title="Search Commands"
         description="Run a command or search..."
+        style={{ fontWeight: 400 }}
       >
         <CommandInput placeholder="Run a command or search..." />
         <CommandList className="max-h-[560px]">
