@@ -126,6 +126,15 @@ def create_team(
     )
 
     db.add(new_team)
+    db.flush()
+
+    # Automatically add the creator as a team member
+    creator_member = TeamMember(
+        team_id=new_team.team_id,
+        user_id=user_id,
+        added_by=user_id
+    )
+    db.add(creator_member)
 
     # ----------------------------------------
     # Audit

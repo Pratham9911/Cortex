@@ -5,8 +5,6 @@ import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
 import {
   CalendarDays,
-  Loader2,
-  LayoutList,
   MessageCircle,
   Plus,
   Search,
@@ -43,11 +41,49 @@ type TeamMember = {
   avatar_url?: string
 }
 
+// ----------------------------------------------------------------------
+// SKELETON COMPONENT (Prevents layout jumping on load)
+// ----------------------------------------------------------------------
+function TeamCardSkeleton({ isDark }: { isDark: boolean }) {
+  const panel = isDark ? "bg-[#181a20] border-zinc-800" : "bg-white border-zinc-200"
+  const pulse = isDark ? "bg-zinc-800" : "bg-zinc-200"
+  
+  return (
+    <div className={cn("border rounded-2xl p-0 overflow-hidden animate-pulse", panel)}>
+      <div className="p-4 md:p-5 space-y-4">
+        <div className="flex gap-2 mb-4">
+          <div className={cn("h-6 w-16 rounded-full", pulse)} />
+          <div className={cn("h-6 w-16 rounded-full", pulse)} />
+        </div>
+        <div className={cn("h-7 w-3/4 rounded-md", pulse)} />
+        <div className="space-y-2 mt-2">
+          <div className={cn("h-4 w-full rounded-md", pulse)} />
+          <div className={cn("h-4 w-5/6 rounded-md", pulse)} />
+        </div>
+        <div className={cn("h-4 w-24 rounded-md mt-4", pulse)} />
+      </div>
+      <div className={cn("px-4 md:px-5 py-3 border-t flex justify-between", isDark ? "border-zinc-800" : "border-zinc-200")}>
+        <div className="flex gap-1 -space-x-2">
+          <div className={cn("h-8 w-8 rounded-full border-2", pulse, isDark ? "border-[#181a20]" : "border-white")} />
+          <div className={cn("h-8 w-8 rounded-full border-2", pulse, isDark ? "border-[#181a20]" : "border-white")} />
+        </div>
+        <div className={cn("h-4 w-12 rounded-md my-auto", pulse)} />
+      </div>
+    </div>
+  )
+}
+
+// ----------------------------------------------------------------------
+// MAIN PAGE COMPONENT
+// ----------------------------------------------------------------------
 export default function TeamsPage() {
   const router = useRouter()
   const { user } = useAuth()
   const { theme } = useTheme()
-  const isDark = theme === "dark"
+  const [mounted, setMounted] = useState(false)
+  
+  useEffect(() => { setMounted(true) }, [])
+  const isDark = mounted && theme === "dark"
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
   const [teams, setTeams] = useState<Team[]>([])
@@ -55,14 +91,15 @@ export default function TeamsPage() {
   const [sortBy, setSortBy] = useState<"name" | "recent">("name")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  
   const [openCreate, setOpenCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [teamName, setTeamName] = useState("")
   const [teamDescription, setTeamDescription] = useState("")
   const [teamTags, setTeamTags] = useState("")
+  
   const [teamMembersMap, setTeamMembersMap] = useState<Record<number, TeamMember[]>>({})
 
-  const bg = isDark ? "bg-[#101115]" : "bg-[#f3f4f6]"
   const panel = isDark ? "bg-[#181a20] border-zinc-800" : "bg-white border-zinc-200"
   const muted = isDark ? "text-zinc-400" : "text-zinc-500"
   const strong = isDark ? "text-white" : "text-zinc-900"
@@ -105,21 +142,11 @@ export default function TeamsPage() {
         const teamId = Number(teamIdKey)
         membersMap[teamId] = (membersMap[teamId] || []).map((member) => ({
           ...member,
-          avatar_url:
-            member.user_id === user?.user_id
-              ? user?.avatar_url || member.avatar_url
-              : member.avatar_url,
+          avatar_url: member.user_id === user?.user_id ? user?.avatar_url || member.avatar_url : member.avatar_url,
         }))
       })
 
-      const allUserIds = Array.from(
-        new Set(
-          Object.values(membersMap)
-            .flat()
-            .filter((member) => !member.avatar_url)
-            .map((member) => member.user_id)
-        )
-      )
+      const allUserIds = Array.from(new Set(Object.values(membersMap).flat().filter(m => !m.avatar_url).map(m => m.user_id)))
 
       if (allUserIds.length > 0) {
         const avatarQuery = allUserIds.map((id) => `user_ids=${id}`).join("&")
@@ -154,9 +181,7 @@ export default function TeamsPage() {
   const filteredTeams = useMemo(() => {
     const list = teams.filter((team) => team.name.toLowerCase().includes(query.toLowerCase()))
     if (sortBy === "name") return [...list].sort((a, b) => a.name.localeCompare(b.name))
-    return [...list].sort(
-      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-    )
+    return [...list].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
   }, [teams, query, sortBy])
 
   const getInitials = (name: string) => {
@@ -166,11 +191,13 @@ export default function TeamsPage() {
     return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
   }
 
-  const colorTagClass = (idx: number) => {
+  const colorTagClass = (tag: string) => {
     const tagStyles = isDark
-      ? ["bg-pink-500/20 text-pink-300", "bg-amber-500/20 text-amber-300", "bg-violet-500/20 text-violet-300"]
-      : ["bg-pink-100 text-pink-700", "bg-amber-100 text-amber-700", "bg-violet-100 text-violet-700"]
-    return tagStyles[idx % tagStyles.length]
+      ? ["bg-pink-500/10 text-pink-400", "bg-amber-500/10 text-amber-400", "bg-violet-500/10 text-violet-400", "bg-blue-500/10 text-blue-400", "bg-emerald-500/10 text-emerald-400", "bg-rose-500/10 text-rose-400"]
+      : ["bg-pink-100 text-pink-700", "bg-amber-100 text-amber-700", "bg-violet-100 text-violet-700", "bg-blue-100 text-blue-700", "bg-emerald-100 text-emerald-700", "bg-rose-100 text-rose-700"]
+    let hash = 0
+    for (let i = 0; i < tag.length; i++) { hash = tag.charCodeAt(i) + ((hash << 5) - hash) }
+    return tagStyles[Math.abs(hash) % tagStyles.length]
   }
 
   const handleCreateTeam = async () => {
@@ -188,11 +215,7 @@ export default function TeamsPage() {
       const projectId = localStorage.getItem("selected_project_id")
       if (!token || !projectId) throw new Error("missing-context")
 
-      const tags = teamTags
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .slice(0, 3)
+      const tags = teamTags.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 3)
 
       const response = await fetch(`${apiUrl}/projects/${projectId}/teams`, {
         method: "POST",
@@ -218,78 +241,73 @@ export default function TeamsPage() {
       setTeamTags("")
       await fetchTeams()
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Could not create team."
-      setError(message || "Could not create team.")
+      setError(e instanceof Error ? e.message : "Could not create team.")
     } finally {
       setCreating(false)
     }
   }
 
   return (
-    <section className={cn("rounded-3xl border p-4 md:p-6 space-y-5 md:space-y-7", panel, bg)}>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <h1 className={cn("text-2xl md:text-4xl font-bold tracking-tight", strong)}>Teams</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" className={cn(panel, "h-10 px-4")}>
-            <LayoutList className="w-4 h-4 mr-2" /> List
+    <section className="w-full">
+      <h1 className={cn("text-3xl font-semibold tracking-tight", strong)}>My Teams</h1>
+
+      <div className="mt-4 md:mt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full md:w-auto">
+          <div className="relative">
+            <Search className={cn("pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2", muted)} />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search teams"
+              className={cn(
+                "h-10 w-full sm:w-[430px] rounded-xl pl-10 text-sm",
+                isDark ? "border-zinc-700 bg-[#14161d] text-zinc-100 placeholder:text-zinc-500" : "border-slate-300 bg-white"
+              )}
+            />
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => setSortBy(sortBy === "name" ? "recent" : "name")}
+            className={cn("h-10 rounded-xl px-4 text-sm font-semibold", isDark ? "border-zinc-700 bg-[#14161d] text-zinc-100 hover:bg-zinc-800" : "")}
+          >
+            <SlidersHorizontal className="w-4 h-4 mr-2" />
+            {sortBy === "name" ? "Sorted by name" : "Sorted by recent"}
           </Button>
-          <Button onClick={() => setOpenCreate(true)} className="h-10 px-5 rounded-2xl bg-[#f78a2a] hover:bg-[#e0781f] text-white">
-            <Plus className="w-4 h-4 mr-2" /> Create team
+        </div>
+
+        <div className="flex items-center gap-3 md:ml-47 w-full md:w-auto justify-end">
+          <Button onClick={() => setOpenCreate(true)} className="h-10 rounded-xl bg-[#009f5c] px-4 md:px-6 text-sm font-semibold text-white hover:bg-[#00b166]">
+            <Plus className="mr-2 h-4 w-4" /> Create team
           </Button>
         </div>
       </div>
 
-      <Card className={cn("border p-3 md:p-4", panel)}>
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-          <div className="relative flex-1">
-            <Search className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4", muted)} />
-            <Input
-              placeholder="Search teams..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className={cn(
-                "pl-10 h-10 border-0 focus-visible:ring-0 text-sm",
-                isDark ? "bg-transparent text-zinc-200 placeholder:text-zinc-500" : "bg-transparent text-zinc-700 placeholder:text-zinc-400"
-              )}
-            />
-          </div>
-          <div className={cn("h-px lg:h-8 lg:w-px", isDark ? "bg-zinc-800" : "bg-zinc-200")} />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="ghost" className={cn("h-9", muted)} onClick={() => setSortBy("name")}>
-              <SlidersHorizontal className="w-4 h-4 mr-2" /> Sort by
-            </Button>
-            <Button
-              variant="ghost"
-              className={cn("h-9", sortBy === "recent" ? strong : muted)}
-              onClick={() => setSortBy("recent")}
-            >
-              Recent
-            </Button>
-          </div>
-        </div>
-      </Card>
+      <div className="mt-4 min-h-[28px]">
+        {error && <p className="text-base text-red-400">{error}</p>}
+      </div>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
-
-      {loading ? (
-        <div className="grid place-items-center py-16">
-          <Loader2 className={cn("w-6 h-6 animate-spin", muted)} />
-        </div>
-      ) : (
-        <div className={cn("rounded-2xl border p-3 md:p-4", isDark ? "border-zinc-800 bg-[#14161d]" : "border-zinc-200 bg-white/70")}>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filteredTeams.map((team) => (
-              <Card
-                key={team.team_id}
-                onClick={() => router.push(`/teams/${team.team_id}`)}
-                className={cn("border rounded-2xl p-0 cursor-pointer transition-all hover:-translate-y-0.5 overflow-hidden", panel)}
-              >
+      <div className={cn("mt-7 min-h-[420px] rounded-2xl p-0")}>
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
+            <TeamCardSkeleton isDark={isDark} />
+            <TeamCardSkeleton isDark={isDark} />
+            <TeamCardSkeleton isDark={isDark} />
+            <TeamCardSkeleton isDark={isDark} />
+          </div>
+        ) : filteredTeams.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
+              {filteredTeams.map((team) => (
+                <Card
+                  key={team.team_id}
+                  onClick={() => router.push(`/teams/${team.team_id}`)}
+                  className={cn("border rounded-2xl p-0 cursor-pointer transition-all hover:-translate-y-0.5 overflow-hidden", panel)}
+                >
                 <div className="p-4 md:p-5">
                   <div className="flex items-center gap-2 mb-4 flex-wrap">
-                    {(team.tags || []).slice(0, 3).map((tag, idx) => (
+                    {(team.tags || []).slice(0, 3).map((tag) => (
                       <span
                         key={tag}
-                        className={cn("inline-flex px-3 py-1 rounded-full text-xs font-semibold", colorTagClass(idx))}
+                        className={cn("inline-flex px-3 py-1 rounded-full text-xs font-semibold", colorTagClass(tag))}
                       >
                         {tag}
                       </span>
@@ -301,9 +319,9 @@ export default function TeamsPage() {
                     {team.description || "No description provided."}
                   </p>
 
-                  <div className={cn("mt-4 inline-flex items-center gap-2 border rounded-xl px-3 py-1.5 text-sm", isDark ? "border-zinc-700 text-zinc-300" : "border-zinc-300 text-zinc-700")}>
+                  <div className={cn("mt-4 flex items-center gap-2 text-sm font-medium", isDark ? "text-zinc-400" : "text-zinc-500")}>
                     <CalendarDays className="w-4 h-4" />
-                    {team.created_at ? new Date(team.created_at).toLocaleDateString() : "No date"}
+                    {team.created_at ? new Date(team.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : "No date"}
                   </div>
                 </div>
                 <div className={cn("px-4 md:px-5 py-3 border-t flex items-center justify-between", isDark ? "border-zinc-800" : "border-zinc-200")}>
@@ -363,17 +381,23 @@ export default function TeamsPage() {
                     </span>
                   </div>
                 </div>
-              </Card>
-            ))}
+                </Card>
+              ))}
           </div>
-
-          {!filteredTeams.length && (
-            <div className={cn("rounded-xl border border-dashed p-10 text-center mt-2", isDark ? "border-zinc-700 text-zinc-400" : "border-zinc-300 text-zinc-500")}>
-              No teams found.
+        ) : (
+          <div className="min-h-[420px] flex items-start">
+            <div className={cn(
+              "w-full rounded-3xl border border-dashed px-8 py-12 text-center",
+              isDark ? "border-zinc-700 bg-[#111318]" : "border-slate-200 bg-white"
+            )}>
+              <div className="mx-auto max-w-md">
+                <h2 className={cn("text-2xl font-semibold", strong)}>No teams found</h2>
+                <p className={cn("mt-3 text-sm leading-6", muted)}>Try adjusting your search terms or create a new team.</p>
+              </div>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>
         <DialogContent className={cn("sm:max-w-lg", isDark ? "border-zinc-700 bg-[#171920] text-white" : "")}>

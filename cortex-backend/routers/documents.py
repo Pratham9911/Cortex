@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from dependencies import get_current_user
 from sqlalchemy.sql import func
-from models import User, ProjectMember, Document, DocumentVersion , DocumentChunk , Team , Folder
+from models import User, ProjectMember, Document, DocumentVersion , DocumentChunk , Team , Folder, TeamMember
 from supabase_client import supabase
 from routers.audit import create_audit_log
 import re
@@ -185,6 +185,7 @@ def upload_document(
         title=title,
         description=description,
         owner_id=user_id,
+        modified_by=user_id,
 
         tags=tag_list,
 
@@ -264,6 +265,15 @@ def upload_document(
         detail=f"{user.name} uploaded document '{title}' with version 1"
     )
 
+    # ---------------------------------------------------
+    # Update Folder Modified Date
+    # ---------------------------------------------------
+    if folder_id is not None:
+        folder = db.query(Folder).filter(Folder.folder_id == folder_id).first()
+        if folder:
+            folder.last_modified = func.now()
+            folder.modified_by = user_id
+
     db.commit()
 
     # ---------------------------------------------------
@@ -295,18 +305,27 @@ def list_documents(
 ):
 
     # ----------------------------------------
-    # Verify ADMIN access
+    # Verify membership
     # ----------------------------------------
     membership = db.query(ProjectMember).filter(
         ProjectMember.project_id == project_id,
         ProjectMember.user_id == user_id
     ).first()
 
-    if not membership or membership.role != "admin":
+    if not membership:
         raise HTTPException(
             status_code=403,
-            detail="Only admin can view documents"
+            detail="Access denied"
         )
+
+    user_team_ids: list[int] = []
+    if membership.role != "admin":
+        user_team_ids = [
+            member.team_id
+            for member in db.query(TeamMember).filter(
+                TeamMember.user_id == user_id
+            ).all()
+        ]
 
     # ----------------------------------------
     # Get all project documents
@@ -333,6 +352,23 @@ def list_documents(
         # ----------------------------------------
         if not active_version:
             continue
+
+        # ----------------------------------------
+        # Search visibility / ACL checks
+        # ----------------------------------------
+        if membership.role != "admin":
+            is_owner = doc.owner_id == user_id
+            if not is_owner:
+                if doc.search_access_level == "member":
+                    has_team_access = bool(
+                        set(doc.allowed_team_ids or [])
+                        &
+                        set(user_team_ids)
+                    )
+                    if not has_team_access:
+                        continue
+                else:
+                    continue
 
         # ----------------------------------------
         # Folder info
@@ -383,9 +419,13 @@ def list_documents(
             "search_access_level": doc.search_access_level,
 
             "created_at": doc.created_at,
+            "last_modified": doc.last_modified,
+            "modified_by": doc.modified_by,
+            "owner_id": doc.owner_id,
 
             "active_version": active_version.version_number,
-            "file_name": active_version.file_name
+            "file_name": active_version.file_name,
+            "file_size": active_version.file_size
 
         })
 
@@ -542,6 +582,18 @@ def upload_new_version(
     )
 
     # ----------------------------------------
+    # Update Document and Folder Modified Date
+    # ----------------------------------------
+    document.last_modified = func.now()
+    document.modified_by = user_id
+
+    if document.folder_id is not None:
+        folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+        if folder:
+            folder.last_modified = func.now()
+            folder.modified_by = user_id
+
+    # ----------------------------------------
     # 9. Commit
     # ----------------------------------------
     db.commit()
@@ -604,6 +656,18 @@ def update_document(
         raise HTTPException(
             status_code=403,
             detail="Only admin can update documents"
+        )
+
+    # ----------------------------------------
+    # Owner-only update rule when search is none
+    # ----------------------------------------
+    if (
+        document.search_access_level == "none"
+        and document.owner_id != user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Only owner can update this document when search access is none"
         )
 
     changed_fields = []
@@ -827,6 +891,18 @@ def update_document(
             )
         )
     
+    # ----------------------------------------
+    # Update Document and Folder Modified Date
+    # ----------------------------------------
+    document.last_modified = func.now()
+    document.modified_by = user_id
+
+    if document.folder_id is not None:
+        folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+        if folder:
+            folder.last_modified = func.now()
+            folder.modified_by = user_id
+
     db.commit()
 
     return {
@@ -1009,6 +1085,18 @@ def delete_document_version(
         raise HTTPException(status_code=403, detail="Only admin can delete")
 
     # ----------------------------------------
+    # Update Document and Folder Modified Date
+    # ----------------------------------------
+    document.last_modified = func.now()
+    document.modified_by = user_id
+
+    if document.folder_id is not None:
+        folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+        if folder:
+            folder.last_modified = func.now()
+            folder.modified_by = user_id
+
+    # ----------------------------------------
     # Get version
     # ----------------------------------------
     version = db.query(DocumentVersion).filter(
@@ -1143,6 +1231,18 @@ def soft_delete_document_version(
         )
 
     # ----------------------------------------
+    # Update Document and Folder Modified Date
+    # ----------------------------------------
+    document.last_modified = func.now()
+    document.modified_by = user_id
+
+    if document.folder_id is not None:
+        folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+        if folder:
+            folder.last_modified = func.now()
+            folder.modified_by = user_id
+
+    # ----------------------------------------
     # Get version
     # ----------------------------------------
     version = db.query(DocumentVersion).filter(
@@ -1266,6 +1366,18 @@ def restore_document_version(
         )
 
     # ----------------------------------------
+    # Update Document and Folder Modified Date
+    # ----------------------------------------
+    document.last_modified = func.now()
+    document.modified_by = user_id
+
+    if document.folder_id is not None:
+        folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+        if folder:
+            folder.last_modified = func.now()
+            folder.modified_by = user_id
+
+    # ----------------------------------------
     # Get deleted version
     # ----------------------------------------
     version = db.query(DocumentVersion).filter(
@@ -1354,6 +1466,18 @@ def activate_document_version(
 
     if not membership or membership.role != "admin":
         raise HTTPException(status_code=403, detail="Only admin can activate versions")
+
+    # ----------------------------------------
+    # Update Document and Folder Modified Date
+    # ----------------------------------------
+    document.last_modified = func.now()
+    document.modified_by = user_id
+
+    if document.folder_id is not None:
+        folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+        if folder:
+            folder.last_modified = func.now()
+            folder.modified_by = user_id
 
     # ----------------------------------------
     # Get target version
@@ -1543,3 +1667,79 @@ def ask_route_reranked(
             "chunks": chunks
         }
 
+
+@router.get("/documents/{document_id}/versions")
+def list_document_versions(
+    document_id: int,
+    include_deleted: bool = False,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # 1. Get document
+    document = db.query(Document).filter(
+        Document.document_id == document_id
+    ).first()
+    
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found"
+        )
+
+    # 2. Verify membership
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == document.project_id,
+        ProjectMember.user_id == user_id
+    ).first()
+
+    if not membership:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied"
+        )
+
+    # 3. Retrieve versions
+    query = db.query(DocumentVersion).filter(
+        DocumentVersion.document_id == document_id
+    )
+    
+    if not include_deleted:
+        query = query.filter(DocumentVersion.is_deleted == False)
+
+    versions = query.order_by(DocumentVersion.version_number.desc()).all()
+
+    # 4. Map user IDs to names for uploader/deleted info
+    user_ids = set()
+    for v in versions:
+        user_ids.add(v.uploaded_by)
+        if v.activated_by:
+            user_ids.add(v.activated_by)
+        if v.deleted_by:
+            user_ids.add(v.deleted_by)
+            
+    users = db.query(User).filter(User.user_id.in_(list(user_ids))).all()
+    user_names = {u.user_id: u.name for u in users}
+
+    result = []
+    for v in versions:
+        result.append({
+            "version_id": v.version_id,
+            "document_id": v.document_id,
+            "version_number": v.version_number,
+            "file_name": v.file_name,
+            "mime_type": v.mime_type,
+            "file_size": v.file_size,
+            "is_active": v.is_active,
+            "is_deleted": v.is_deleted,
+            "uploaded_by": v.uploaded_by,
+            "uploaded_by_name": user_names.get(v.uploaded_by, f"User {v.uploaded_by}"),
+            "uploaded_at": v.uploaded_at,
+            "activated_by": v.activated_by,
+            "activated_by_name": user_names.get(v.activated_by) if v.activated_by else None,
+            "activated_at": v.activated_at,
+            "deleted_by": v.deleted_by,
+            "deleted_by_name": user_names.get(v.deleted_by) if v.deleted_by else None,
+            "deleted_at": v.deleted_at
+        })
+
+    return result

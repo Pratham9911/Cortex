@@ -83,6 +83,17 @@ class Document(Base):
     ForeignKey("folders.folder_id"),
     nullable=True
 )
+    last_modified = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    modified_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=True
+    )
     __table_args__ = (
         UniqueConstraint("project_id", "title", name="uq_project_document_title"),
     )
@@ -198,6 +209,23 @@ class Folder(Base):
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()
+    )
+
+    last_modified = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    modified_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=True
+    )
+
+    allowed_team_ids = Column(
+        ARRAY(Integer),
+        nullable=True
     )
 
     __table_args__ = (

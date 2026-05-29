@@ -120,11 +120,12 @@ def get_user_avatars(
     db: Session = Depends(get_db),
 ):
     if not user_ids:
-        return {"avatars": {}}
+        return {"avatars": {}, "names": {}}
 
     local_users = db.query(User).filter(User.user_id.in_(user_ids)).all()
     email_to_id: Dict[str, int] = {u.email.lower(): u.user_id for u in local_users if u.email}
     result: Dict[str, str | None] = {str(uid): None for uid in user_ids}
+    names: Dict[str, str] = {str(u.user_id): u.name for u in local_users}
 
     unresolved_emails: set[str] = set()
     now_ts = time()
@@ -149,7 +150,7 @@ def get_user_avatars(
             unresolved_emails.add(email_key)
 
     if not unresolved_emails:
-        return {"avatars": result, "source": "local_db_cache"}
+        return {"avatars": result, "names": names, "source": "local_db_cache"}
 
     try:
         fetched = _query_supabase_auth_avatars(db, unresolved_emails)
@@ -183,6 +184,6 @@ def get_user_avatars(
         source_info = "direct_db_query"
     except Exception as e:
         print(f"Failed to fetch avatars: {e}")
-        return {"avatars": result, "source": "failed"}
+        return {"avatars": result, "names": names, "source": "failed"}
 
-    return {"avatars": result, "source": source_info}
+    return {"avatars": result, "names": names, "source": source_info}

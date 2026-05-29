@@ -165,7 +165,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
             </div>
           </header>
 
-          <main className="max-w-6xl mx-auto px-6 py-8">{children}</main>
+          <main className="flex-1 min-h-0 px-6 py-8">{children}</main>
 
           <CommandDialog
             open={commandOpen}
