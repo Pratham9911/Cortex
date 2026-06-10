@@ -17,7 +17,7 @@ export default function RegisterPage() {
 
   return (
     <div className={cn(
-      "min-h-screen h-screen w-screen flex items-center justify-center transition-colors duration-300 relative overflow-hidden",
+      "min-h-screen w-full flex items-center justify-center px-4 py-4 transition-colors duration-300 relative overflow-x-hidden overflow-y-auto",
       isDark ? "bg-[#050505]" : "bg-zinc-50"
     )}>
       {/* Stark monochrome ambient background filters */}

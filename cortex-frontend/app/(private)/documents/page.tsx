@@ -609,36 +609,41 @@ export default function DocumentsPage() {
       {/* ── MAIN LIST ──────────────────────────────────────────────── */}
       <div className={cn("flex flex-col flex-1 min-w-0 overflow-hidden border-r", isDark ? "bg-[#0d0f14] border-zinc-800" : "bg-white border-slate-200")}>
 
-        {/* Top bar */}
-        <div className={cn("flex items-center gap-2 px-4 h-12 border-b shrink-0", isDark ? "border-zinc-800 bg-[#0d0f14]" : "border-slate-200 bg-white")}>
-          <h1 className={cn("text-base font-bold mr-2 whitespace-nowrap", isDark ? "text-white" : "text-slate-900")}>Documents</h1>
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
-            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search..."
-              className={cn("w-full h-8 pl-8 pr-3 text-sm rounded-md border outline-none",
-                isDark ? "bg-zinc-900 border-zinc-700 text-zinc-200 placeholder:text-zinc-500" : "bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400"
-              )}
-            />
+        {/* Top bar — two rows so title is always above the search */}
+        <div className={cn("flex flex-col border-b shrink-0", isDark ? "border-zinc-800 bg-[#0d0f14]" : "border-slate-200 bg-white")}>
+          {/* Row 1: page title */}
+          <div className="flex items-center px-4 h-8">
+            <h1 className={cn("text-base font-bold", isDark ? "text-white" : "text-slate-900")}>Documents</h1>
           </div>
-          {currentUserRole === "admin" && (
-            <>
-              <button onClick={()=>{setCreateFolderOpen(true);setFolderError("");setNewFolderName("");setNewFolderTeams({})}}
-                className="flex items-center gap-1 h-8 px-3 rounded-md text-sm font-semibold whitespace-nowrap bg-violet-600 hover:bg-violet-700 text-white transition-colors">
-                <Plus className="w-3.5 h-3.5" /> Folder
-              </button>
-              <button onClick={openUpload}
-                className="flex items-center gap-1 h-8 px-3 rounded-md text-sm font-semibold whitespace-nowrap bg-violet-600 hover:bg-violet-700 text-white transition-colors">
-                <Upload className="w-3.5 h-3.5" /> Upload
-              </button>
-            </>
-          )}
+          {/* Row 2: search + actions */}
+          <div className="flex items-center gap-2 px-4 pb-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+              <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search documents…"
+                className={cn("w-full h-8 pl-8 pr-3 text-sm rounded-md border outline-none",
+                  isDark ? "bg-zinc-900 border-zinc-700 text-zinc-200 placeholder:text-zinc-500" : "bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400"
+                )}
+              />
+            </div>
+            {currentUserRole === "admin" && (
+              <>
+                <button onClick={()=>{setCreateFolderOpen(true);setFolderError("");setNewFolderName("");setNewFolderTeams({})}}
+                  className="flex items-center gap-1 h-8 px-3 rounded-md text-sm font-semibold whitespace-nowrap bg-violet-600 hover:bg-violet-700 text-white transition-colors">
+                  <Plus className="w-3.5 h-3.5" /> Folder
+                </button>
+                <button onClick={openUpload}
+                  className="flex items-center gap-1 h-8 px-3 rounded-md text-sm font-semibold whitespace-nowrap bg-violet-600 hover:bg-violet-700 text-white transition-colors">
+                  <Upload className="w-3.5 h-3.5" /> Upload
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Column headers */}
-        <div className={cn("flex items-center h-8 px-0 text-[11px] font-semibold uppercase tracking-wider shrink-0 border-b",
+        <div className={cn("flex items-center h-8 text-[11px] font-semibold uppercase tracking-wider shrink-0 border-b",
           isDark ? "text-zinc-500 border-zinc-800 bg-[#0d0f14]" : "text-slate-400 border-slate-100 bg-white")}>
-          <div className={colCheck} />
-          <div className="flex-1 pl-1">Name</div>
+          <div className="flex-1 pl-4">Name</div>
           <div className={colDate}>Modified</div>
           <div className={colSize}>Size</div>
           <div className={colUser}>By</div>
@@ -660,16 +665,13 @@ export default function DocumentsPage() {
                 router.push(`/documents/${folder.folder_id}`)
               }}
             >
-              <div className={colCheck}>
+              <div className="flex-1 flex items-center gap-2 min-w-0 pl-4">
                 {folder.is_locked_for_user
                   ? <button onClick={e=>{e.stopPropagation();setLockedFolderInfo(folder);setLockModalOpen(true)}}
-                      className="flex items-center justify-center hover:scale-110 active:scale-95 transition-transform">
+                      className="flex items-center justify-center shrink-0 hover:scale-110 active:scale-95 transition-transform">
                       <Lock className="h-3.5 w-3.5 text-red-500" />
                     </button>
-                  : null}
-              </div>
-              <div className="flex-1 flex items-center gap-2 min-w-0">
-                <FolderIcon className="w-4 h-4 text-amber-400 shrink-0" fill="currentColor" strokeWidth={0} />
+                  : <FolderIcon className="w-4 h-4 text-amber-400 shrink-0" fill="currentColor" strokeWidth={0} />}
                 <span className={cn("truncate text-sm", isDark ? "text-zinc-200" : "text-slate-800")}>{folder.name}</span>
               </div>
               <div className={cn(colDate, isDark ? "text-zinc-500" : "text-slate-400")}>{formatDate(folder.last_modified || folder.created_at)}</div>
@@ -703,15 +705,10 @@ export default function DocumentsPage() {
               className={cn(rowBase, isSelDoc(doc) ? rowSelected : rowIdle)}
               onClick={() => selectDoc(doc)}
             >
-              <div className={colCheck}>
-                {!canViewDocContent(doc) ? (
-                  <Lock className="h-3.5 w-3.5 text-red-500" />
-                ) : (
-                  <Checkbox checked={isSelDoc(doc)} className="h-3.5 w-3.5"
-                    onCheckedChange={()=>selectDoc(doc)} onClick={e=>e.stopPropagation()} />
+              <div className="flex-1 flex items-center gap-2 min-w-0 pl-4">
+                {!canViewDocContent(doc) && (
+                  <Lock className="h-3.5 w-3.5 text-red-500 shrink-0" />
                 )}
-              </div>
-              <div className="flex-1 flex items-center gap-2 min-w-0">
                 <FileIcon fileName={doc.file_name} />
                 <span className={cn("truncate text-sm", isDark ? "text-zinc-200" : "text-slate-800")}>{doc.title}</span>
               </div>

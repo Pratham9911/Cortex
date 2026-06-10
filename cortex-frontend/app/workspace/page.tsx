@@ -185,7 +185,13 @@ function WorkspaceContent() {
       <header className={cn("sticky top-0 z-30 border-b", isDark ? "border-zinc-800/70 bg-[#0d0f14]" : "border-slate-200 bg-white")}>
         <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between px-3 md:px-5">
           <div className="flex items-center gap-3">
-            <Image src="/cortex_icon.png" alt="Cortex" width={16} height={16} />
+            <Image
+              src="/cortex_icon.png"
+              alt="Cortex"
+              width={28}
+              height={28}
+              className={cn("object-contain", !isDark && "invert")}
+            />
             <p className="text-xl leading-none font-semibold tracking-tight">Cortex</p>
           </div>
 

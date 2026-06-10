@@ -188,43 +188,46 @@ export default function FolderPage() {
         "flex flex-col flex-1 min-w-0 overflow-hidden border-r",
         isDark ? "bg-[#0d0f14] border-zinc-800" : "bg-white border-slate-200"
       )}>
-        {/* Top bar */}
+        {/* Top bar — two rows so path never shrinks the search */}
         <div className={cn(
-          "flex items-center gap-2 px-4 h-12 border-b shrink-0",
+          "flex flex-col border-b shrink-0",
           isDark ? "border-zinc-800 bg-[#0d0f14]" : "border-slate-200 bg-white"
         )}>
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-1 text-sm shrink-0">
+          {/* Row 1: breadcrumb path */}
+          <div className="flex items-center gap-1 px-4 h-8 text-sm">
             <button
               onClick={() => router.push("/documents")}
-              className={cn("font-semibold hover:underline", isDark ? "text-zinc-400 hover:text-white" : "text-slate-500 hover:text-slate-900")}
+              className={cn("font-semibold hover:underline transition-colors", isDark ? "text-zinc-400 hover:text-white" : "text-slate-500 hover:text-slate-900")}
             >
               Documents
             </button>
-            <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
-            <span className={cn("font-bold", isDark ? "text-white" : "text-slate-900")}>{folderName}</span>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <span className={cn("font-bold truncate", isDark ? "text-white" : "text-slate-900")}>{folderName}</span>
           </div>
 
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Search..."
-              className={cn(
-                "w-full h-8 pl-8 pr-3 text-sm rounded-md border outline-none",
-                isDark
-                  ? "bg-zinc-900 border-zinc-700 text-zinc-200 placeholder:text-zinc-500"
-                  : "bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400"
-              )}
-            />
+          {/* Row 2: search + upload */}
+          <div className="flex items-center gap-2 px-4 pb-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+              <input
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Search documents…"
+                className={cn(
+                  "w-full h-8 pl-8 pr-3 text-sm rounded-md border outline-none",
+                  isDark
+                    ? "bg-zinc-900 border-zinc-700 text-zinc-200 placeholder:text-zinc-500"
+                    : "bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400"
+                )}
+              />
+            </div>
+            <button className={cn(
+              "flex items-center gap-1 h-8 px-3 rounded-md text-sm font-semibold whitespace-nowrap",
+              "bg-violet-600 hover:bg-violet-700 text-white transition-colors"
+            )}>
+              <Upload className="w-3.5 h-3.5" /> Upload
+            </button>
           </div>
-          <button className={cn(
-            "flex items-center gap-1 h-8 px-3 rounded-md text-sm font-semibold whitespace-nowrap",
-            "bg-violet-600 hover:bg-violet-700 text-white transition-colors"
-          )}>
-            <Upload className="w-3.5 h-3.5" /> Upload
-          </button>
         </div>
 
         {/* Column headers */}
@@ -232,8 +235,7 @@ export default function FolderPage() {
           "flex items-center h-8 text-[11px] font-semibold uppercase tracking-wider shrink-0 border-b",
           isDark ? "text-zinc-500 border-zinc-800 bg-[#0d0f14]" : "text-slate-400 border-slate-100 bg-white"
         )}>
-          <div className={colCheck}></div>
-          <div className="flex-1 pl-1">Name</div>
+          <div className="flex-1 pl-4">Name</div>
           <div className={colDate}>Modified</div>
           <div className={colSize}>Size</div>
           <div className={colUser}>By</div>
@@ -248,15 +250,7 @@ export default function FolderPage() {
               className={cn(rowBase, selectedDoc?.document_id === doc.document_id ? rowSelected : rowIdle)}
               onClick={() => selectDoc(doc)}
             >
-              <div className={colCheck}>
-                <Checkbox
-                  checked={selectedDoc?.document_id === doc.document_id}
-                  className="h-3.5 w-3.5"
-                  onCheckedChange={() => selectDoc(doc)}
-                  onClick={e => e.stopPropagation()}
-                />
-              </div>
-              <div className="flex-1 flex items-center gap-2 min-w-0">
+              <div className="flex-1 flex items-center gap-2 min-w-0 pl-4">
                 {getFileIcon(doc.file_name)}
                 <span className={cn("truncate text-sm", isDark ? "text-zinc-200" : "text-slate-800")}>{doc.title}</span>
               </div>

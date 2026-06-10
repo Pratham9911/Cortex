@@ -130,7 +130,11 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
   const isDark = mounted && theme === "dark"
 
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-3 w-full max-w-sm px-4 animate-in fade-in duration-500 relative", className)} {...props}>
+    <div className={cn(
+      "flex flex-col items-center justify-center w-full max-w-sm px-4 animate-in fade-in duration-500 relative",
+      isRegister ? "gap-3" : "gap-2",
+      className
+    )} {...props}>
       {successMsg && (
         <div className="fixed top-4 inset-x-0 flex justify-center z-50">
           <div className={cn("bg-emerald-100 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-600 rounded-md p-4 max-w-md w-full shadow-lg", isDark ? "dark" : "")}>
@@ -159,7 +163,7 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
           alt="Cortex" 
           width={28} 
           height={28} 
-          className="rounded-md object-contain"
+          className={cn("rounded-md object-contain", !isDark && "invert")}
         />
         <span className={cn(
           "font-bold text-lg tracking-tight transition-colors duration-300",
@@ -181,7 +185,10 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
           "absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-zinc-500 to-transparent opacity-30"
         )}></div>
         
-        <CardHeader className="text-center space-y-1 pt-5 pb-3">
+        <CardHeader className={cn(
+          "text-center space-y-1",
+          isRegister ? "pt-5 pb-3" : "pt-4 pb-2"
+        )}>
           <CardTitle className={cn(
             "text-xl font-bold tracking-tight transition-colors duration-300",
             isDark ? "text-white" : "text-zinc-900"
@@ -196,9 +203,12 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="pb-5 pl-5 pr-5">
+        <CardContent className={cn(
+          "pl-5 pr-5",
+          isRegister ? "pb-5" : "pb-4"
+        )}>
           <form onSubmit={handleEmailAuth}>
-            <div className="grid gap-3">
+            <div className={cn("grid", isRegister ? "gap-3" : "gap-2")}>
               
               {/* Google OAuth Login Button */}
               <div>
@@ -437,15 +447,6 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
             </form>
           </CardContent>
         </Card>
-        
-        {/* Terms of Service footer */}
-        <div className={cn(
-          "text-balance text-center text-[9px] max-w-[260px] transition-colors leading-relaxed",
-          isDark ? "text-zinc-600" : "text-zinc-400"
-        )}>
-          By clicking continue, you agree to our <br/>
-          <Link href="#" className={cn("underline underline-offset-4 transition-colors font-medium", isDark ? "hover:text-white" : "hover:text-zinc-800")}>Terms of Service</Link> and <Link href="#" className={cn("underline underline-offset-4 transition-colors font-medium", isDark ? "hover:text-white" : "hover:text-zinc-800")}>Privacy Policy</Link>.
-        </div>
       </div>
     )
   }

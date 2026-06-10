@@ -180,7 +180,12 @@ function SidebarContent({
               className="relative w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-zinc-400/20 hover:opacity-80 transition-opacity"
               title={isCollapsed ? "Open sidebar" : "Collapse sidebar"}
             >
-              <Image src="/cortex_icon.png" alt="Cortex" fill className="object-contain" />
+              <Image
+                src="/cortex_icon.png"
+                alt="Cortex"
+                fill
+                className={cn("object-contain", !isDark && "invert")}
+              />
             </button>
             {!isCollapsed && (
               <button
