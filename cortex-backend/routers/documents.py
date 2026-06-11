@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
@@ -9,12 +10,11 @@ from supabase_client import supabase
 from routers.audit import create_audit_log
 import re
 from ingestion.extractor import extract_text
+from ingestion.inline_extractor import extract_and_embed_from_bytes
 from rag.retriever import semantic_search , keyword_search , hybrid_search , hybrid_search_with_rerank
 from rag.generator import generate_answer
 
 router = APIRouter()
-
-
 def get_db():
     db = SessionLocal()
     try:
@@ -171,6 +171,7 @@ def upload_document(
     tag_list = []
 
     if tags.strip():
+
         tag_list = [
             tag.strip()
             for tag in tags.split(",")
@@ -178,7 +179,25 @@ def upload_document(
         ]
 
     # ---------------------------------------------------
-    # 8. CREATE DOCUMENT ROW
+    # 8. EXTRACT & EMBED FROM MEMORY (BEFORE DB/STORAGE WRITES)
+    # ---------------------------------------------------
+    try:
+        file_bytes = file.file.read()
+        file_size = len(file_bytes)
+        mime_type = file.content_type
+        
+        # Extract and embed inline (batched internally to 20 chunks)
+        embedded_chunks = extract_and_embed_from_bytes(file_bytes, mime_type, file.filename)
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process and embed document: {str(e)}"
+        )
+
+    # ---------------------------------------------------
+    # 9. CREATE DOCUMENT ROW
     # ---------------------------------------------------
     new_document = Document(
         project_id=project_id,
@@ -197,22 +216,18 @@ def upload_document(
         search_access_level=search_access_level
     )
 
-    db.add(new_document)
-    db.commit()
-    db.refresh(new_document)
+    try:
+        db.add(new_document)
+        db.flush()  # Generate ID without committing
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error during document creation: {str(e)}"
+        )
 
-    # ---------------------------------------------------
-    # 9. VERSION DETAILS
-    # ---------------------------------------------------
     version_number = 1
-
-    file_bytes = file.file.read()
-
-    file_size = len(file_bytes)
-    mime_type = file.content_type
-
     clean_name = safe_filename(file.filename)
-
     file_path = (
         f"{project_id}/"
         f"{new_document.document_id}/"
@@ -222,62 +237,101 @@ def upload_document(
     # ---------------------------------------------------
     # 10. UPLOAD TO STORAGE
     # ---------------------------------------------------
-    supabase.storage.from_("documents").upload(
-        path=file_path,
-        file=file_bytes,
-        file_options={
-            "content-type": mime_type
-        }
-    )
+    try:
+        supabase.storage.from_("documents").upload(
+            path=file_path,
+            file=file_bytes,
+            file_options={
+                "content-type": mime_type
+            }
+        )
+    except Exception as upload_error:
+        db.rollback()  # Deletes document row from transaction
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload file to storage: {str(upload_error)}"
+        )
 
     # ---------------------------------------------------
-    # 11. CREATE VERSION
+    # 11. CREATE VERSION & INSERT CHUNKS
     # ---------------------------------------------------
-    new_version = DocumentVersion(
-        document_id=new_document.document_id,
+    try:
+        new_version = DocumentVersion(
+            document_id=new_document.document_id,
 
-        version_number=version_number,
+            version_number=version_number,
 
-        storage_path=file_path,
+            storage_path=file_path,
 
-        file_name=file.filename,
-        mime_type=mime_type,
-        file_size=file_size,
+            file_name=file.filename,
+            mime_type=mime_type,
+            file_size=file_size,
 
-        is_active=True,
+            is_active=True,
 
-        uploaded_by=user_id,
+            uploaded_by=user_id,
 
-        activated_by=user_id,
-        activated_at=func.now()
-    )
+            activated_by=user_id,
+            activated_at=func.now()
+        )
 
-    db.add(new_version)
+        db.add(new_version)
+        db.flush()  # Generate version_id
+
+        # Insert chunks
+        for chunk in embedded_chunks:
+            db_chunk = DocumentChunk(
+                project_id=project_id,
+                version_id=new_version.version_id,
+                chunk_index=chunk["chunk_index"],
+                content=chunk["content"],
+                page_number=chunk.get("page_number"),
+                embedding=chunk["embedding"]
+            )
+            db.add(db_chunk)
+        db.flush()
+
+        # Update search vector
+        db.execute(text("""
+            UPDATE document_chunks
+            SET search_vector = to_tsvector('english', content)
+            WHERE version_id = :version_id
+        """), {
+            "version_id": new_version.version_id
+        })
+
+        # Audit Log
+        create_audit_log(
+            db=db,
+            project_id=project_id,
+            user_id=user_id,
+            action="create",
+            detail=f"{user.name} uploaded document '{title}' with version 1"
+        )
+
+        # Update Folder Modified Date
+        if folder_id is not None:
+            folder = db.query(Folder).filter(Folder.folder_id == folder_id).first()
+            if folder:
+                folder.last_modified = func.now()
+                folder.modified_by = user_id
+
+        db.commit()
+
+    except Exception as e:
+        db.rollback()  # Rollback all database operations (document, version, chunks)
+        # Attempt to clean up uploaded file in Supabase storage
+        try:
+            supabase.storage.from_("documents").remove([file_path])
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error finalizing document upload details: {str(e)}"
+        )
 
     # ---------------------------------------------------
-    # 12. AUDIT LOG
-    # ---------------------------------------------------
-    create_audit_log(
-        db=db,
-        project_id=project_id,
-        user_id=user_id,
-        action="create",
-        detail=f"{user.name} uploaded document '{title}' with version 1"
-    )
-
-    # ---------------------------------------------------
-    # Update Folder Modified Date
-    # ---------------------------------------------------
-    if folder_id is not None:
-        folder = db.query(Folder).filter(Folder.folder_id == folder_id).first()
-        if folder:
-            folder.last_modified = func.now()
-            folder.modified_by = user_id
-
-    db.commit()
-
-    # ---------------------------------------------------
-    # 13. RESPONSE
+    # 12. RESPONSE
     # ---------------------------------------------------
     return {
         "message": "Document uploaded successfully",
@@ -473,6 +527,15 @@ def upload_new_version(
             detail="Only admin can upload new version"
         )
 
+    if (
+        document.search_access_level == "none"
+        and document.owner_id != user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied"
+        )
+
     # ----------------------------------------
     # 3. Validate file type
     # ----------------------------------------
@@ -505,26 +568,44 @@ def upload_new_version(
     next_version = latest_version.version_number + 1
 
     # ----------------------------------------
-    # 5. Deactivate all active versions
+    # 5. Extract & Chunk text from memory bytes BEFORE database modifications
     # ----------------------------------------
-    active_versions = db.query(DocumentVersion).filter(
-        DocumentVersion.document_id == document_id,
-        DocumentVersion.is_active == True,
-        DocumentVersion.is_deleted == False
-    ).all()
-
-    for version in active_versions:
-        version.is_active = False
+    try:
+        file_bytes = file.file.read()
+        file_size = len(file_bytes)
+        mime_type = file.content_type
+        
+        embedded_chunks = extract_and_embed_from_bytes(file_bytes, mime_type, file.filename)
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process and embed document version: {str(e)}"
+        )
 
     # ----------------------------------------
-    # 6. Upload new file
+    # 6. Deactivate all active versions, generate new file path
     # ----------------------------------------
-    file_bytes = file.file.read()
+    try:
+        active_versions = db.query(DocumentVersion).filter(
+            DocumentVersion.document_id == document_id,
+            DocumentVersion.is_active == True,
+            DocumentVersion.is_deleted == False
+        ).all()
 
-    mime_type = file.content_type
+        for version in active_versions:
+            version.is_active = False
+            
+        db.flush()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update existing versions: {str(e)}"
+        )
 
     clean_name = safe_filename(file.filename)
-
     file_path = (
         f"{document.project_id}/"
         f"{document_id}/"
@@ -532,71 +613,110 @@ def upload_new_version(
         f"{clean_name}"
     )
 
-    supabase.storage.from_("documents").upload(
-        path=file_path,
-        file=file_bytes,
-        file_options={
-            "content-type": mime_type
-        }
-    )
-
     # ----------------------------------------
-    # 7. Create new version row
+    # 7. Upload to Storage
     # ----------------------------------------
-    new_version = DocumentVersion(
-        document_id=document_id,
-
-        version_number=next_version,
-
-        storage_path=file_path,
-
-        file_name=file.filename,
-        mime_type=mime_type,
-        file_size=len(file_bytes),
-
-        is_active=True,
-
-        uploaded_by=user_id,
-
-        activated_by=user_id,
-        activated_at=func.now(),
-
-        is_deleted=False
-    )
-
-    db.add(new_version)
-
-    # ----------------------------------------
-    # 8. Audit log
-    # ----------------------------------------
-    create_audit_log(
-        db=db,
-        project_id=document.project_id,
-        user_id=user_id,
-        action="create",
-        detail=(
-            f"{user.name} uploaded "
-            f"version {next_version} "
-            f"of document '{document.title}'"
+    try:
+        supabase.storage.from_("documents").upload(
+            path=file_path,
+            file=file_bytes,
+            file_options={
+                "content-type": mime_type
+            }
         )
-    )
+    except Exception as upload_error:
+        db.rollback()  # Reactivates old versions since it cancels session changes
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload file to storage: {str(upload_error)}"
+        )
 
     # ----------------------------------------
-    # Update Document and Folder Modified Date
+    # 8. Create new version, chunks, and finalize
     # ----------------------------------------
-    document.last_modified = func.now()
-    document.modified_by = user_id
+    try:
+        new_version = DocumentVersion(
+            document_id=document_id,
 
-    if document.folder_id is not None:
-        folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
-        if folder:
-            folder.last_modified = func.now()
-            folder.modified_by = user_id
+            version_number=next_version,
 
-    # ----------------------------------------
-    # 9. Commit
-    # ----------------------------------------
-    db.commit()
+            storage_path=file_path,
+
+            file_name=file.filename,
+            mime_type=mime_type,
+            file_size=file_size,
+
+            is_active=True,
+
+            uploaded_by=user_id,
+
+            activated_by=user_id,
+            activated_at=func.now(),
+
+            is_deleted=False
+        )
+
+        db.add(new_version)
+        db.flush()
+
+        # Insert chunks
+        for chunk in embedded_chunks:
+            db_chunk = DocumentChunk(
+                project_id=document.project_id,
+                version_id=new_version.version_id,
+                chunk_index=chunk["chunk_index"],
+                content=chunk["content"],
+                page_number=chunk.get("page_number"),
+                embedding=chunk["embedding"]
+            )
+            db.add(db_chunk)
+        db.flush()
+
+        # Update search vector
+        db.execute(text("""
+            UPDATE document_chunks
+            SET search_vector = to_tsvector('english', content)
+            WHERE version_id = :version_id
+        """), {
+            "version_id": new_version.version_id
+        })
+
+        # Audit log
+        create_audit_log(
+            db=db,
+            project_id=document.project_id,
+            user_id=user_id,
+            action="create",
+            detail=(
+                f"{user.name} uploaded "
+                f"version {next_version} "
+                f"of document '{document.title}'"
+            )
+        )
+
+        # Update Document and Folder Modified Date
+        document.last_modified = func.now()
+        document.modified_by = user_id
+
+        if document.folder_id is not None:
+            folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+            if folder:
+                folder.last_modified = func.now()
+                folder.modified_by = user_id
+
+        db.commit()
+
+    except Exception as e:
+        db.rollback()  # Restores active versions, deletes new version & chunks
+        # Clean up Supabase
+        try:
+            supabase.storage.from_("documents").remove([file_path])
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error finalizing document version details: {str(e)}"
+        )
 
     return {
         "message": "New version uploaded successfully",
@@ -1084,6 +1204,15 @@ def delete_document_version(
     if not membership or membership.role != "admin":
         raise HTTPException(status_code=403, detail="Only admin can delete")
 
+    if (
+        document.search_access_level == "none"
+        and document.owner_id != user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied"
+        )
+
     # ----------------------------------------
     # Update Document and Folder Modified Date
     # ----------------------------------------
@@ -1467,6 +1596,15 @@ def activate_document_version(
     if not membership or membership.role != "admin":
         raise HTTPException(status_code=403, detail="Only admin can activate versions")
 
+    if (
+        document.search_access_level == "none"
+        and document.owner_id != user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied"
+        )
+
     # ----------------------------------------
     # Update Document and Folder Modified Date
     # ----------------------------------------
@@ -1696,6 +1834,16 @@ def list_document_versions(
         raise HTTPException(
             status_code=403,
             detail="Access denied"
+        )
+
+    # 2b. Check search access level permissions
+    if (
+        document.search_access_level == "none"
+        and document.owner_id != user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the document owner can access versions when search access is none."
         )
 
     # 3. Retrieve versions

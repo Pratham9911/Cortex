@@ -11,38 +11,38 @@ client = genai.Client(
 MODEL_NAME = "gemini-embedding-2"
 
 
-def generate_embeddings(chunks):
-
-    texts = [chunk["content"] for chunk in chunks]
-
-    formatted_contents = [
-        types.Content(
-            parts=[types.Part.from_text(text=text)]
-        )
-        for text in texts
-    ]
-
-    response = client.models.embed_content(
-        model=MODEL_NAME,
-        contents=formatted_contents,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_DOCUMENT",
-            output_dimensionality=1024
-        )
-    )
+def generate_embeddings(chunks, batch_size=20):
+    if not chunks:
+        return []
 
     embedded_chunks = []
 
-    for index, embedding in enumerate(response.embeddings):
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        texts = [chunk["content"] for chunk in batch]
 
-        embedded_chunks.append({
-    "chunk_index": chunks[index]["chunk_index"],
+        formatted_contents = [
+            types.Content(
+                parts=[types.Part.from_text(text=text)]
+            )
+            for text in texts
+        ]
 
-    "content": chunks[index]["content"],
+        response = client.models.embed_content(
+            model=MODEL_NAME,
+            contents=formatted_contents,
+            config=types.EmbedContentConfig(
+                task_type="RETRIEVAL_DOCUMENT",
+                output_dimensionality=1024
+            )
+        )
 
-    "page_number": chunks[index].get("page_number"),
-
-    "embedding": embedding.values
-})
+        for index, embedding in enumerate(response.embeddings):
+            embedded_chunks.append({
+                "chunk_index": batch[index]["chunk_index"],
+                "content": batch[index]["content"],
+                "page_number": batch[index].get("page_number"),
+                "embedding": embedding.values
+            })
 
     return embedded_chunks

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
@@ -116,6 +117,83 @@ def mark_message_as_read(
     }
 
 # ---------------------------------------------------
+# SEARCH USERS TO INVITE
+# ---------------------------------------------------
+@router.get("/projects/{project_id}/invite/search")
+def search_users_to_invite(
+    project_id: int,
+    q: str = Query(..., min_length=1, max_length=100),
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id
+    ).first()
+
+    if not membership or membership.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only admin can search users to invite"
+        )
+
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found"
+        )
+
+    search_term = q.strip()
+    if len(search_term) < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Enter at least 1 character"
+        )
+
+    existing_member_ids = db.query(ProjectMember.user_id).filter(
+        ProjectMember.project_id == project_id
+    )
+
+    users = db.query(User).filter(
+        User.user_id != user_id,
+        ~User.user_id.in_(existing_member_ids),
+        or_(
+            User.name.ilike(f"%{search_term}%"),
+            User.email.ilike(f"%{search_term}%")
+        )
+    ).order_by(
+        User.name.asc()
+    ).limit(12).all()
+
+    pending_receiver_ids = {
+        row[0]
+        for row in db.query(InboxMessage.receiver_id).filter(
+            InboxMessage.related_project_id == project_id,
+            InboxMessage.type == "invite",
+            InboxMessage.status.in_(["unread", "read"]),
+            InboxMessage.receiver_id.in_([user.user_id for user in users])
+        ).all()
+    } if users else set()
+
+    return {
+        "users": [
+            {
+                "user_id": user.user_id,
+                "name": user.name,
+                "email": user.email,
+                "avatar_url": user.avatar_url,
+                "invite_pending": user.user_id in pending_receiver_ids
+            }
+            for user in users
+        ]
+    }
+
+
+# ---------------------------------------------------
 # SEND PROJECT INVITE
 # ---------------------------------------------------
 @router.post("/projects/{project_id}/invite/send")
@@ -197,7 +275,7 @@ def invite_user_to_project(
         InboxMessage.receiver_id == receiver.user_id,
         InboxMessage.related_project_id == project_id,
         InboxMessage.type == "invite",
-        InboxMessage.status == "unread"
+        InboxMessage.status.in_(["unread", "read"])
     ).first()
 
     if existing_invite:

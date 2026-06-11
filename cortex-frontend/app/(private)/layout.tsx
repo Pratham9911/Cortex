@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useTheme } from "next-themes"
-import { BookOpen, Code2, Cog, EllipsisVertical, HelpCircle, Keyboard, Lightbulb, Menu, Plus, Search, Wrench } from "lucide-react"
+import { BookOpen, Code2, Cog, EllipsisVertical, HelpCircle, Inbox, Keyboard, Lightbulb, Menu, Plus, Search, Wrench } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { InboxDialog, InboxUnreadBadge, useInboxController } from "@/components/inbox/inbox-dialog"
 import { cn } from "@/lib/utils"
 
 export default function PrivateLayout({ children }: { children: React.ReactNode }) {
@@ -32,6 +33,8 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
   const [projectName, setProjectName] = useState("Project")
   const [commandOpen, setCommandOpen] = useState(false)
   const { theme } = useTheme()
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const inbox = useInboxController({ apiUrl })
 
   useEffect(() => {
     setMounted(true)
@@ -129,8 +132,13 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
                   <span className="text-sm">Search...</span>
                   <span className={cn("text-xs", isDark ? "text-zinc-500" : "text-slate-500")}>Ctrl K</span>
                 </button>
-                <Button className="hidden md:inline-flex h-6 min-h-6 rounded-md bg-sky-500 px-3 text-xs font-semibold leading-none text-white hover:bg-sky-400">
-                  Inbox
+                <Button
+                  onClick={inbox.openInbox}
+                  className="relative hidden md:inline-flex h-9 min-h-9 rounded-full bg-sky-500 px-3 text-xs font-semibold leading-none text-white hover:bg-sky-400"
+                  aria-label={`Inbox${inbox.unreadCount ? `, ${inbox.unreadCount} unread` : ""}`}
+                >
+                  <Inbox className="h-4 w-4" />
+                  <InboxUnreadBadge count={inbox.unreadCount} />
                 </Button>
                 <button className={cn("hidden md:grid h-9 w-9 place-items-center rounded-full border", isDark ? "border-zinc-700 text-zinc-300" : "border-slate-300 text-slate-600")}>
                   <HelpCircle className="h-4 w-4" />
@@ -150,8 +158,12 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
                     <DropdownMenuItem onClick={() => setCommandOpen(true)}>
                       <Search className="h-4 w-4" /> Search
                     </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <Plus className="h-4 w-4" /> Inbox
+                    <DropdownMenuItem onClick={inbox.openInbox}>
+                      <span className="relative">
+                        <Inbox className="h-4 w-4" />
+                        <InboxUnreadBadge count={inbox.unreadCount} />
+                      </span>
+                      Inbox
                     </DropdownMenuItem>
                     <DropdownMenuItem>
                       <HelpCircle className="h-4 w-4" /> Help
@@ -173,7 +185,6 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
             className={cn("sm:max-w-[860px] font-quicksand", isDark ? "border-zinc-700 bg-[#1b1d23] text-zinc-100" : "bg-white")}
             title="Search Commands"
             description="Run a command or search..."
-            style={{ fontWeight: 400 }}
           >
             <CommandInput placeholder="Run a command or search..." />
             <CommandList className="max-h-[560px]">
@@ -213,6 +224,8 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
               </CommandGroup>
             </CommandList>
           </CommandDialog>
+
+          <InboxDialog controller={inbox} isDark={isDark} />
         </div>
       </div>
     </ProtectedRoute>

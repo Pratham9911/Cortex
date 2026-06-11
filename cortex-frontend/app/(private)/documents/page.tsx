@@ -35,6 +35,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/components/auth/protected-route"
 
@@ -1269,11 +1270,41 @@ export default function DocumentsPage() {
       </Dialog>
 
       {/* ══════════════ UPLOAD MODAL ══════════════════════════════════ */}
-      <Dialog open={uploadOpen} onOpenChange={v=>{if(!v)resetUpload();setUploadOpen(v)}}>
+      <Dialog
+        open={uploadOpen}
+        onOpenChange={v => {
+          if (uploadLoading) return
+          if (!v) resetUpload()
+          setUploadOpen(v)
+        }}
+      >
         <DialogContent className={cn(
           "sm:max-w-lg w-full p-0 overflow-hidden rounded-2xl border",
           isDark ? "bg-[#12141a] border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
-        )}>
+        )} showCloseButton={!uploadLoading}>
+          {uploadLoading && (
+            <div className={cn(
+              "absolute inset-0 z-20 flex flex-col items-center justify-center px-8 text-center",
+              isDark ? "bg-[#12141a]" : "bg-white"
+            )}>
+              <div className={cn(
+                "flex size-16 items-center justify-center rounded-2xl border shadow-lg",
+                isDark ? "border-violet-500/30 bg-violet-500/10" : "border-violet-200 bg-violet-50"
+              )}>
+                <Spinner className="size-8 text-violet-500" />
+              </div>
+              <h2 className="mt-5 text-base font-bold">Processing your document</h2>
+              <p className={cn("mt-2 max-w-sm text-xs leading-5", isDark ? "text-zinc-400" : "text-slate-500")}>
+                Cortex is uploading the file, extracting its content, and preparing it for search. This may take a while.
+              </p>
+              {uploadFile && (
+                <p className={cn("mt-4 max-w-xs truncate text-xs font-semibold", isDark ? "text-zinc-300" : "text-slate-700")}>
+                  {uploadFile.name}
+                </p>
+              )}
+              <p className="mt-2 text-[10px] text-zinc-500">Please keep this window open.</p>
+            </div>
+          )}
           {/* Header */}
           <div className={cn("flex items-center justify-between px-5 py-4 border-b", isDark ? "border-zinc-800" : "border-slate-200")}>
             <div>
@@ -1432,8 +1463,47 @@ export default function DocumentsPage() {
       </Dialog>
 
       {/* Upload Version Dialog */}
-      <Dialog open={uploadVersionOpen} onOpenChange={v=>{if(!v){setUploadVerFile(null);setUploadVerError("")};setUploadVersionOpen(v)}}>
-        <DialogContent className={cn("sm:max-w-sm", isDark ? "bg-[#181b24] border-zinc-800 text-white" : "")}>
+      <Dialog
+        open={uploadVersionOpen}
+        onOpenChange={v => {
+          if (uploadVerLoading) return
+          if (!v) {
+            setUploadVerFile(null)
+            setUploadVerError("")
+          }
+          setUploadVersionOpen(v)
+        }}
+      >
+        <DialogContent
+          className={cn(
+            "sm:max-w-sm overflow-hidden",
+            isDark ? "bg-[#181b24] border-zinc-800 text-white" : ""
+          )}
+          showCloseButton={!uploadVerLoading}
+        >
+          {uploadVerLoading && (
+            <div className={cn(
+              "absolute inset-0 z-20 flex flex-col items-center justify-center px-7 py-10 text-center",
+              isDark ? "bg-[#181b24]" : "bg-white"
+            )}>
+              <div className={cn(
+                "flex size-14 items-center justify-center rounded-2xl border",
+                isDark ? "border-violet-500/30 bg-violet-500/10" : "border-violet-200 bg-violet-50"
+              )}>
+                <Spinner className="size-7 text-violet-500" />
+              </div>
+              <DialogTitle className="mt-4 text-base">Processing new version</DialogTitle>
+              <DialogDescription className="mt-2 text-xs leading-5 text-zinc-400">
+                Cortex is extracting and indexing the new file. This may take a while.
+              </DialogDescription>
+              {uploadVerFile && (
+                <p className={cn("mt-4 max-w-xs truncate text-xs font-semibold", isDark ? "text-zinc-300" : "text-slate-700")}>
+                  {uploadVerFile.name}
+                </p>
+              )}
+              <p className="mt-2 text-[10px] text-zinc-500">Please keep this window open.</p>
+            </div>
+          )}
           <DialogHeader>
             <DialogTitle className="text-sm">Upload New Version</DialogTitle>
             <DialogDescription className="text-xs text-zinc-400">

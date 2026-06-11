@@ -12,6 +12,7 @@ import {
   Keyboard,
   Grid3X3,
   HelpCircle,
+  Inbox,
   Lightbulb,
   List,
   Plus,
@@ -50,6 +51,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { InboxDialog, InboxUnreadBadge, useInboxController } from "@/components/inbox/inbox-dialog"
 import { cn } from "@/lib/utils"
 
 type Project = {
@@ -69,6 +71,7 @@ function WorkspaceContent() {
   const router = useRouter()
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
   const [mounted, setMounted] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
@@ -114,7 +117,6 @@ function WorkspaceContent() {
     setError("")
     try {
       const token = localStorage.getItem("access_token")
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const res = await fetch(`${apiUrl}/getprojects`, {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -131,6 +133,8 @@ function WorkspaceContent() {
   useEffect(() => {
     loadProjects()
   }, [])
+
+  const inbox = useInboxController({ apiUrl, onInviteHandled: loadProjects })
 
   const filteredProjects = useMemo(() => {
     const byName = projects.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()))
@@ -160,7 +164,6 @@ function WorkspaceContent() {
     setError("")
     try {
       const token = localStorage.getItem("access_token")
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const res = await fetch(`${apiUrl}/projects`, {
         method: "POST",
         headers: {
@@ -208,8 +211,13 @@ function WorkspaceContent() {
               <span className="text-sm">Search...</span>
               <span className={cn("text-xs", isDark ? "text-zinc-500" : "text-slate-500")}>Ctrl K</span>
             </button>
-            <Button className="hidden md:inline-flex h-6 min-h-6 rounded-md bg-sky-500 px-3 text-xs font-semibold leading-none text-white hover:bg-sky-400">
-              Inbox
+            <Button
+              onClick={inbox.openInbox}
+              className="relative hidden md:inline-flex h-9 min-h-9 rounded-full bg-sky-500 px-3 text-xs font-semibold leading-none text-white hover:bg-sky-400"
+              aria-label={`Inbox${inbox.unreadCount ? `, ${inbox.unreadCount} unread` : ""}`}
+            >
+              <Inbox className="h-4 w-4" />
+              <InboxUnreadBadge count={inbox.unreadCount} />
             </Button>
             <button className={cn("hidden md:grid h-9 w-9 place-items-center rounded-full border", isDark ? "border-zinc-700 text-zinc-300" : "border-slate-300 text-slate-600")}>
               <HelpCircle className="h-4 w-4" />
@@ -230,8 +238,12 @@ function WorkspaceContent() {
                 <DropdownMenuItem onClick={() => setCommandOpen(true)}>
                   <Search className="h-4 w-4" /> Search
                 </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Plus className="h-4 w-4" /> Inbox
+                <DropdownMenuItem onClick={inbox.openInbox}>
+                  <span className="relative">
+                    <Inbox className="h-4 w-4" />
+                    <InboxUnreadBadge count={inbox.unreadCount} />
+                  </span>
+                  Inbox
                 </DropdownMenuItem>
                 <DropdownMenuItem>
                   <HelpCircle className="h-4 w-4" /> Help
@@ -476,7 +488,6 @@ function WorkspaceContent() {
         className={cn("sm:max-w-[860px] font-quicksand", isDark ? "border-zinc-700 bg-[#1b1d23] text-zinc-100" : "bg-white")}
         title="Search Commands"
         description="Run a command or search..."
-        style={{ fontWeight: 400 }}
       >
         <CommandInput placeholder="Run a command or search..." />
         <CommandList className="max-h-[560px]">
@@ -516,6 +527,7 @@ function WorkspaceContent() {
           </CommandGroup>
         </CommandList>
       </CommandDialog>
+      <InboxDialog controller={inbox} isDark={isDark} />
     </main>
   )
 }
