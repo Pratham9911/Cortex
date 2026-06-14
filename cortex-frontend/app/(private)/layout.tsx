@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 import { BookOpen, Code2, Cog, EllipsisVertical, HelpCircle, Inbox, Keyboard, Lightbulb, Menu, Plus, Search, Wrench } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
@@ -27,11 +28,14 @@ import { InboxDialog, InboxUnreadBadge, useInboxController } from "@/components/
 import { cn } from "@/lib/utils"
 
 export default function PrivateLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  const isAgentRoute = pathname.startsWith("/ai-agent")
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isMobileOpen, setIsMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [projectName, setProjectName] = useState("Project")
   const [commandOpen, setCommandOpen] = useState(false)
+  const preAgentCollapsedRef = useRef<boolean | null>(null)
   const { theme } = useTheme()
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const inbox = useInboxController({ apiUrl })
@@ -47,6 +51,23 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
       setProjectName(selectedProjectName)
     }
   }, [])
+
+  useEffect(() => {
+    if (isAgentRoute) {
+      if (preAgentCollapsedRef.current === null) {
+        preAgentCollapsedRef.current = isCollapsed
+      }
+      if (!isCollapsed) {
+        setIsCollapsed(true)
+      }
+      return
+    }
+    if (preAgentCollapsedRef.current !== null) {
+      setIsCollapsed(preAgentCollapsedRef.current)
+      preAgentCollapsedRef.current = null
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route changes
+  }, [isAgentRoute])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -76,19 +97,21 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
         style={{ fontWeight: 400 }}
       >
         <Sidebar
-          isCollapsed={isCollapsed}
+          isCollapsed={isAgentRoute ? true : isCollapsed}
           setIsCollapsed={handleSetCollapsed}
           isMobileOpen={isMobileOpen}
           setIsMobileOpen={setIsMobileOpen}
+          agentMode={isAgentRoute}
         />
 
         <div
           className={cn(
             "flex-1 flex flex-col min-h-screen transition-all duration-300 ease-in-out",
-            isCollapsed ? "md:pl-[68px]" : "md:pl-[260px]",
+            isAgentRoute ? "md:pl-[68px]" : isCollapsed ? "md:pl-[68px]" : "md:pl-[260px]",
             "pl-0"
           )}
         >
+          {!isAgentRoute && (
           <header
             className={cn(
               "sticky top-0 z-30 border-b",
@@ -176,8 +199,16 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
               </div>
             </div>
           </header>
+          )}
 
-          <main className="flex-1 min-h-0 px-6 py-8">{children}</main>
+          <main
+            className={cn(
+              "flex-1 min-h-0",
+              isAgentRoute ? "overflow-hidden p-0" : "px-6 py-8"
+            )}
+          >
+            {children}
+          </main>
 
           <CommandDialog
             open={commandOpen}

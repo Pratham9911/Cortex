@@ -5,7 +5,7 @@ from sqlalchemy import text
 from database import SessionLocal, engine
 from models import Base, User
 from dependencies import get_current_user
-from routers import auth , projects  , documents , teams , folder , inbox, user_profiles
+from routers import auth , projects  , documents , teams , folder , inbox, user_profiles , agents
 
 app = FastAPI()
 
@@ -37,6 +37,7 @@ app.include_router(folder.router)
 app.include_router(inbox.router)
 app.include_router(documents.router)
 app.include_router(user_profiles.router)
+app.include_router(agents.router)
 
 def get_db():
     db = SessionLocal()

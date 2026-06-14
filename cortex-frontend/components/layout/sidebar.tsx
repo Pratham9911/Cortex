@@ -8,7 +8,7 @@ import { useAuth } from "@/components/auth/protected-route"
 import { cn } from "@/lib/utils"
 import {
   Search, Inbox, Bell, LayoutGrid, BarChart3, LineChart,
-  FileText, Receipt, Building2, Trash2, Sparkles,
+  Bot, FileText, Receipt, Building2, Trash2, Sparkles,
   Sliders, Moon, Sun, Palette, HelpCircle, ChevronsUpDown,
   PanelLeftClose, LogOut, User, X, Settings
 } from "lucide-react"
@@ -18,12 +18,14 @@ interface SidebarProps {
   setIsCollapsed: (v: boolean) => void
   isMobileOpen: boolean
   setIsMobileOpen: (v: boolean) => void
+  agentMode?: boolean
 }
 
 const MENU_ITEMS = [
   { id: "Dashboard",  label: "Dashboard",        icon: LayoutGrid },
   { id: "Analytics",  label: "Analytics",        icon: BarChart3  },
   { id: "Reporting",  label: "Reporting",        icon: LineChart  },
+  { id: "Agent",      label: "AI Agent",         icon: Bot        },
   { id: "Documents",  label: "Documents",        icon: FileText   },
   { id: "Projects",   label: "Projects",         icon: Receipt    },
   { id: "ProjectSettings", label: "Project settings", icon: Settings },
@@ -80,6 +82,7 @@ function SidebarContent({
       Dashboard: localStorage.getItem("selected_project_id") ? "/dashboard" : "/workspace",
       Analytics: "/analytics",
       Reporting: "/reports",
+      Agent: "/ai-agent",
       Documents: "/documents",
       Projects: "/projects",
       ProjectSettings: "/project-settings",
@@ -108,6 +111,10 @@ function SidebarContent({
     }
     if (pathname.startsWith("/reports")) {
       setActive("Reporting")
+      return
+    }
+    if (pathname.startsWith("/ai-agent")) {
+      setActive("Agent")
       return
     }
     if (pathname.startsWith("/documents")) {
@@ -374,11 +381,17 @@ function SidebarContent({
 }
 
 /* ─── Main export ─── */
-export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen }: SidebarProps) {
+export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen, agentMode = false }: SidebarProps) {
   const { theme } = useTheme()
   const [mounted, setMounted] = useState(false)
+  const [hoverExpanded, setHoverExpanded] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   const isDark = mounted && theme === "dark"
+
+  const effectiveCollapsed = agentMode ? !hoverExpanded : isCollapsed
+  const desktopWidth = agentMode
+    ? hoverExpanded ? "w-[260px]" : "w-[68px]"
+    : isCollapsed ? "w-[68px]" : "w-[260px]"
 
   useEffect(() => {
     if (!isMobileOpen) return
@@ -397,13 +410,22 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
   return (
     <>
       {/* Desktop fixed panel */}
-      <aside className={cn(
-        "hidden md:block fixed top-0 left-0 z-40 h-screen border-r transition-all duration-300 ease-in-out",
-        isCollapsed ? "w-[68px]" : "w-[260px]",
-        isDark ? "border-zinc-800" : "border-zinc-200"
-      )}>
+      <aside
+        onMouseEnter={agentMode ? () => setHoverExpanded(true) : undefined}
+        onMouseLeave={agentMode ? () => setHoverExpanded(false) : undefined}
+        className={cn(
+          "hidden md:block fixed top-0 left-0 h-screen border-r transition-all duration-300 ease-in-out",
+          desktopWidth,
+          agentMode && hoverExpanded ? "z-50 shadow-2xl" : "z-40",
+          isDark ? "border-zinc-800" : "border-zinc-200"
+        )}
+      >
         <div className={panelClass} style={{ height: "100vh", fontWeight: 400 }}>
-          <SidebarContent isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} setIsMobileOpen={setIsMobileOpen} />
+          <SidebarContent
+            isCollapsed={effectiveCollapsed}
+            setIsCollapsed={setIsCollapsed}
+            setIsMobileOpen={setIsMobileOpen}
+          />
         </div>
       </aside>
 

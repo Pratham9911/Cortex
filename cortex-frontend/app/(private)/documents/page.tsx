@@ -106,6 +106,7 @@ export default function DocumentsPage() {
 
   // ── Core data ───────────────────────────────────────────────────────────────
   const [folders, setFolders]               = useState<FolderItem[]>([])
+  const [allDocuments, setAllDocuments]     = useState<DocumentItem[]>([])
   const [documents, setDocuments]           = useState<DocumentItem[]>([])
   const [loading, setLoading]               = useState(true)
   const [query, setQuery]                   = useState("")
@@ -213,6 +214,7 @@ export default function DocumentsPage() {
       const dList = rawDocs.filter((d) => d.folder_id == null)
 
       setFolders(fList)
+      setAllDocuments(rawDocs)
       setDocuments(dList)
 
       // Avatars + names
@@ -269,8 +271,9 @@ export default function DocumentsPage() {
   }, [selectedDoc, fetchDocVersions])
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
-  const formatSize = (b: number) => {
-    if (!b) return "--"
+  const formatSize = (b: number | null | undefined) => {
+    if (b === null || b === undefined) return "--"
+    if (b === 0) return "0 B"
     const k = 1024, s = ["B","KB","MB","GB"]
     const i = Math.floor(Math.log(b) / Math.log(k))
     return parseFloat((b / Math.pow(k, i)).toFixed(1)) + " " + s[i]
@@ -316,6 +319,12 @@ export default function DocumentsPage() {
 
   const filteredFolders = folders.filter(f => f.name.toLowerCase().includes(query.toLowerCase()))
   const filteredDocs    = documents.filter(d => (d.title || d.file_name).toLowerCase().includes(query.toLowerCase()))
+  const folderSizeMap = allDocuments.reduce<Record<number, number>>((acc, doc) => {
+    if (doc.folder_id != null) {
+      acc[doc.folder_id] = (acc[doc.folder_id] || 0) + (doc.file_size || 0)
+    }
+    return acc
+  }, {})
 
   // ─── Folder CRUD ──────────────────────────────────────────────────────────
   const handleCreateFolder = async () => {
@@ -676,7 +685,7 @@ export default function DocumentsPage() {
                 <span className={cn("truncate text-sm", isDark ? "text-zinc-200" : "text-slate-800")}>{folder.name}</span>
               </div>
               <div className={cn(colDate, isDark ? "text-zinc-500" : "text-slate-400")}>{formatDate(folder.last_modified || folder.created_at)}</div>
-              <div className={cn(colSize, isDark ? "text-zinc-500" : "text-slate-400")}>--</div>
+              <div className={cn(colSize, isDark ? "text-zinc-500" : "text-slate-400")}>{formatSize(folderSizeMap[folder.folder_id] ?? 0)}</div>
               <div className={colUser}><UserAvatarSmall userId={folder.modified_by || folder.created_by} /></div>
               <div className={colMenu} onClick={e=>e.stopPropagation()}>
                 {currentUserRole === "admin" && (

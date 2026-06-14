@@ -266,6 +266,7 @@ export default function FolderPage() {
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
   const formatSize = (b: number) => {
+    if (b === 0) return "0 B"
     if (!b) return "--"
     const k = 1024, s = ["B","KB","MB","GB"]
     const i = Math.floor(Math.log(b) / Math.log(k))
@@ -301,6 +302,7 @@ export default function FolderPage() {
   }
 
   const filteredDocs = documents.filter(d => (d.title || d.file_name).toLowerCase().includes(query.toLowerCase()))
+  const totalFolderSize = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
 
   // ─── Document soft-delete ─────────────────────────────────────────────────
   const handleDeleteDoc = async () => {
@@ -543,7 +545,12 @@ export default function FolderPage() {
                 Documents
               </button>
               <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-              <span className={cn("font-bold truncate", isDark ? "text-white" : "text-slate-900")}>{folderName}</span>
+              <div className="min-w-0">
+                <p className={cn("font-bold truncate", isDark ? "text-white" : "text-slate-900")}>{folderName}</p>
+                <p className={cn("text-xs mt-0.5 truncate", isDark ? "text-zinc-400" : "text-slate-500")}>
+                  {filteredDocs.length} document{filteredDocs.length === 1 ? "" : "s"} • {formatSize(totalFolderSize)}
+                </p>
+              </div>
             </div>
             {/* Row 2: search + upload */}
             <div className="flex items-center gap-2 px-4 pb-2">
