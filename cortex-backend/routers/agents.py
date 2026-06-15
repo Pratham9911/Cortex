@@ -1,5 +1,6 @@
 
 import json
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -327,4 +328,142 @@ def test_web_search(query: str):
         media_type="text/event-stream"
     )
 
+
+# ============================================================
+# /test2  –  Groq compound-beta web search (SSE)
+# ============================================================
+from rag.agents.webagent2 import run_groq_web_search
+
+@router.get("/test2")
+async def test_groq_web_search(query: str):
+    """
+    SSE endpoint that streams Groq compound-beta web search results.
+    Events:
+        data: {"type": "status",  "step": "groq_search", "message": "..."}
+        data: {"type": "sources", "step": "groq_sources", "sources": [...]}
+        data: {"type": "final",   "answer": "..."}
+        event: done
+    """
+
+    async def event_stream():
+
+        loop = asyncio.get_event_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        _DONE = object()
+
+        def _run():
+            try:
+                for event in run_groq_web_search(query):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception as exc:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    {"type": "error", "message": str(exc)}
+                )
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, _DONE)
+
+        task = loop.run_in_executor(None, _run)
+
+        try:
+            while True:
+                event = await queue.get()
+                if event is _DONE:
+                    break
+                yield (
+                    "data: "
+                    + json.dumps(event)
+                    + "\n\n"
+                )
+
+            yield "event: done\ndata: complete\n\n"
+
+        except Exception as e:
+            yield (
+                "data: "
+                + json.dumps({"type": "error", "message": str(e)})
+                + "\n\n"
+            )
+
+        await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+# ============================================================
+# /IntelligentGoogleSearch  –  Gemini Google Search (SSE)
+# ============================================================
+from rag.agents.IntelligentWebAgent import run_gemini_google_search
+
+@router.get("/IntelligentGoogleSearch")
+async def test_intelligent_google_search(query: str):
+    """
+    SSE endpoint that streams Gemini Google Search results.
+    Events:
+        data: {"type": "status",  "step": "gemini_search", "message": "..."}
+        data: {"type": "final",   "answer": "..."}
+        event: done
+    """
+
+    async def event_stream():
+
+        loop = asyncio.get_event_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        _DONE = object()
+
+        def _run():
+            try:
+                for event in run_gemini_google_search(query):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception as exc:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    {"type": "error", "message": str(exc)}
+                )
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, _DONE)
+
+        task = loop.run_in_executor(None, _run)
+
+        try:
+            while True:
+                event = await queue.get()
+                if event is _DONE:
+                    break
+                yield (
+                    "data: "
+                    + json.dumps(event)
+                    + "\n\n"
+                )
+
+            yield "event: done\ndata: complete\n\n"
+
+        except Exception as e:
+            yield (
+                "data: "
+                + json.dumps({"type": "error", "message": str(e)})
+                + "\n\n"
+            )
+
+        await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
 

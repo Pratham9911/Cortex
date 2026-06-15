@@ -5,7 +5,7 @@ from rag.handlers import (
     handle_general_chat,
     handle_suspicious,
     handle_web_search,
-    handle_project_and_web
+    handle_multi_hop
 )
 
 
@@ -85,11 +85,11 @@ def run_pipeline(
         return
 
     # ========================================
-    # PROJECT + WEB
+    # MULTI-HOP (Universal retrieval)
     # ========================================
-    if intent == "project_and_web":
+    if intent == "multi_hop":
 
-        yield from handle_project_and_web(
+        yield from handle_multi_hop(
             query=query,
             project_id=project_id,
             user_id=user_id,

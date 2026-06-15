@@ -14,43 +14,40 @@ def rewrite_query(query: str):
     prompt = f"""
 You are a query rewriting agent for an enterprise RAG system.
 
-Your job is to rewrite user questions into retrieval-optimized search queries.
+Your job is to improve retrieval quality while preserving the user's original meaning.
 
 Rules:
-- Preserve the original meaning.
-- Only fix spelling, abbreviations, and ambiguity.
-- Do not invent new concepts.
-- Keep the rewritten query concise.
+- Fix spelling mistakes.
+- Expand abbreviations only when obvious.
+- Preserve entities, dates, and key terms.
 - Do not answer the question.
-- Do not add information not implied by the query.
-- Do not infer any other concepts unless
-explicitly implied by the user's query.
+- Do not invent new concepts.
+- Do not add words that are not implied by the query.
+- Keep the rewritten query concise.
 
 Return ONLY valid JSON.
 
-Examples:
+Example:
 
 Input:
-what about teacher portal
+Pratham rol for team meetin discussefd
 
 Output:
 {{
-    "rewritten_query": "teacher portal requirements discussion specifications"
+    "rewritten_query": "Pratham role for team meeting discussion"
 }}
 
 Input:
-hostel attendance
+server storage
 
 Output:
 {{
-    "rewritten_query": "hostel attendance policy biometric attendance requirements"
+    "rewritten_query": "server storage"
 }}
-
 
 User Query:
 {query}
 """
-
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[

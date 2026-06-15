@@ -11,9 +11,9 @@ client = Groq(
 VALID_INTENTS = {
     "project_knowledge",
     "web_search",
-    "project_and_web",
     "general_chat",
-    "suspicious"
+    "suspicious",
+    "multi_hop"
 }
 
 def detect_intent(query: str):
@@ -24,13 +24,18 @@ You are an intent classification agent.
 Classify the user query into ONE of these intents:
 
 1. project_knowledge
-   - Questions about project documents, files, requirements, meetings, decisions, discussions, architecture, project knowledge.
+   - Simple queries about project documents, files, requirements, meetings, decisions, discussions, architecture, project knowledge.
+   - Do NOT use for questions that require comparison or combining multiple sources.
 
 2. web_search
-   - Requires current internet information, latest news, releases, trends, external facts.
+   - Simple queries that require current internet information, latest news, releases, trends, external facts.
+   - Includes comparison between purely external topics (e.g. comparing two external companies, systems, or public architectures like Glean and Copilot).
 
-3. project_and_web
-   - Needs both project documents and internet knowledge.
+3. multi_hop
+   - Comparison, difference, or aggregation questions involving internal project documents (Project + Project).
+   - Cross-source questions that combine internal project knowledge and external web search (Project + Web).
+   - Do NOT use for purely external comparisons (use web_search).
+   - mostly project and web related tasks
 
 4. general_chat
    - General knowledge, greetings, explanations, coding help, casual conversation.
@@ -42,13 +47,32 @@ Return ONLY valid JSON.
 
 Examples:
 
-Query:
-"What was discussed about teacher portal?"
+Query: "Compare teacher portal and student portal."
+Output:
+{{"intent":"multi_hop"}}
+
+Query: "Compare Project requirements with government regulations."
+Output:
+{{"intent":"multi_hop"}}
+
+
+Query: "What changed between version 1 and version 3?"
+Output:
+{{"intent":"multi_hop"}}
+
+Query: "Compare last meeting decisions with current roadmap."
+Output:
+{{"intent":"multi_hop"}}
+
+Query: "Compare Glean architecture with Microsoft Copilot architecture."
+Output:
+{{"intent":"web_search"}}
+
+Query: "What was discussed about teacher portal?"
 Output:
 {{"intent":"project_knowledge"}}
 
-Query:
-"Latest Gemini release?"
+Query: "Latest Gemini release?"
 Output:
 {{"intent":"web_search"}}
 
@@ -86,6 +110,7 @@ User Query:
     return {
       "intent": intent
   }
+
   
 
 # query = "What was discussed about teacher portal?"
