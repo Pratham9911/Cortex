@@ -304,8 +304,8 @@ def handle_multi_hop(
             chunks = hybrid_search_with_rerank(
                 rewritten_query,
                 project_id,
-                user_role,
                 user_id,
+                user_role,
                 db
             )
             yield {
@@ -429,8 +429,8 @@ def handle_project_knowledge(
     chunks = hybrid_search_with_rerank(
         rewritten_query,
         project_id,
-        user_role,
         user_id,
+        user_role,
         db
     )
 

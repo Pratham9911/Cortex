@@ -18,6 +18,7 @@ export const PROMPT_POOLS: PromptCard[][] = [
 export const INITIAL_CHATS: ChatSession[] = [
   {
     id: "agent-1",
+    chatId: 1,
     title: "ChatAI",
     group: "saved",
     avatarLetter: "C",
@@ -34,6 +35,7 @@ export const INITIAL_CHATS: ChatSession[] = [
   },
   {
     id: "agent-2",
+    chatId: 2,
     title: "Image of sun",
     group: "saved",
     avatarLetter: "🌄",
@@ -51,6 +53,7 @@ export const INITIAL_CHATS: ChatSession[] = [
   },
   {
     id: "agent-3",
+    chatId: 3,
     title: "Data Analyst",
     group: "saved",
     avatarLetter: "D",
@@ -67,6 +70,7 @@ export const INITIAL_CHATS: ChatSession[] = [
   },
   {
     id: "today-1",
+    chatId: 4,
     title: "How can I improve my time management skills?",
     group: "today",
     avatarLetter: "T",
@@ -83,6 +87,7 @@ export const INITIAL_CHATS: ChatSession[] = [
   },
   {
     id: "today-2",
+    chatId: 5,
     title: "What's the best way to learn a new skill?",
     group: "today",
     avatarLetter: "W",
@@ -99,6 +104,7 @@ export const INITIAL_CHATS: ChatSession[] = [
   },
   {
     id: "today-3",
+    chatId: 6,
     title: "How do I start investing in stocks as a beginner?",
     group: "today",
     avatarLetter: "H",
@@ -115,6 +121,7 @@ export const INITIAL_CHATS: ChatSession[] = [
   },
   {
     id: "yesterday-1",
+    chatId: 7,
     title: "What are the benefits of daily exercise for mental health?",
     group: "yesterday",
     avatarLetter: "W",
@@ -131,6 +138,7 @@ export const INITIAL_CHATS: ChatSession[] = [
   },
   {
     id: "yesterday-2",
+    chatId: 8,
     title: "What's the difference between a UI designer and UX designer?",
     group: "yesterday",
     avatarLetter: "W",

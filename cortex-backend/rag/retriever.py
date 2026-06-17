@@ -60,6 +60,7 @@ def reciprocal_rank_fusion(
 def semantic_search(
     query: str,
     project_id: int,
+    user_id: int,
     user_role: str,
     user_team_ids: list[int],
     db
@@ -106,28 +107,29 @@ JOIN document_versions dv
 JOIN documents d
     ON dv.document_id = d.document_id
 
+JOIN projects p
+    ON p.project_id = d.project_id
+
 WHERE
     dc.project_id = :project_id
 
     AND dv.is_active = true
     AND dv.is_deleted = false
 
-    -- TEAM ACL
-    AND (
-        :user_role = 'admin'
-
-        OR
-
-        d.allowed_team_ids && CAST(:user_team_ids AS integer[])
-    )
-
     -- SEARCH ACCESS
     AND (
-        d.search_access_level = 'member'
-
+        p.created_by = :user_id
+        OR d.owner_id = :user_id
         OR (
             d.search_access_level = 'admin'
             AND :user_role = 'admin'
+        )
+        OR (
+            d.search_access_level = 'member'
+            AND (
+                :user_role = 'admin'
+                OR d.allowed_team_ids && CAST(:user_team_ids AS integer[])
+            )
         )
     )
 
@@ -141,6 +143,7 @@ LIMIT 10;
         {
             "query_vector": vector_str,
             "project_id": project_id,
+            "user_id": user_id,
             "user_role": user_role,
             "user_team_ids": user_team_ids
         }
@@ -168,6 +171,7 @@ LIMIT 10;
 def keyword_search(
     query: str,
     project_id: int,
+    user_id: int,
     user_role: str,
     user_team_ids: list[int],
     db
@@ -203,20 +207,14 @@ JOIN document_versions dv
 JOIN documents d
     ON dv.document_id = d.document_id
 
+JOIN projects p
+    ON p.project_id = d.project_id
+
 WHERE
     dc.project_id = :project_id
 
     AND dv.is_active = true
     AND dv.is_deleted = false
-
-    -- TEAM ACL
-    AND (
-        :user_role = 'admin'
-
-        OR
-
-        d.allowed_team_ids && CAST(:user_team_ids AS integer[])
-    )
 
     AND (
 
@@ -235,11 +233,18 @@ WHERE
 
     -- SEARCH ACCESS
     AND (
-        d.search_access_level = 'member'
-
+        p.created_by = :user_id
+        OR d.owner_id = :user_id
         OR (
             d.search_access_level = 'admin'
             AND :user_role = 'admin'
+        )
+        OR (
+            d.search_access_level = 'member'
+            AND (
+                :user_role = 'admin'
+                OR d.allowed_team_ids && CAST(:user_team_ids AS integer[])
+            )
         )
     )
 
@@ -269,6 +274,7 @@ LIMIT 10;
         {
             "query": query,
             "project_id": project_id,
+            "user_id": user_id,
             "user_role": user_role,
             "user_team_ids": user_team_ids
         }
@@ -317,6 +323,7 @@ def hybrid_search(
     semantic_results = semantic_search(
         query,
         project_id,
+        user_id,
         user_role,
         user_team_ids,
         db
@@ -328,6 +335,7 @@ def hybrid_search(
     keyword_results = keyword_search(
         query,
         project_id,
+        user_id,
         user_role,
         user_team_ids,
         db
@@ -358,8 +366,8 @@ def hybrid_search_with_rerank(
     hybrid_results = hybrid_search(
         query,
         project_id,
-        user_role,
         user_id,
+        user_role,
         db
     )
 

@@ -3,28 +3,55 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTheme } from "next-themes"
 import { useAuth } from "@/components/auth/protected-route"
-import { sendToAgent } from "@/lib/ai-agent"
+import {
+  createChat,
+  listChats,
+  listMessages,
+  streamChatAsk,
+} from "@/lib/ai-agent"
 import { cn } from "@/lib/utils"
 import { AgentChatMain } from "./agent-chat-main"
 import { AgentChatSidebar } from "./agent-chat-sidebar"
-import { INITIAL_CHATS, PROMPT_POOLS } from "./mock-data"
-import type { ChatSession, Message } from "./types"
+import { PROMPT_POOLS } from "./mock-data"
+import type { ChatSession, Message, MessageSources, ThinkingEvent } from "./types"
 
-function titleFromMessage(text: string) {
-  const trimmed = text.trim()
-  if (trimmed.length <= 48) return trimmed
-  return `${trimmed.slice(0, 48)}...`
+function selectedProjectId() {
+  const rawProjectId = localStorage.getItem("selected_project_id")
+  return rawProjectId ? Number(rawProjectId) : null
+}
+
+function optimisticUserMessage(content: string): Message {
+  return {
+    id: `user-${Date.now()}`,
+    role: "user",
+    content,
+  }
+}
+
+function optimisticAssistantMessage(
+  content: string,
+  sources: MessageSources | null,
+  latencyMs: number
+): Message {
+  return {
+    id: `assistant-${Date.now()}`,
+    role: "assistant",
+    content,
+    sources,
+    latencyMs,
+  }
 }
 
 export function AgentChatShell() {
   const { user } = useAuth()
   const { theme } = useTheme()
   const [mounted, setMounted] = useState(false)
-  const [chats, setChats] = useState<ChatSession[]>(INITIAL_CHATS)
+  const [chats, setChats] = useState<ChatSession[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [input, setInput] = useState("")
   const [isThinking, setIsThinking] = useState(false)
-  const [promptPoolIndex, setPromptPoolIndex] = useState(0)
+  const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([])
+  const [promptPoolIndex] = useState(0)
 
   useEffect(() => {
     setMounted(true)
@@ -34,86 +61,206 @@ export function AgentChatShell() {
   const userInitials = user?.name ? user.name.slice(0, 2).toUpperCase() : "U"
   const activeChat = activeChatId ? chats.find((c) => c.id === activeChatId) : null
 
+  const replaceChatMessages = useCallback((chatId: number, messages: Message[]) => {
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.chatId === chatId
+          ? {
+              ...chat,
+              messages,
+            }
+          : chat
+      )
+    )
+  }, [])
+
+  const refreshChats = useCallback(async () => {
+    const projectId = selectedProjectId()
+    if (!projectId) return
+
+    const loadedChats = await listChats(projectId)
+    setChats((prev) =>
+      loadedChats.map((chat) => ({
+        ...chat,
+        messages: prev.find((item) => item.chatId === chat.chatId)?.messages ?? [],
+      }))
+    )
+  }, [])
+
+  const refreshActiveMessages = useCallback(async () => {
+    if (!activeChatId || isThinking) return
+
+    const chat = chats.find((item) => item.id === activeChatId)
+    if (!chat) return
+
+    const messages = await listMessages(chat.chatId)
+    replaceChatMessages(chat.chatId, messages)
+  }, [activeChatId, chats, isThinking, replaceChatMessages])
+
+  useEffect(() => {
+    void refreshChats()
+  }, [refreshChats])
+
+  useEffect(() => {
+    const handleFocus = () => {
+      void refreshActiveMessages()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshActiveMessages()
+      }
+    }
+
+    window.addEventListener("focus", handleFocus)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [refreshActiveMessages])
+
+  useEffect(() => {
+    if (!activeChatId || isThinking) return
+
+    const interval = window.setInterval(() => {
+      void refreshActiveMessages()
+    }, 10000)
+
+    return () => window.clearInterval(interval)
+  }, [activeChatId, isThinking, refreshActiveMessages])
+
   const handleNewChat = useCallback(() => {
     setActiveChatId(null)
     setInput("")
+    setThinkingEvents([])
   }, [])
 
-  const handleSelectChat = useCallback((id: string) => {
-    setActiveChatId(id)
-    setInput("")
-  }, [])
+  const handleSelectChat = useCallback(
+    (id: string) => {
+      const chat = chats.find((item) => item.id === id)
+      if (!chat) return
+
+      setActiveChatId(id)
+      setInput("")
+      setThinkingEvents([])
+
+      void listMessages(chat.chatId).then((messages) => {
+        replaceChatMessages(chat.chatId, messages)
+      })
+    },
+    [chats, replaceChatMessages]
+  )
 
   const handleSend = useCallback(
     async (text?: string) => {
       const trimmed = (text ?? input).trim()
       if (!trimmed || isThinking) return
 
-      const userMessage: Message = {
-        id: `user-${Date.now()}`,
-        role: "user",
-        content: trimmed,
-      }
+      const projectId = selectedProjectId()
+      if (!projectId) return
 
       setInput("")
       setIsThinking(true)
+      setThinkingEvents([])
 
-      if (activeChatId === null) {
-        const newId = `chat-${Date.now()}`
-        const newChat: ChatSession = {
-          id: newId,
-          title: titleFromMessage(trimmed),
-          group: "today",
-          avatarLetter: trimmed.charAt(0).toUpperCase() || "N",
-          avatarColor: "bg-sky-500",
-          messages: [userMessage],
-        }
-        setChats((prev) => [newChat, ...prev])
-        setActiveChatId(newId)
-
-        try {
-          const reply = await sendToAgent(trimmed)
-          const assistantMessage: Message = {
-            id: `assistant-${Date.now()}`,
-            role: "assistant",
-            content: reply,
-          }
-          setChats((prev) =>
-            prev.map((c) =>
-              c.id === newId ? { ...c, messages: [...c.messages, assistantMessage] } : c
-            )
-          )
-        } finally {
-          setIsThinking(false)
-        }
-        return
+      let targetChat = activeChat
+      if (!targetChat) {
+        targetChat = await createChat(projectId)
+        setChats((prev) => [targetChat!, ...prev])
+        setActiveChatId(targetChat.id)
       }
 
-      setChats((prev) =>
-        prev.map((c) =>
-          c.id === activeChatId ? { ...c, messages: [...c.messages, userMessage] } : c
-        )
-      )
+      const userMessage = optimisticUserMessage(trimmed)
+      replaceChatMessages(targetChat.chatId, [
+        ...(targetChat.messages ?? []),
+        userMessage,
+      ])
+
+      const startedAt = performance.now()
+      let finalAnswer = ""
 
       try {
-        const reply = await sendToAgent(trimmed)
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: reply,
+        await streamChatAsk(targetChat.chatId, trimmed, {
+          onEvent: (event) => {
+            if (event.type === "status" && event.message) {
+              setThinkingEvents((prev) => [
+                ...prev,
+                {
+                  id: `${Date.now()}-${prev.length}`,
+                  step: event.step,
+                  message: String(event.message),
+                },
+              ])
+            }
+
+            if (event.type === "sources" && Array.isArray(event.sources)) {
+              const count = event.sources.length
+              if (count > 0) {
+                setThinkingEvents((prev) => [
+                  ...prev,
+                  {
+                    id: `${Date.now()}-${prev.length}`,
+                    step: event.step,
+                    message: `Found ${count} web source${count === 1 ? "" : "s"}.`,
+                  },
+                ])
+              }
+            }
+
+            if (event.type !== "final") return
+
+            finalAnswer = event.answer || ""
+
+            const latencyMs = performance.now() - startedAt
+            const assistantMessage = optimisticAssistantMessage(
+              finalAnswer,
+              null,
+              latencyMs
+            )
+
+            replaceChatMessages(targetChat!.chatId, [
+              ...(targetChat!.messages ?? []),
+              userMessage,
+              assistantMessage,
+            ])
+          },
+        })
+
+        const persistedMessages = await listMessages(targetChat.chatId)
+        if (persistedMessages.length > 0) {
+          const latencyMs = performance.now() - startedAt
+          const lastIndex = persistedMessages.length - 1
+          persistedMessages[lastIndex] = {
+            ...persistedMessages[lastIndex],
+            latencyMs:
+              persistedMessages[lastIndex].role === "assistant"
+                ? latencyMs
+                : undefined,
+          }
+          replaceChatMessages(targetChat.chatId, persistedMessages)
         }
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === activeChatId
-              ? { ...c, messages: [...c.messages, assistantMessage] }
-              : c
-          )
+
+        await refreshChats()
+      } catch (error) {
+        const fallbackMessage = optimisticAssistantMessage(
+          error instanceof Error ? error.message : "Unable to generate an answer.",
+          null,
+          performance.now() - startedAt
         )
+
+        replaceChatMessages(targetChat.chatId, [
+          ...(targetChat.messages ?? []),
+          userMessage,
+          fallbackMessage,
+        ])
       } finally {
         setIsThinking(false)
+        setThinkingEvents([])
       }
     },
-    [activeChatId, input, isThinking]
+    [activeChat, input, isThinking, refreshChats, replaceChatMessages]
   )
 
   return (
@@ -134,6 +281,7 @@ export function AgentChatShell() {
       <AgentChatMain
         messages={activeChat?.messages ?? []}
         prompts={PROMPT_POOLS[promptPoolIndex]}
+        thinkingEvents={thinkingEvents}
         input={input}
         onInputChange={setInput}
         onSend={(text) => void handleSend(text)}
@@ -142,6 +290,7 @@ export function AgentChatShell() {
         isDark={isDark}
         userInitials={userInitials}
         activeChatTitle={activeChat?.title}
+        onSourceAccessChanged={() => void refreshActiveMessages()}
       />
     </div>
   )

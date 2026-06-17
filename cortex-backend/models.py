@@ -8,6 +8,7 @@ from sqlalchemy import (
     UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
 from database import Base
@@ -79,6 +80,29 @@ class Chat(Base):
         onupdate=func.now()
     )
 
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    message_id = Column(Integer, primary_key=True, index=True)
+
+    chat_id = Column(
+        Integer,
+        ForeignKey("chats.chat_id"),
+        nullable=False,
+        index=True
+    )
+
+    role = Column(String, nullable=False)
+
+    content = Column(String, nullable=False)
+
+    sources = Column(JSONB, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
 
 
 class Document(Base):

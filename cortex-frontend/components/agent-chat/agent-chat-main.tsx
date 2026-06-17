@@ -2,7 +2,7 @@
 
 import { Settings, Share2, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Message, PromptCard } from "./types"
+import type { Message, PromptCard, ThinkingEvent } from "./types"
 import { AgentChatComposer } from "./agent-chat-composer"
 import { AgentChatThread } from "./agent-chat-thread"
 import { AgentWelcomeView } from "./agent-welcome"
@@ -10,6 +10,7 @@ import { AgentWelcomeView } from "./agent-welcome"
 type AgentChatMainProps = {
   messages: Message[]
   prompts: PromptCard[]
+  thinkingEvents: ThinkingEvent[]
   input: string
   onInputChange: (value: string) => void
   onSend: (text?: string) => void
@@ -18,11 +19,13 @@ type AgentChatMainProps = {
   isDark: boolean
   userInitials: string
   activeChatTitle?: string
+  onSourceAccessChanged?: () => void
 }
 
 export function AgentChatMain({
   messages,
   prompts,
+  thinkingEvents,
   input,
   onInputChange,
   onSend,
@@ -31,6 +34,7 @@ export function AgentChatMain({
   isDark,
   userInitials,
   activeChatTitle,
+  onSourceAccessChanged,
 }: AgentChatMainProps) {
   return (
     <div
@@ -112,8 +116,10 @@ export function AgentChatMain({
         <AgentChatThread
           messages={messages}
           isThinking={isThinking}
+          thinkingEvents={thinkingEvents}
           isDark={isDark}
           userInitials={userInitials}
+          onSourceAccessChanged={onSourceAccessChanged}
         />
       )}
 

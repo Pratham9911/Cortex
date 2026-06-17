@@ -3,9 +3,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
+from document_acl import can_download_document, can_search_document, is_owner_override
 from dependencies import get_current_user
 from sqlalchemy.sql import func
-from models import User, ProjectMember, Document, DocumentVersion , DocumentChunk , Team , Folder, TeamMember
+from models import User, Project, ProjectMember, Document, DocumentVersion , DocumentChunk , Team , Folder, TeamMember
 from supabase_client import supabase
 from routers.audit import create_audit_log
 import re
@@ -370,14 +371,16 @@ def list_documents(
             detail="Access denied"
         )
 
-    user_team_ids: list[int] = []
-    if membership.role != "admin":
-        user_team_ids = [
-            member.team_id
-            for member in db.query(TeamMember).filter(
-                TeamMember.user_id == user_id
-            ).all()
-        ]
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).first()
+
+    user_team_ids = [
+        member.team_id
+        for member in db.query(TeamMember).filter(
+            TeamMember.user_id == user_id
+        ).all()
+    ]
 
     # ----------------------------------------
     # Get all project documents
@@ -405,22 +408,14 @@ def list_documents(
         if not active_version:
             continue
 
-        # ----------------------------------------
-        # Search visibility / ACL checks
-        # ----------------------------------------
-        if membership.role != "admin":
-            is_owner = doc.owner_id == user_id
-            if not is_owner:
-                if doc.search_access_level == "member":
-                    has_team_access = bool(
-                        set(doc.allowed_team_ids or [])
-                        &
-                        set(user_team_ids)
-                    )
-                    if not has_team_access:
-                        continue
-                else:
-                    continue
+        if not can_search_document(
+            project=project,
+            membership=membership,
+            document=doc,
+            user_id=user_id,
+            user_team_ids=user_team_ids
+        ):
+            continue
 
         # ----------------------------------------
         # Folder info
@@ -525,9 +520,13 @@ def upload_new_version(
             detail="Only admin can upload new version"
         )
 
+    project = db.query(Project).filter(
+        Project.project_id == document.project_id
+    ).first()
+
     if (
         document.search_access_level == "none"
-        and document.owner_id != user_id
+        and not is_owner_override(project, document, user_id)
     ):
         raise HTTPException(
             status_code=403,
@@ -776,16 +775,20 @@ def update_document(
             detail="Only admin can update documents"
         )
 
+    project = db.query(Project).filter(
+        Project.project_id == document.project_id
+    ).first()
+
     # ----------------------------------------
-    # Owner-only update rule when search is none
+    # Owner-only/project-owner update rule when search is none
     # ----------------------------------------
     if (
         document.search_access_level == "none"
-        and document.owner_id != user_id
+        and not is_owner_override(project, document, user_id)
     ):
         raise HTTPException(
             status_code=403,
-            detail="Only owner can update this document when search access is none"
+            detail="Only owner or project owner can update this document when search access is none"
         )
 
     changed_fields = []
@@ -1062,49 +1065,30 @@ def download_document(
             detail="Access denied"
         )
 
-    # ----------------------------------------
-    # TEAM ACCESS VALIDATION
-    # Admin bypasses ACL
-    # ----------------------------------------
-    if membership.role != "admin":
+    project = db.query(Project).filter(
+        Project.project_id == document.project_id
+    ).first()
 
-        user_team_ids = [
-            member.team_id
-            for member in db.query(TeamMember).filter(
-                TeamMember.user_id == user_id
-            ).all()
-        ]
-
-        has_access = bool(
-            set(document.allowed_team_ids or [])
-            &
-            set(user_team_ids)
-        )
-
-        if not has_access:
-            raise HTTPException(
-                status_code=403,
-                detail="You do not have access to this document"
-            )
+    user_team_ids = [
+        member.team_id
+        for member in db.query(TeamMember).filter(
+            TeamMember.user_id == user_id
+        ).all()
+    ]
 
     # ----------------------------------------
     # Permission checks
     # ----------------------------------------
-    access = document.download_access_level
-
-    if access == "none":
-        raise HTTPException(
-            status_code=403,
-            detail="Downloads disabled for this document"
-        )
-
-    if (
-        access == "admin"
-        and membership.role != "admin"
+    if not can_download_document(
+        project=project,
+        membership=membership,
+        document=document,
+        user_id=user_id,
+        user_team_ids=user_team_ids
     ):
         raise HTTPException(
             status_code=403,
-            detail="Only admins can download this document"
+            detail="You do not have permission to download this document"
         )
 
     # ----------------------------------------
@@ -1202,9 +1186,13 @@ def delete_document_version(
     if not membership or membership.role != "admin":
         raise HTTPException(status_code=403, detail="Only admin can delete")
 
+    project = db.query(Project).filter(
+        Project.project_id == document.project_id
+    ).first()
+
     if (
         document.search_access_level == "none"
-        and document.owner_id != user_id
+        and not is_owner_override(project, document, user_id)
     ):
         raise HTTPException(
             status_code=403,
@@ -1594,9 +1582,13 @@ def activate_document_version(
     if not membership or membership.role != "admin":
         raise HTTPException(status_code=403, detail="Only admin can activate versions")
 
+    project = db.query(Project).filter(
+        Project.project_id == document.project_id
+    ).first()
+
     if (
         document.search_access_level == "none"
-        and document.owner_id != user_id
+        and not is_owner_override(project, document, user_id)
     ):
         raise HTTPException(
             status_code=403,
@@ -1693,14 +1685,18 @@ def list_document_versions(
             detail="Access denied"
         )
 
+    project = db.query(Project).filter(
+        Project.project_id == document.project_id
+    ).first()
+
     # 2b. Check search access level permissions
     if (
         document.search_access_level == "none"
-        and document.owner_id != user_id
+        and not is_owner_override(project, document, user_id)
     ):
         raise HTTPException(
             status_code=403,
-            detail="Only the document owner can access versions when search access is none."
+            detail="Only the document owner or project owner can access versions when search access is none."
         )
 
     # 3. Retrieve versions

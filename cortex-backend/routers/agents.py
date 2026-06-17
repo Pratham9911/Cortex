@@ -15,7 +15,7 @@ from database import SessionLocal
 from rag.generator import generate_answer
 from rag.agents.answer_validator import validate_answer
 from rag.orchestrator import run_pipeline
-from models import ProjectMember
+from models import ProjectMember, TeamMember
 
 
 from rag.agents.intent import detect_intent
@@ -47,8 +47,21 @@ def sementic_search_route(
         if not membership:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        
-        chunks = semantic_search(query, project_id, membership.role , db)
+        user_team_ids = [
+            member.team_id
+            for member in db.query(TeamMember).filter(
+                TeamMember.user_id == user_id
+            ).all()
+        ]
+
+        chunks = semantic_search(
+            query,
+            project_id,
+            user_id,
+            membership.role,
+            user_team_ids,
+            db
+        )
 
         answer = generate_answer(query, chunks)
 
@@ -86,10 +99,19 @@ def keyword_search_route(
     # ----------------------------------------
     # Keyword retrieval
     # ----------------------------------------
+    user_team_ids = [
+        member.team_id
+        for member in db.query(TeamMember).filter(
+            TeamMember.user_id == user_id
+        ).all()
+    ]
+
     chunks = keyword_search(
         query,
         project_id,
+        user_id,
         membership.role,
+        user_team_ids,
         db
     )
 
@@ -156,8 +178,8 @@ def ask_route_reranked(
         chunks = hybrid_search_with_rerank(
             query,
             project_id,
-            membership.role,
             user_id,
+            membership.role,
             db
          )
 

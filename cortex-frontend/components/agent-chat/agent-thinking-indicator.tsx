@@ -1,26 +1,50 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { THINKING_STEPS } from "./types"
+import { cn } from "@/lib/utils"
+import type { ThinkingEvent } from "./types"
 
-export function AgentThinkingIndicator() {
-  const [step, setStep] = useState(0)
+type AgentThinkingIndicatorProps = {
+  events: ThinkingEvent[]
+  isDark: boolean
+}
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setStep((prev) => (prev + 1) % THINKING_STEPS.length)
-    }, 2000)
-    return () => clearInterval(interval)
-  }, [])
-
+export function AgentThinkingIndicator({
+  events,
+  isDark,
+}: AgentThinkingIndicatorProps) {
   return (
-    <div className="flex items-center gap-2.5 py-1 text-slate-400 dark:text-zinc-500">
-      <span className="flex items-center gap-1 mt-1 shrink-0">
-        <span className="size-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce [animation-delay:-0.3s]"></span>
-        <span className="size-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce [animation-delay:-0.15s]"></span>
-        <span className="size-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce"></span>
-      </span>
-      <p className="thinking-sweep text-[12.5px] font-semibold ml-1.5">{THINKING_STEPS[step]}</p>
+    <div className="w-full py-1">
+      <div className="flex items-center gap-2.5 text-slate-400 dark:text-zinc-500">
+        <span className="flex shrink-0 items-center gap-1">
+          <span className="size-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s] dark:bg-zinc-500"></span>
+          <span className="size-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s] dark:bg-zinc-500"></span>
+          <span className="size-1.5 animate-bounce rounded-full bg-slate-400 dark:bg-zinc-500"></span>
+        </span>
+        <p className="thinking-sweep text-[12.5px] font-semibold">
+          {events.at(-1)?.message || "Starting request..."}
+        </p>
+      </div>
+
+      {events.length > 0 ? (
+        <div
+          className={cn(
+            "mt-3 space-y-1.5 border-l pl-3",
+            isDark ? "border-zinc-800" : "border-slate-200"
+          )}
+        >
+          {events.map((event) => (
+            <div
+              key={event.id}
+              className={cn(
+                "text-[12px] leading-relaxed",
+                isDark ? "text-zinc-450" : "text-slate-500"
+              )}
+            >
+              {event.message}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
