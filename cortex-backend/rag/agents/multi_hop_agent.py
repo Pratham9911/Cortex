@@ -18,94 +18,64 @@ def decompose_query(query: str) -> dict:
     prompt = f"""
 You are a multi-hop query decomposition agent for an enterprise RAG system.
 
-Your job is to break a complex user question into 2 to 5 simpler, independently searchable subqueries.
-Each subquery must have a specific type:
-- "project_knowledge": for questions referencing project documents, internal requirements, specifications, meetings, codebases, or internal architecture.
-- "web_search": for questions requiring external, public domain, or real-time internet knowledge.
+Your job is to break a complex question into independently searchable subqueries.
 
-Rules:
-1. Generate between 2 to 5 subqueries ONLY if the query requires combining multiple pieces of information (comparison, aggregation, difference, relationship, timeline, or cross-source questions).
-2. If the query is simple and does not require decomposition to answer, return exactly 1 query.
-3. Preserve the original meaning and intent. Do not invent new concepts.
-4. Do not answer the question or summarize. Only decompose.
-5. Every subquery must be retrieval-optimized and independently searchable.
-6. Return ONLY valid JSON matching the following schema:
-{{
-    "queries": [
-        {{
-            "type": "project_knowledge" | "web_search",
-            "search_query": "..."
-        }}
-    ]
-}}
-
-Examples:
-
-Input: Compare teacher portal requirements with student portal requirements.
-Output:
-{{
-    "queries": [
-        {{
-            "type": "project_knowledge",
-            "search_query": "teacher portal requirements"
-        }},
-        {{
-            "type": "project_knowledge",
-            "search_query": "student portal requirements"
-        }}
-    ]
-}}
-
-Input: Compare student requirements in BWF with hostel requirements in Jammu and Kashmir.
-Output:
-{{
-    "queries": [
-        {{
-            "type": "project_knowledge",
-            "search_query": "student requirements in BWF"
-        }},
-        {{
-            "type": "web_search",
-            "search_query": "hostel student requirements in Jammu and Kashmir"
-        }}
-    ]
-}}
-
-Input: Compare Glean architecture with Microsoft Copilot architecture.
-Output:
-{{
-    "queries": [
-        {{
-            "type": "web_search",
-            "search_query": "Glean architecture"
-        }},
-        {{
-            "type": "web_search",
-            "search_query": "Microsoft Copilot architecture"
-        }}
-    ]
-}}
-
-Input: What was discussed about the teacher portal in the last meeting?
-Output:
-{{
-    "queries": [
-        {{
-            "type": "project_knowledge",
-            "search_query": "teacher portal discussion last meeting"
-        }}
-    ]
-}}
-
+Types:
+- project_knowledge
+- web_search
 User Query:
 {query}
-"""
+Rules:
+- Preserve the user's intent and comparison dimension.
+- Do not split mechanically.
+- Keep important qualifiers and context.
+- Do not invent new concepts.
+- Return ONLY valid JSON.
+- only split into 2 subquries .
 
+Example:
+
+Input:
+Compare teacher portal requirements with student portal requirements.
+
+Output:
+{{
+  "queries": [
+    {{
+      "type": "project_knowledge",
+      "search_query": "teacher portal requirements"
+    }},
+    {{
+      "type": "project_knowledge",
+      "search_query": "student portal requirements"
+    }}
+  ]
+}}
+
+Input:
+Compare the incident happened to engineers in our company with any similar incident in India.
+
+Output:
+{{
+  "queries": [
+    {{
+      "type": "project_knowledge",
+      "search_query": "engineering incident involving engineers in our company"
+    }},
+    {{
+      "type": "web_search",
+      "search_query": "major engineering incident in India"
+    }}
+  ]
+}}
+
+
+"""
     VALID_FALLBACK = {
         "queries": [
             {
                 "type": "project_knowledge",
-                "search_query": query
+                "search_query": "Fallback to :"+query
             }
         ]
     }

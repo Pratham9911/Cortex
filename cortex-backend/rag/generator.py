@@ -1,11 +1,13 @@
 import os
+import json
+import urllib.request
 
-from groq import Groq
 
-
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
+FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
+FIREWORKS_CHAT_COMPLETIONS_URL = (
+    "https://api.fireworks.ai/inference/v1/chat/completions"
 )
+FIREWORKS_GENERATOR_MODEL = "accounts/fireworks/models/gpt-oss-120b"
 
 
 def generate_answer(query: str, chunks):
@@ -34,17 +36,36 @@ User Question:
 {query}
 """
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
+    if not FIREWORKS_API_KEY:
+        raise RuntimeError("FIREWORKS_API_KEY environment variable is required")
+
+    payload = {
+        "model": FIREWORKS_GENERATOR_MODEL,
+        "messages": [
             {
                 "role": "user",
                 "content": prompt
             }
         ],
-        temperature=0
+        "temperature": 0
+    }
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {FIREWORKS_API_KEY}"
+    }
+
+    request = urllib.request.Request(
+        FIREWORKS_CHAT_COMPLETIONS_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST"
     )
 
-    return response.choices[0].message.content
+    with urllib.request.urlopen(request, timeout=60) as response:
+        response_data = json.loads(response.read().decode("utf-8"))
+
+    return response_data["choices"][0]["message"]["content"]
 
 

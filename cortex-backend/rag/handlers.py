@@ -180,35 +180,24 @@ User Query:
 
 Instructions:
 
-STEP 1:
-Extract the requirements explicitly mentioned in Project Context.
+1. Extract the most relevant information from Project Context.
+2. Extract the most relevant information from Web Context.
+3. Compare them when comparison is possible.
+4. If direct comparison is not possible, provide the key findings from each source separately.
+5. Clearly distinguish:
+   - Similarities
+   - Differences
+   - Project-only findings
+   - Web-only findings
+6. When evidence is insufficient, explicitly state the limitation.
+7. Use only the provided context.
+8. Never invent facts or claim evidence that is not present.
 
-STEP 2:
-Extract the requirements explicitly mentioned in Web Context.
+The goal is to be helpful and informative, not to reject the question simply because an exact comparison is unavailable.
 
-STEP 3:
-Create a comparison table with columns:
-- Requirement
-- Present in Project Context
-- Present in Web Context
-- Evidence
-
-STEP 4:
-Identify:
-- Common requirements
-- Project-only requirements
-- Web-only requirements
-- Contradictions
-
-STEP 5:
-Answer the user's question based only on the extracted evidence.
-
-Rules:
-- Never infer a requirement.
-- Never claim a feature exists unless explicitly stated.
-- If evidence is missing, state "Not mentioned".
-- Return only the final answer.
+Return only the final answer.
 """
+    
     if not FIREWORKS_API_KEY:
         raise RuntimeError("FIREWORKS_API_KEY environment variable is required")
 
@@ -341,24 +330,9 @@ def handle_multi_hop(
     }
 
     answer = generate_multi_hop_answer(query, merged_chunks, web_contexts)
-
-    # ── 4. Validation ──
-    yield {
-        "type": "status",
-        "step": "validation",
-        "message": "Checking response quality..."
-    }
-
-    validation = validate_answer(query, answer)
-
-    yield {
-        "type": "debug",
-        "step": "validation",
-        "decision": validation["decision"]
-    }
-
-    # ── 5. Emit final answer ──
-    # Clean up sources list to ensure no duplicate web sources
+    print("Multi-hop final answer generated.")
+    print("answer:", answer)
+    # Deduplicate web sources before emitting the final multi-hop answer.
     unique_web_sources = []
     seen_urls = set()
     for src in merged_web_sources:
@@ -367,24 +341,13 @@ def handle_multi_hop(
             seen_urls.add(url)
             unique_web_sources.append(src)
 
-    if validation["decision"] == "no":
-        yield {
-            "type": "final",
-            "intent": "multi_hop",
-            "answer": validation["user_response"],
-            "validation": validation,
-            "chunks": format_chunks_for_debug(merged_chunks),
-            "sources": unique_web_sources
-        }
-    else:
-        yield {
-            "type": "final",
-            "intent": "multi_hop",
-            "answer": answer,
-            "validation": validation,
-            "chunks": format_chunks_for_debug(merged_chunks),
-            "sources": unique_web_sources
-        }
+    yield {
+        "type": "final",
+        "intent": "multi_hop",
+        "answer": answer,
+        "chunks": format_chunks_for_debug(merged_chunks),
+        "sources": unique_web_sources
+    }
 
 
 def handle_project_knowledge(
