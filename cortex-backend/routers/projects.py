@@ -242,7 +242,8 @@ def delete_project(
         ProjectAuditLog,
         InboxMessage,
         TeamMember,
-        Team
+        Team,
+        Chat
     )
 
     from supabase_client import supabase
@@ -366,6 +367,13 @@ def delete_project(
     # ----------------------------------------
     db.query(InboxMessage).filter(
         InboxMessage.related_project_id == project_id
+    ).delete(synchronize_session=False)
+
+    # ----------------------------------------
+    # Delete chats
+    # ----------------------------------------
+    db.query(Chat).filter(
+        Chat.project_id == project_id
     ).delete(synchronize_session=False)
 
     # ----------------------------------------

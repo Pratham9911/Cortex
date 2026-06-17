@@ -47,6 +47,38 @@ class ProjectMember(Base):
     )
 
 
+class Chat(Base):
+    __tablename__ = "chats"
+
+    chat_id = Column(Integer, primary_key=True, index=True)
+
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id"),
+        nullable=False,
+        index=True
+    )
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False,
+        index=True
+    )
+
+    title = Column(String, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
 
 
 class Document(Base):
