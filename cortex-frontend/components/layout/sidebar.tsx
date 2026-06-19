@@ -10,7 +10,7 @@ import {
   Search, Inbox, Bell, LayoutGrid, BarChart3, LineChart,
   Bot, FileText, Receipt, Building2, Trash2, Sparkles,
   Sliders, Moon, Sun, Palette, HelpCircle, ChevronsUpDown,
-  PanelLeftClose, LogOut, User, X, Settings
+  PanelLeftClose, PanelLeftOpen, LogOut, User, X, Settings
 } from "lucide-react"
 
 interface SidebarProps {
@@ -22,15 +22,15 @@ interface SidebarProps {
 }
 
 const MENU_ITEMS = [
-  { id: "Dashboard",  label: "Dashboard",        icon: LayoutGrid },
-  { id: "Analytics",  label: "Analytics",        icon: BarChart3  },
-  { id: "Reporting",  label: "Reporting",        icon: LineChart  },
-  { id: "Agent",      label: "AI Agent",         icon: Bot        },
-  { id: "Documents",  label: "Documents",        icon: FileText   },
-  { id: "Projects",   label: "Projects",         icon: Receipt    },
+  { id: "Dashboard", label: "Dashboard", icon: LayoutGrid },
+  { id: "Analytics", label: "Analytics", icon: BarChart3 },
+  { id: "Reporting", label: "Reporting", icon: LineChart },
+  { id: "Agent", label: "AI Agent", icon: Bot },
+  { id: "Documents", label: "Documents", icon: FileText },
+  { id: "Projects", label: "Projects", icon: Receipt },
   { id: "ProjectSettings", label: "Project settings", icon: Settings },
-  { id: "Teams",      label: "Teams",            icon: Building2  },
-  { id: "Trash",      label: "Trash",            icon: Trash2     },
+  { id: "Teams", label: "Teams", icon: Building2 },
+  { id: "Trash", label: "Trash", icon: Trash2 },
 ]
 
 /* ─── Shared inner content used by both desktop & mobile ─── */
@@ -43,14 +43,14 @@ function SidebarContent({
   setIsCollapsed: (v: boolean) => void
   setIsMobileOpen: (v: boolean) => void
 }) {
-  const router                      = useRouter()
-  const pathname                    = usePathname()
-  const { user, logout }              = useAuth()
-  const { theme, setTheme }           = useTheme()
-  const [mounted, setMounted]         = useState(false)
-  const [active, setActive]           = useState("Dashboard")
+  const router = useRouter()
+  const pathname = usePathname()
+  const { user, logout } = useAuth()
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  const [active, setActive] = useState("Dashboard")
   const [profileOpen, setProfileOpen] = useState(false)
-  const profileRef                    = useRef<HTMLDivElement>(null)
+  const profileRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -64,17 +64,22 @@ function SidebarContent({
     return () => document.removeEventListener("mousedown", handler)
   }, [])
 
+  // Close profile popup when sidebar collapses
+  useEffect(() => {
+    if (isCollapsed) setProfileOpen(false)
+  }, [isCollapsed])
+
   const isDark = mounted && theme === "dark"
 
-  const divider    = isDark ? "bg-zinc-800"  : "bg-zinc-200"
-  const navText    = isDark ? "text-zinc-300" : "text-zinc-600"
+  const divider = isDark ? "bg-zinc-800" : "bg-zinc-200"
+  const navText = isDark ? "text-zinc-300" : "text-zinc-600"
   const activeCard = isDark
     ? "bg-[#26262b] border border-zinc-700 text-white"
     : "bg-zinc-100 border border-zinc-200 text-zinc-900"
-  const hoverRow   = isDark
+  const hoverRow = isDark
     ? "hover:bg-[#26262b] hover:text-white"
     : "hover:bg-zinc-100 hover:text-zinc-900"
-  const badgeBg    = isDark ? "bg-zinc-800 text-zinc-400" : "bg-zinc-100 text-zinc-500"
+  const badgeBg = isDark ? "bg-zinc-800 text-zinc-400" : "bg-zinc-100 text-zinc-500"
 
   const handleNav = (id: string) => {
     setActive(id)
@@ -143,7 +148,12 @@ function SidebarContent({
     setProfileOpen((open) => !open)
   }
 
-  /* ── Generic nav row ── */
+  /* ── Generic nav row ──
+   * Key design: icon is always in a fixed 16px box on the left.
+   * The label sits in an overflow-hidden container. When collapsed,
+   * the parent's width is just 44px (icon + padding) so text is
+   * naturally clipped – NO max-w / opacity transition on the text.
+   * This prevents any icon shifting during collapse/expand. */
   const NavRow = ({
     id, label, icon: Icon, badge, onClick,
   }: {
@@ -155,23 +165,17 @@ function SidebarContent({
         onClick={onClick ?? (() => handleNav(id))}
         title={isCollapsed ? label : undefined}
         className={cn(
-          "w-full flex items-center justify-between gap-3 overflow-hidden rounded-lg px-2.5 py-2 h-9 text-xs font-semibold transition-colors duration-150 outline-none",
+          "w-full flex items-center gap-3 rounded-lg px-2.5 h-9 text-xs font-semibold transition-colors duration-150 outline-none",
           isActive ? activeCard : cn(navText, hoverRow)
         )}
       >
-        <span className="flex min-w-0 items-center gap-3">
-          <Icon className="w-4 h-4 shrink-0" />
-          <span
-            className={cn(
-              "overflow-hidden truncate whitespace-nowrap transition-all duration-300 ease-in-out",
-              isCollapsed ? "max-w-0 opacity-0" : "max-w-[180px] opacity-100"
-            )}
-          >
-            {label}
-          </span>
-        </span>
-        {!isCollapsed && badge && (
-          <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", badgeBg)}>
+        <Icon className="w-4 h-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+        {badge && (
+          <span className={cn(
+            "text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0",
+            badgeBg
+          )}>
             {badge}
           </span>
         )}
@@ -185,12 +189,13 @@ function SidebarContent({
       {/* ── TOP ── */}
       <div className="flex flex-col gap-3">
 
-        {/* Logo + collapse */}
-        <div className="flex items-center justify-between overflow-hidden px-1 py-0.5">
-          <div className="flex min-w-0 items-center gap-2">
+        {/* Logo + collapse toggle */}
+        <div className="flex items-center h-8 overflow-hidden">
+          {/* Left cluster: logo + brand name */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
-              className="relative w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-zinc-400/20 hover:opacity-80 transition-opacity"
+              className="relative w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-zinc-400/20 hover:opacity-80 transition-all ml-[2px]"
               title={isCollapsed ? "Open sidebar" : "Collapse sidebar"}
             >
               <Image
@@ -206,19 +211,26 @@ function SidebarContent({
                 setIsMobileOpen(false)
               }}
               className={cn(
-                "overflow-hidden whitespace-nowrap font-extrabold text-sm tracking-tight hover:opacity-80 transition-all duration-300 ease-in-out",
-                isCollapsed ? "max-w-0 opacity-0" : "max-w-[120px] opacity-100",
-                isDark ? "text-white" : "text-zinc-950"
+                "overflow-hidden whitespace-nowrap font-extrabold text-sm tracking-tight hover:opacity-80 truncate",
+                isDark ? "text-white" : "text-zinc-950",
+                isCollapsed && "hidden"
               )}
             >
               Cortex
             </button>
           </div>
+          {/* Right: collapse/expand icon */}
           {!isCollapsed && (
             <button
-              onClick={() => setIsCollapsed(true)}
+              onClick={() => {
+                setIsCollapsed(true)
+                setProfileOpen(false)
+              }}
               title="Collapse"
-              className={cn("p-1.5 rounded-md border transition-all hover:opacity-80", isDark ? "border-zinc-700 text-zinc-400" : "border-zinc-200 text-zinc-500")}
+              className={cn(
+                "p-1.5 rounded-md border shrink-0 transition-colors hover:opacity-80",
+                isDark ? "border-zinc-700 text-zinc-400" : "border-zinc-200 text-zinc-500"
+              )}
             >
               <PanelLeftClose className="w-3.5 h-3.5" />
             </button>
@@ -227,34 +239,28 @@ function SidebarContent({
 
         {/* Quick search */}
         <button className={cn(
-          "flex h-9 items-center gap-2.5 overflow-hidden rounded-lg border px-3 text-xs font-medium transition-colors",
+          "flex h-9 items-center gap-3 rounded-lg border px-2.5 text-xs font-medium transition-colors",
           isDark
             ? "bg-[#26262b] border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-[#2d2d33]"
             : "bg-zinc-50 border-zinc-200 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100"
         )}>
           <Search className="w-3.5 h-3.5 shrink-0" />
-          <span
-            className={cn(
-              "overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out",
-              isCollapsed ? "max-w-0 opacity-0" : "max-w-[140px] opacity-100"
-            )}
-          >
-            Quick search
-          </span>
+          <span className="truncate">Quick search</span>
         </button>
 
         {/* Inbox + Notifications */}
         <div className="flex flex-col gap-0.5">
-          <NavRow id="Inbox"         label="Inbox"         icon={Inbox} badge="12"  onClick={() => handleNav("Inbox")} />
-          <NavRow id="Notifications" label="Notifications" icon={Bell}  badge="15+" onClick={() => handleNav("Notifications")} />
+          <NavRow id="Inbox" label="Inbox" icon={Inbox} badge="12" onClick={() => handleNav("Inbox")} />
+          <NavRow id="Notifications" label="Notifications" icon={Bell} badge="15+" onClick={() => handleNav("Notifications")} />
         </div>
 
         {/* Divider + Menu label */}
         <div>
           <div className={cn("h-px w-full", divider)} />
-          {!isCollapsed && (
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-2.5 mb-1 px-1">Menu</p>
-          )}
+          <p className={cn(
+            "text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-2.5 mb-1 px-1 truncate whitespace-nowrap transition-opacity",
+            isCollapsed && "opacity-0"
+          )}>Menu</p>
         </div>
 
         {/* Main nav */}
@@ -293,8 +299,8 @@ function SidebarContent({
                   icon={isDark ? Sun : Moon}
                   onClick={() => setTheme(isDark ? "light" : "dark")}
                 />
-                <NavRow id="Themes" label="Themes" icon={Palette}    />
-                <NavRow id="Help"   label="Help"   icon={HelpCircle} />
+                <NavRow id="Themes" label="Themes" icon={Palette} />
+                <NavRow id="Help" label="Help" icon={HelpCircle} />
               </div>
 
               {/* Upgrade card */}
@@ -340,58 +346,58 @@ function SidebarContent({
             </div>
           )}
 
-          {/* Profile trigger button — always visible */}
-          <button
-            onClick={handleProfileTrigger}
-            className={cn(
-              "w-full flex items-center overflow-visible rounded-xl border transition-colors",
-              isCollapsed ? "h-11 justify-center p-1.5" : "h-12 justify-between gap-2.5 p-2",
-              profileOpen
-                ? isDark ? "bg-[#26262b] border-zinc-600 text-white"   : "bg-zinc-100 border-zinc-300 text-zinc-900"
-                : isDark ? "bg-[#1e1e21] border-zinc-800 hover:bg-[#26262b] hover:border-zinc-700 text-white"
-                         : "bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-900"
-            )}
-          >
-            <span className={cn(
-              "flex min-w-0 items-center overflow-visible",
-              isCollapsed ? "justify-center gap-0" : "gap-2"
-            )}>
-              {user?.avatar_url ? (
-                <img
-                  src={user.avatar_url}
-                  alt={user.name || "User Avatar"}
-                  className="w-7 h-7 rounded-full object-cover shrink-0"
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none"
-                    const fallback = e.currentTarget.nextElementSibling as HTMLElement
-                    if (fallback) fallback.style.display = "flex"
-                  }}
-                />
-              ) : null}
-              <span
-                className="w-7 h-7 rounded-full bg-zinc-600 text-white text-[11px] font-extrabold flex items-center justify-center shrink-0 select-none uppercase"
-                style={user?.avatar_url ? { display: "none" } : {}}
-              >
-                {user?.name ? user.name.slice(0, 2) : "CX"}
+          {/* Profile trigger button wrapper — fixed height prevents vertical jumping */}
+          <div className="h-12 flex items-center w-full">
+            <button
+              onClick={handleProfileTrigger}
+              title={isCollapsed ? (user?.name ?? "Profile") : undefined}
+              className={cn(
+                "w-full flex items-center gap-2.5 transition-all duration-300",
+                isCollapsed ? "rounded-full border-transparent h-9 px-1" : "rounded-xl border h-12 pl-1 pr-1",
+                profileOpen
+                  ? isDark ? "bg-[#26262b] border-zinc-600 text-white" : "bg-zinc-100 border-zinc-300 text-zinc-900"
+                  : isDark ? "bg-[#1e1e21] border-zinc-800 hover:bg-[#26262b] hover:border-zinc-700 text-white"
+                    : "bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-900"
+              )}
+            >
+              {/* Avatar — always in same spot */}
+              <span className="shrink-0">
+                {user?.avatar_url ? (
+                  <img
+                    src={user.avatar_url}
+                    alt={user.name || "User Avatar"}
+                    className="w-7 h-7 rounded-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none"
+                      const fallback = e.currentTarget.nextElementSibling as HTMLElement
+                      if (fallback) fallback.style.display = "flex"
+                    }}
+                  />
+                ) : null}
+                <span
+                  className="w-7 h-7 rounded-full bg-zinc-600 text-white text-[11px] font-extrabold flex items-center justify-center select-none uppercase"
+                  style={user?.avatar_url ? { display: "none" } : {}}
+                >
+                  {user?.name ? user.name.slice(0, 2) : "CX"}
+                </span>
               </span>
-              <span
-                className={cn(
-                  "flex flex-col overflow-hidden text-left transition-all duration-300 ease-in-out",
-                  isCollapsed ? "max-w-0 opacity-0" : "max-w-[130px] opacity-100"
-                )}
-              >
-                  <span className="text-xs font-extrabold truncate max-w-[110px] leading-tight">
-                    {user?.name ?? "Cortex User"}
-                  </span>
-                  <span className="text-[9px] text-zinc-500 font-semibold uppercase tracking-wide">Pro trial</span>
+
+              {/* Name + plan — disappears instantly when collapsed */}
+              <span className={cn("flex flex-col min-w-0 flex-1 overflow-hidden text-left", isCollapsed && "hidden")}>
+                <span className="text-xs font-extrabold truncate leading-tight">
+                  {user?.name ?? "Cortex User"}
+                </span>
+                <span className="text-[9px] text-zinc-500 font-semibold uppercase tracking-wide">Pro trial</span>
               </span>
-            </span>
-            <ChevronsUpDown className={cn(
-                "h-3.5 shrink-0 text-zinc-400 transition-all duration-200",
-                isCollapsed ? "w-0 opacity-0" : "w-3.5 opacity-100",
-                profileOpen && "rotate-180"
+
+              {/* Chevron — also just clips away */}
+              <ChevronsUpDown className={cn(
+                "w-3.5 h-3.5 shrink-0 text-zinc-400",
+                profileOpen && "rotate-180",
+                isCollapsed && "hidden"
               )} />
-          </button>
+            </button>
+          </div>
 
         </div>
       </div>
@@ -409,8 +415,8 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
 
   const effectiveCollapsed = agentMode ? !hoverExpanded : isCollapsed
   const desktopWidth = agentMode
-    ? hoverExpanded ? "w-[260px]" : "w-[68px]"
-    : isCollapsed ? "w-[68px]" : "w-[260px]"
+    ? hoverExpanded ? "w-[260px]" : "w-[60px]"
+    : isCollapsed ? "w-[60px]" : "w-[260px]"
 
   useEffect(() => {
     if (!isMobileOpen) return
@@ -422,7 +428,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
   }, [isMobileOpen])
 
   const panelClass = cn(
-    "h-full flex flex-col overflow-x-hidden overflow-y-auto p-3 font-quicksand",
+    "h-full flex flex-col overflow-hidden p-3 font-quicksand",
     isDark ? "bg-[#121215] border-zinc-800" : "bg-[#f7f7f8] border-zinc-200"
   )
 
@@ -466,7 +472,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
               <X className="w-4 h-4" />
             </button>
             <div className="h-full p-3 overflow-y-scroll overscroll-contain touch-pan-y" style={{ fontWeight: 400 }}>
-              <SidebarContent isCollapsed={false} setIsCollapsed={() => {}} setIsMobileOpen={setIsMobileOpen} />
+              <SidebarContent isCollapsed={false} setIsCollapsed={() => { }} setIsMobileOpen={setIsMobileOpen} />
             </div>
           </aside>
         </div>

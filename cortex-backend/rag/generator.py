@@ -10,6 +10,8 @@ FIREWORKS_CHAT_COMPLETIONS_URL = (
 FIREWORKS_GENERATOR_MODEL = "accounts/fireworks/models/gpt-oss-120b"
 
 
+
+
 def generate_answer(query: str, chunks):
 
     context = "\n\n".join(
@@ -23,8 +25,9 @@ Your task is to answer the user's question using ONLY the provided project conte
 
 Instructions:
 - Give detailed and well-structured answers.
+- MUST format your response using standard Markdown (e.g., tables, headings like ###, **bold text**, blockquotes, and lists).
 - Combine information from multiple retrieved chunks if needed.
-- Use bullet points when appropriate.
+- Use bullet points or tables when comparing or listing multiple items.
 - Explain clearly and professionally.
 - Do not invent information outside the provided context.
 - If information is missing, explicitly say so.

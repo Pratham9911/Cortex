@@ -26,6 +26,7 @@ export type WebSource = {
   url: string
   favicon?: string | null
   snippet?: string | null
+  score?: number | null
 }
 
 export type DocumentSource = {

@@ -5,17 +5,18 @@ from groq import Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # System prompt used on the first attempt.
-# Keeps the answer focused so Groq doesn't over-fetch web content.
+# Keeps the answer focused and structured beautifully.
 _CONCISE_SYSTEM = (
     "You are a helpful assistant with web search access. "
-    "Answer the user's question accurately and concisely. "
-    "Keep your response under 400 words. "
+    "Answer the user's question accurately and format your response using rich standard Markdown "
+    "(such as **bold text**, tables, bulleted or numbered lists, blockquotes, and headings like ###). "
+    "Make the layout visually clean and highly structured. Keep your response under 400 words. "
     "Do not repeat search snippets verbatim."
 )
 
 # Tighter prompt used on the 413 retry — forces Groq to fetch less.
 _TIGHTER_SYSTEM = (
-    "Answer in 3-5 sentences maximum. Be extremely brief."
+    "Answer in 3-5 sentences maximum using clean standard Markdown (e.g. lists, bold text). Be brief."
 )
 
 # Fallback model used when compound search itself is too large.
@@ -103,15 +104,49 @@ def _extract_sources(message) -> list:
             title   = d.get("title", "")
             url     = d.get("url", "")
             snippet = d.get("content", "") or d.get("snippet", "")
+            score   = d.get("score", 0.0)
 
             if title or url:
                 sources.append({
                     "title":   str(title)[:200],
                     "url":     str(url),
                     "snippet": str(snippet)[:300],
+                    "score":   float(score) if score is not None else 0.0
                 })
 
+    import re
+    if not sources and getattr(message, "reasoning", None):
+        reasoning = message.reasoning
+        blocks = re.split(r'Title:', reasoning)
+        for block in blocks[1:]:
+            lines = block.strip().split('\n')
+            if not lines: continue
+            title = lines[0].strip()
+            url = ""
+            snippet = ""
+            score = 0.0
+            
+            for line in lines[1:]:
+                line = line.strip()
+                if line.startswith('URL:'):
+                    url = line[4:].strip()
+                elif line.startswith('Content:'):
+                    snippet = line[8:].strip()
+                elif line.startswith('Score:'):
+                    try:
+                        score = float(line[6:].strip())
+                    except ValueError:
+                        pass
+            
+            if title or url:
+                sources.append({
+                    "title": str(title)[:200],
+                    "url": str(url),
+                    "snippet": str(snippet)[:300],
+                    "score": float(score)
+                })
 
+    sources.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
     return sources
 
@@ -221,5 +256,7 @@ def run_groq_web_search(query: str):
     # ── Emit final answer ─────────────────────────────────────────────
     yield {
         "type": "final",
-        "answer": message.content or ""
+        "intent": "web_search",
+        "answer": message.content or "",
+        "sources": sources
     }

@@ -161,7 +161,8 @@ def _normalize_web_sources(raw_sources: list) -> list[dict]:
             "title": source.get("title") or url,
             "url": url,
             "favicon": source.get("favicon"),
-            "snippet": source.get("snippet")
+            "snippet": source.get("snippet"),
+            "score": source.get("score")
         })
 
     return normalized

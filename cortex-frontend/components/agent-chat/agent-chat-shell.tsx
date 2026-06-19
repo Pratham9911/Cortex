@@ -254,9 +254,15 @@ export function AgentChatShell() {
             finalAnswer = event.answer || ""
 
             const latencyMs = performance.now() - startedAt
+            
+            // Map the flat sources array from the event into the MessageSources shape expected by the UI
+            const sourcesData = Array.isArray(event.sources) && event.sources.length > 0 
+              ? { web: event.sources } 
+              : null;
+
             const assistantMessage = optimisticAssistantMessage(
               finalAnswer,
-              null,
+              sourcesData,
               latencyMs
             )
 

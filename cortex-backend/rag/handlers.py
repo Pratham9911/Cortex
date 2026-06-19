@@ -206,6 +206,7 @@ Instructions:
 6. When evidence is insufficient, explicitly state the limitation.
 7. Use only the provided context.
 8. Never invent facts or claim evidence that is not present.
+9. MUST format your response using standard Markdown (e.g. tables for comparisons, bold text for emphasis, bulleted or numbered lists, and headings like ### to organize sections).
 
 The goal is to be helpful and informative, not to reject the question simply because an exact comparison is unavailable.
 
