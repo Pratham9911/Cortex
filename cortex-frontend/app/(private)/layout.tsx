@@ -86,6 +86,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
   }
 
   const isDark = mounted && theme === "dark"
+  const sidebarOffset = isAgentRoute || isCollapsed ? 68 : 260
 
   return (
     <ProtectedRoute>
@@ -106,10 +107,12 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
 
         <div
           className={cn(
-            "flex-1 flex flex-col min-h-screen transition-all duration-300 ease-in-out",
-            isAgentRoute ? "md:pl-[68px]" : isCollapsed ? "md:pl-[68px]" : "md:pl-[260px]",
-            "pl-0"
+            "flex-1 flex flex-col min-h-screen transition-[padding-left] duration-300 ease-in-out",
+            "pl-0 md:pl-[var(--sidebar-offset)]"
           )}
+          style={{
+            "--sidebar-offset": `${mounted ? sidebarOffset : 260}px`,
+          } as React.CSSProperties}
         >
           {!isAgentRoute && (
           <header

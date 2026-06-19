@@ -155,14 +155,20 @@ function SidebarContent({
         onClick={onClick ?? (() => handleNav(id))}
         title={isCollapsed ? label : undefined}
         className={cn(
-          "w-full flex items-center rounded-lg text-xs font-semibold transition-all duration-150 outline-none",
-          isCollapsed ? "justify-center p-2 h-9" : "gap-3 px-2.5 py-2 h-9 justify-between",
+          "w-full flex items-center justify-between gap-3 overflow-hidden rounded-lg px-2.5 py-2 h-9 text-xs font-semibold transition-colors duration-150 outline-none",
           isActive ? activeCard : cn(navText, hoverRow)
         )}
       >
-        <span className="flex items-center gap-3">
+        <span className="flex min-w-0 items-center gap-3">
           <Icon className="w-4 h-4 shrink-0" />
-          {!isCollapsed && <span className="truncate">{label}</span>}
+          <span
+            className={cn(
+              "overflow-hidden truncate whitespace-nowrap transition-all duration-300 ease-in-out",
+              isCollapsed ? "max-w-0 opacity-0" : "max-w-[180px] opacity-100"
+            )}
+          >
+            {label}
+          </span>
         </span>
         {!isCollapsed && badge && (
           <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", badgeBg)}>
@@ -180,8 +186,8 @@ function SidebarContent({
       <div className="flex flex-col gap-3">
 
         {/* Logo + collapse */}
-        <div className={cn("flex items-center py-0.5", isCollapsed ? "justify-center" : "justify-between px-1")}>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between overflow-hidden px-1 py-0.5">
+          <div className="flex min-w-0 items-center gap-2">
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
               className="relative w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-zinc-400/20 hover:opacity-80 transition-opacity"
@@ -194,17 +200,19 @@ function SidebarContent({
                 className={cn("object-contain", !isDark && "invert")}
               />
             </button>
-            {!isCollapsed && (
-              <button
-                onClick={() => {
-                  router.push("/workspace")
-                  setIsMobileOpen(false)
-                }}
-                className={cn("font-extrabold text-sm tracking-tight hover:opacity-80 transition-opacity", isDark ? "text-white" : "text-zinc-950")}
-              >
-                Cortex
-              </button>
-            )}
+            <button
+              onClick={() => {
+                router.push("/workspace")
+                setIsMobileOpen(false)
+              }}
+              className={cn(
+                "overflow-hidden whitespace-nowrap font-extrabold text-sm tracking-tight hover:opacity-80 transition-all duration-300 ease-in-out",
+                isCollapsed ? "max-w-0 opacity-0" : "max-w-[120px] opacity-100",
+                isDark ? "text-white" : "text-zinc-950"
+              )}
+            >
+              Cortex
+            </button>
           </div>
           {!isCollapsed && (
             <button
@@ -219,14 +227,20 @@ function SidebarContent({
 
         {/* Quick search */}
         <button className={cn(
-          "flex items-center rounded-lg border transition-all text-xs font-medium",
-          isCollapsed ? "justify-center p-2 h-9" : "gap-2.5 px-3 h-9",
+          "flex h-9 items-center gap-2.5 overflow-hidden rounded-lg border px-3 text-xs font-medium transition-colors",
           isDark
             ? "bg-[#26262b] border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-[#2d2d33]"
             : "bg-zinc-50 border-zinc-200 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100"
         )}>
           <Search className="w-3.5 h-3.5 shrink-0" />
-          {!isCollapsed && <span>Quick search</span>}
+          <span
+            className={cn(
+              "overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out",
+              isCollapsed ? "max-w-0 opacity-0" : "max-w-[140px] opacity-100"
+            )}
+          >
+            Quick search
+          </span>
         </button>
 
         {/* Inbox + Notifications */}
@@ -330,15 +344,18 @@ function SidebarContent({
           <button
             onClick={handleProfileTrigger}
             className={cn(
-              "w-full flex items-center rounded-xl border transition-all",
-              isCollapsed ? "justify-center p-1.5 h-11" : "gap-2.5 p-2 h-12 justify-between",
+              "w-full flex items-center overflow-visible rounded-xl border transition-colors",
+              isCollapsed ? "h-11 justify-center p-1.5" : "h-12 justify-between gap-2.5 p-2",
               profileOpen
                 ? isDark ? "bg-[#26262b] border-zinc-600 text-white"   : "bg-zinc-100 border-zinc-300 text-zinc-900"
                 : isDark ? "bg-[#1e1e21] border-zinc-800 hover:bg-[#26262b] hover:border-zinc-700 text-white"
                          : "bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-900"
             )}
           >
-            <span className="flex items-center gap-2 overflow-hidden">
+            <span className={cn(
+              "flex min-w-0 items-center overflow-visible",
+              isCollapsed ? "justify-center gap-0" : "gap-2"
+            )}>
               {user?.avatar_url ? (
                 <img
                   src={user.avatar_url}
@@ -357,21 +374,23 @@ function SidebarContent({
               >
                 {user?.name ? user.name.slice(0, 2) : "CX"}
               </span>
-              {!isCollapsed && (
-                <span className="flex flex-col text-left overflow-hidden">
+              <span
+                className={cn(
+                  "flex flex-col overflow-hidden text-left transition-all duration-300 ease-in-out",
+                  isCollapsed ? "max-w-0 opacity-0" : "max-w-[130px] opacity-100"
+                )}
+              >
                   <span className="text-xs font-extrabold truncate max-w-[110px] leading-tight">
                     {user?.name ?? "Cortex User"}
                   </span>
                   <span className="text-[9px] text-zinc-500 font-semibold uppercase tracking-wide">Pro trial</span>
-                </span>
-              )}
+              </span>
             </span>
-            {!isCollapsed && (
-              <ChevronsUpDown className={cn(
-                "w-3.5 h-3.5 shrink-0 text-zinc-400 transition-transform duration-200",
+            <ChevronsUpDown className={cn(
+                "h-3.5 shrink-0 text-zinc-400 transition-all duration-200",
+                isCollapsed ? "w-0 opacity-0" : "w-3.5 opacity-100",
                 profileOpen && "rotate-180"
               )} />
-            )}
           </button>
 
         </div>
@@ -403,7 +422,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
   }, [isMobileOpen])
 
   const panelClass = cn(
-    "h-full flex flex-col p-3 overflow-y-auto font-quicksand",
+    "h-full flex flex-col overflow-x-hidden overflow-y-auto p-3 font-quicksand",
     isDark ? "bg-[#121215] border-zinc-800" : "bg-[#f7f7f8] border-zinc-200"
   )
 
@@ -414,7 +433,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
         onMouseEnter={agentMode ? () => setHoverExpanded(true) : undefined}
         onMouseLeave={agentMode ? () => setHoverExpanded(false) : undefined}
         className={cn(
-          "hidden md:block fixed top-0 left-0 h-screen border-r transition-all duration-300 ease-in-out",
+          "hidden md:block fixed top-0 left-0 h-screen overflow-hidden border-r transition-[width] duration-300 ease-in-out",
           desktopWidth,
           agentMode && hoverExpanded ? "z-50 shadow-2xl" : "z-40",
           isDark ? "border-zinc-800" : "border-zinc-200"

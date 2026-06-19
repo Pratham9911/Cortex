@@ -5,9 +5,11 @@ import { useTheme } from "next-themes"
 import { useAuth } from "@/components/auth/protected-route"
 import {
   createChat,
+  deleteChat,
   listChats,
   listMessages,
   streamChatAsk,
+  updateChatTitle,
 } from "@/lib/ai-agent"
 import { cn } from "@/lib/utils"
 import { AgentChatMain } from "./agent-chat-main"
@@ -153,6 +155,44 @@ export function AgentChatShell() {
     [chats, replaceChatMessages]
   )
 
+  const handleRenameChat = useCallback(
+    async (chatId: number, title: string) => {
+      const updatedChat = await updateChatTitle(chatId, title)
+
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.chatId === chatId
+            ? {
+                ...chat,
+                title: updatedChat.title,
+                avatarLetter: updatedChat.avatarLetter,
+              }
+            : chat
+        )
+      )
+    },
+    []
+  )
+
+  const handleDeleteChat = useCallback(
+    async (chatId: number) => {
+      await deleteChat(chatId)
+
+      setChats((prev) => prev.filter((chat) => chat.chatId !== chatId))
+
+      const deletedActiveChat = chats.find(
+        (chat) => chat.chatId === chatId && chat.id === activeChatId
+      )
+
+      if (deletedActiveChat) {
+        setActiveChatId(null)
+        setInput("")
+        setThinkingEvents([])
+      }
+    },
+    [activeChatId, chats]
+  )
+
   const handleSend = useCallback(
     async (text?: string) => {
       const trimmed = (text ?? input).trim()
@@ -275,6 +315,8 @@ export function AgentChatShell() {
         activeChatId={activeChatId}
         onNewChat={handleNewChat}
         onSelectChat={handleSelectChat}
+        onRenameChat={handleRenameChat}
+        onDeleteChat={handleDeleteChat}
         isDark={isDark}
       />
 

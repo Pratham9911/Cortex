@@ -113,6 +113,22 @@ export async function deleteChat(chatId: number): Promise<void> {
   await parseJsonResponse(response)
 }
 
+export async function updateChatTitle(
+  chatId: number,
+  title: string
+): Promise<ChatSession> {
+  const response = await fetch(`${apiUrl}/chats/${chatId}`, {
+    method: "PATCH",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title }),
+  })
+  const data = await parseJsonResponse<{ chat: ApiChat }>(response)
+  return toChatSession(data.chat)
+}
+
 export async function listMessages(chatId: number): Promise<Message[]> {
   const response = await fetch(`${apiUrl}/chats/${chatId}/messages`, {
     headers: authHeaders(),

@@ -151,13 +151,27 @@ def handle_web_search(query):
         yield from _run_manual_web_search(query)
 
 
-def generate_multi_hop_answer(query: str, project_chunks, web_contexts) -> str:
+def _context_to_text(context) -> str:
+    if isinstance(context, str):
+        return context
+
+    if isinstance(context, dict):
+        return context.get("content", "")
+
+    return ""
+
+
+def generate_multi_hop_answer(query: str, project_contexts, web_contexts) -> str:
     # Format project context
     project_context_str = ""
-    if project_chunks:
-        project_context_str = "\n\n".join([c["content"] for c in project_chunks])
+    if project_contexts:
+        project_context_str = "\n\n".join(
+            text
+            for text in [_context_to_text(c) for c in project_contexts]
+            if text
+        )
     else:
-        project_context_str = "No project documents retrieved."
+        project_context_str = "No project knowledge answer retrieved."
 
     # Format web context
     web_context_str = ""
@@ -180,10 +194,10 @@ User Query:
 
 Instructions:
 
-1. Extract the most relevant information from Project Context.
-2. Extract the most relevant information from Web Context.
-3. Compare them when comparison is possible.
-4. If direct comparison is not possible, provide the key findings from each source separately.
+1. Use the supplied project/web answers as source context.
+2. Compare them when comparison is possible.
+3. If direct comparison is not possible, provide the key findings from each source separately.
+4. Focus on final answer quality, not retrieval mechanics.
 5. Clearly distinguish:
    - Similarities
    - Differences
@@ -232,13 +246,15 @@ Return only the final answer.
     return data["choices"][0]["message"]["content"].strip()
 
 
-def handle_multi_hop(
+def handle_multi_hop_legacy(
     query: str,
     project_id: int,
     user_id: int,
     user_role: str,
     db
 ):
+    # Legacy implementation kept for reference. It manually performs project
+    # retrieval inside multi-hop instead of delegating to handle_project_knowledge.
     from rag.agents.multi_hop_agent import decompose_query
 
     # ── 1. Decompose Query ──
@@ -330,8 +346,7 @@ def handle_multi_hop(
     }
 
     answer = generate_multi_hop_answer(query, merged_chunks, web_contexts)
-    print("Multi-hop final answer generated.")
-    print("answer:", answer)
+  
     # Deduplicate web sources before emitting the final multi-hop answer.
     unique_web_sources = []
     seen_urls = set()
@@ -350,12 +365,145 @@ def handle_multi_hop(
     }
 
 
+def handle_multi_hop(
+    query: str,
+    project_id: int,
+    user_id: int,
+    user_role: str,
+    db
+):
+    from rag.agents.multi_hop_agent import decompose_query
+
+    yield {
+        "type": "status",
+        "step": "multi_hop_decompose",
+        "message": "Breaking question into sub-problems..."
+    }
+
+    decomposition = decompose_query(query)
+    subqueries = decomposition.get("queries", [])
+
+    yield {
+        "type": "debug",
+        "step": "multi_hop_decompose",
+        "subqueries": subqueries
+    }
+
+    project_contexts = []
+    web_contexts = []
+    project_chunks = []
+    seen_project_source_keys = set()
+    web_sources = []
+
+    for subquery in subqueries:
+        subquery_text = subquery.get("search_query", "")
+        subquery_type = subquery.get("type", "project_knowledge")
+
+        if not subquery_text:
+            continue
+
+        if subquery_type == "project_knowledge":
+            yield {
+                "type": "status",
+                "step": "multi_hop_project_knowledge",
+                "message": f"Searching project knowledge for: {subquery_text}"
+            }
+
+            subquery_answer = ""
+            for event in handle_project_knowledge(
+                query=subquery_text,
+                project_id=project_id,
+                user_id=user_id,
+                user_role=user_role,
+                db=db,
+                validate_response=False
+            ):
+                if event.get("type") in ["status", "debug"]:
+                    yield event
+                elif event.get("type") == "final":
+                    subquery_answer = event.get("answer", "")
+                    for chunk in event.get("chunks", []):
+                        document = chunk.get("document", {})
+                        chunk_info = chunk.get("chunk", {})
+                        source_key = (
+                            document.get("document_id"),
+                            document.get("version"),
+                            chunk_info.get("page_number")
+                        )
+
+                        if source_key in seen_project_source_keys:
+                            continue
+
+                        seen_project_source_keys.add(source_key)
+                        project_chunks.append(chunk)
+
+            if subquery_answer:
+                project_contexts.append(
+                    f"Project Knowledge Answer for '{subquery_text}':\n"
+                    f"{subquery_answer}"
+                )
+
+        elif subquery_type == "web_search":
+            yield {
+                "type": "status",
+                "step": "multi_hop_web_search",
+                "message": f"Searching the web for: {subquery_text}"
+            }
+
+            subquery_answer = ""
+            for event in handle_web_search(subquery_text):
+                if event.get("type") in ["status", "debug"]:
+                    yield event
+                elif event.get("type") == "sources":
+                    web_sources.extend(event.get("sources", []))
+                elif event.get("type") == "final":
+                    subquery_answer = event.get("answer", "")
+                    web_sources.extend(event.get("sources", []))
+
+            if subquery_answer:
+                web_contexts.append(
+                    f"Web Search Answer for '{subquery_text}':\n"
+                    f"{subquery_answer}"
+                )
+
+    yield {
+        "type": "status",
+        "step": "generation",
+        "message": "Synthesizing the multi-hop answer..."
+    }
+
+    answer = generate_multi_hop_answer(
+        query=query,
+        project_contexts=project_contexts,
+        web_contexts=web_contexts
+    )
+
+    unique_web_sources = []
+    seen_urls = set()
+    for source in web_sources:
+        url = source.get("url")
+        if not url or url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+        unique_web_sources.append(source)
+
+    yield {
+        "type": "final",
+        "intent": "multi_hop",
+        "answer": answer,
+        "chunks": project_chunks,
+        "sources": unique_web_sources
+    }
+
+
 def handle_project_knowledge(
     query,
     project_id,
     user_id,
     user_role,
-    db
+    db,
+    validate_response=True
 ):
 
     # ----------------------------------------
@@ -434,6 +582,17 @@ def handle_project_knowledge(
         query,
         chunks
     )
+
+    if not validate_response:
+        yield {
+            "type": "final",
+            "intent": "project_knowledge",
+            "rewritten_query": rewritten_query,
+            "answer": answer,
+            "chunks": format_chunks_for_debug(chunks)
+        }
+
+        return
 
     # ----------------------------------------
     # Validation
