@@ -1,6 +1,10 @@
-# 🧠 Cortex
-
-**An Internal AI Knowledge & Decision System**
+<h1>
+  <img src="cortex-frontend/public/cortex_icon.png"
+       width="56"
+       valign="middle"
+       alt="Cortex Logo">
+  Cortex <small>— Internal AI Knowledge &amp; Decision System</small>
+</h1>
 
 Cortex is a structured AI system designed to **ingest knowledge, retrieve relevant context, generate answers, and explain them with trust**.
 
@@ -8,7 +12,7 @@ It focuses on **clarity, reliability, and actionable intelligence**, not just ra
 
 ---
 
-# 🚀 What Cortex Does
+#  What Cortex Does
 
 * 📥 Ingests structured internal knowledge
 * 🔍 Retrieves relevant information using embeddings
