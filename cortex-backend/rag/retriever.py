@@ -349,7 +349,7 @@ def hybrid_search(
         keyword_results
     )
 
-    return fused_results[:20]
+    return fused_results[:7] # need to change this to 20 
 
 
 def hybrid_search_with_rerank(

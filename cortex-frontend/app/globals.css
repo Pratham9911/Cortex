@@ -268,4 +268,30 @@
     color: transparent;
     animation: thinking-sweep 2.2s linear infinite;
   }
+
+  .agent-composer-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(113 113 122 / 0.55) transparent;
+  }
+
+  .dark .agent-composer-scroll {
+    scrollbar-color: rgb(82 82 91 / 0.7) transparent;
+  }
+
+  .agent-composer-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .agent-composer-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .agent-composer-scroll::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: rgb(203 213 225 / 0.9);
+  }
+
+  .dark .agent-composer-scroll::-webkit-scrollbar-thumb {
+    background: rgb(82 82 91 / 0.85);
+  }
 }

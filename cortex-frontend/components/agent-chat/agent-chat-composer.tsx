@@ -1,14 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { ArrowUp, Link2, Mic, Sparkles } from "lucide-react"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { ArrowUp, Mic, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type AgentChatComposerProps = {
@@ -19,6 +12,8 @@ type AgentChatComposerProps = {
   isDark: boolean
 }
 
+const MAX_HEIGHT = 128
+
 export function AgentChatComposer({
   value,
   onChange,
@@ -26,15 +21,17 @@ export function AgentChatComposer({
   disabled,
   isDark,
 }: AgentChatComposerProps) {
-  const maxChars = 1000
+  const maxChars = 4000
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     const textarea = textareaRef.current
-    if (textarea) {
-      textarea.style.height = "auto"
-      textarea.style.height = `${textarea.scrollHeight}px`
-    }
+    if (!textarea) return
+
+    textarea.style.height = "auto"
+    const nextHeight = Math.min(textarea.scrollHeight, MAX_HEIGHT)
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = textarea.scrollHeight > MAX_HEIGHT ? "auto" : "hidden"
   }, [value])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -45,84 +42,74 @@ export function AgentChatComposer({
   }
 
   return (
-    <div className="px-6 py-2.5">
+    <div className="shrink-0 px-10 pb-3 pt-1">
       <div
         className={cn(
-          "mx-auto max-w-[620px] rounded-[24px] border p-3.5 shadow-sm transition-shadow",
+          // Width: tweak max-w-[52rem] (832px) — e.g. max-w-4xl (896px) wider, max-w-3xl (768px) narrower
+          "mx-auto flex w-full max-w-[52rem] items-end gap-1.5 rounded-[26px] border px-2 py-1.5",
           isDark
-            ? "border-zinc-800 bg-[#141416]"
-            : "border-slate-200/90 bg-white shadow-slate-100/50 hover:shadow-md"
+            ? "border-zinc-800 bg-[#1c1c1e]"
+            : "border-slate-200 bg-white shadow-sm"
         )}
       >
-        <div className="flex items-start gap-2.5 px-1.5">
-          <Sparkles className={cn("size-4 mt-0.5 shrink-0", isDark ? "text-indigo-400" : "text-indigo-500")} />
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => onChange(e.target.value.slice(0, maxChars))}
-            onKeyDown={handleKeyDown}
-            disabled={disabled}
-            placeholder="What are the best open opportunities by comp..."
-            rows={1}
-            className={cn(
-              "w-full resize-none bg-transparent text-[13px] outline-none leading-relaxed",
-              isDark
-                ? "text-white placeholder:text-zinc-500"
-                : "text-slate-900 placeholder:text-slate-400"
-            )}
-            style={{ minHeight: "20px", maxHeight: "160px", overflowY: "auto" }}
-          />
-        </div>
-        <div className="flex items-center justify-between gap-3 mt-3 px-1">
-          <Select defaultValue="project-docs">
-            <SelectTrigger
-              className={cn(
-                "h-7 rounded-full border border-slate-200 px-3 text-[11px] font-medium bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1 shadow-sm w-[130px] justify-between",
-                isDark && "border-zinc-850 bg-[#1a1a1d] text-zinc-200 hover:bg-zinc-800/80"
-              )}
-            >
-              <SelectValue placeholder="Select Source" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all-web">All Web</SelectItem>
-              <SelectItem value="project-docs">Project Docs</SelectItem>
-            </SelectContent>
-          </Select>
+        <button
+          type="button"
+          aria-label="Add attachment"
+          className={cn(
+            "mb-1 grid size-9 shrink-0 place-items-center rounded-full transition-colors",
+            isDark
+              ? "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          )}
+        >
+          <Plus className="size-5" />
+        </button>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={cn(
-                "h-7 rounded-full border border-slate-200 px-3 flex items-center gap-1.5 text-[11px] font-medium bg-white hover:bg-slate-50 text-[#475569] shadow-sm transition-colors",
-                isDark && "border-zinc-800 bg-[#1a1a1d] text-zinc-250 hover:bg-zinc-800/80"
-              )}
-            >
-              <Link2 className="size-3 text-slate-500 dark:text-zinc-400 rotate-45" />
-              <span>Attach</span>
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "h-7 rounded-full border border-slate-200 px-3 flex items-center gap-1.5 text-[11px] font-medium bg-white hover:bg-slate-50 text-[#475569] shadow-sm transition-colors",
-                isDark && "border-zinc-800 bg-[#1a1a1d] text-zinc-250 hover:bg-zinc-800/80"
-              )}
-            >
-              <Mic className="size-3 text-slate-500 dark:text-zinc-400" />
-              <span>Voice</span>
-            </button>
-            <button
-              type="button"
-              onClick={onSend}
-              disabled={disabled || !value.trim()}
-              className={cn(
-                "size-7 rounded-full bg-[#0B1528] text-white flex items-center justify-center transition-all hover:bg-[#1A253C]",
-                (disabled || !value.trim()) && "opacity-40 cursor-not-allowed"
-              )}
-            >
-              <ArrowUp className="size-3.5" />
-            </button>
-          </div>
-        </div>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(e) => onChange(e.target.value.slice(0, maxChars))}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          placeholder="Ask anything..."
+          rows={1}
+          className={cn(
+            "min-h-[36px] max-h-32 flex-1 resize-none bg-transparent py-2 text-[13.5px] leading-relaxed outline-none",
+            "agent-composer-scroll",
+            isDark
+              ? "text-white placeholder:text-zinc-500"
+              : "text-slate-900 placeholder:text-slate-400"
+          )}
+        />
+
+        <button
+          type="button"
+          aria-label="Voice input"
+          className={cn(
+            "mb-1 grid size-9 shrink-0 place-items-center rounded-full transition-colors",
+            isDark
+              ? "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          )}
+        >
+          <Mic className="size-[18px]" />
+        </button>
+
+        <button
+          type="button"
+          onClick={onSend}
+          disabled={disabled || !value.trim()}
+          aria-label="Send message"
+          className={cn(
+            "mb-1 grid size-9 shrink-0 place-items-center rounded-full transition-all",
+            isDark
+              ? "bg-white text-zinc-900 hover:bg-zinc-100"
+              : "bg-zinc-900 text-white hover:bg-zinc-800",
+            (disabled || !value.trim()) && "opacity-40 cursor-not-allowed"
+          )}
+        >
+          <ArrowUp className="size-4" />
+        </button>
       </div>
     </div>
   )

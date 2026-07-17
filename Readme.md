@@ -22,11 +22,9 @@ It focuses on **clarity, reliability, and actionable intelligence**, not just ra
 
 ## 🔹 System Design
 
-![System Design](./public/diagram/CortexSD.png)
+![System Design](./public/diagram/cortexArchitecture.png)
 
-## 🔹 ER Diagram
 
-![ER Diagram](./public/diagram/CortexER.png)
 
 ---
 

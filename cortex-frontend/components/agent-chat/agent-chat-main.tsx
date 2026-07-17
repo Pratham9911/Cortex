@@ -130,16 +130,6 @@ export function AgentChatMain({
         disabled={isThinking}
         isDark={isDark}
       />
-
-      <p
-        className={cn(
-          "shrink-0 px-6 pb-4 pt-1 text-center text-[10.5px] tracking-wide",
-          isDark ? "text-zinc-650" : "text-slate-400"
-        )}
-      >
-        Centra may display inaccurate info, so please double check the response.{" "}
-        <a href="#" className="underline hover:text-slate-600">Your Privacy &amp; Orbita GPT</a>
-      </p>
     </div>
   )
 }

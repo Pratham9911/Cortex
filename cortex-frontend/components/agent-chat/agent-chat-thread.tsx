@@ -46,6 +46,40 @@ const CopyButton = ({ text, isDark }: { text: string; isDark: boolean }) => {
   )
 }
 
+const BR_TAG_SPLIT = /<br\s*\/?>/gi
+const BR_TAG_TEST = /<br\s*\/?>/i
+
+function flattenMarkdownChildren(node: React.ReactNode): string {
+  if (node == null || node === false) return ""
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(flattenMarkdownChildren).join("")
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return flattenMarkdownChildren(node.props.children)
+  }
+  return ""
+}
+
+function containsBrTag(node: React.ReactNode): boolean {
+  return BR_TAG_TEST.test(flattenMarkdownChildren(node))
+}
+
+function TableCellContent({ children }: { children: React.ReactNode }) {
+  if (!containsBrTag(children)) return <>{children}</>
+
+  const lines = flattenMarkdownChildren(children)
+    .split(BR_TAG_SPLIT)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  return (
+    <div className="space-y-1">
+      {lines.map((line, index) => (
+        <div key={index} className="leading-snug">{line}</div>
+      ))}
+    </div>
+  )
+}
+
 function AssistantMessageContent({ content, isDark }: { content: string; isDark: boolean }) {
   return (
     <div className={cn(
@@ -158,7 +192,14 @@ function AssistantMessageContent({ content, isDark }: { content: string; isDark:
 
             return (
               <div className="relative group my-3.5">
-                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-zinc-850">
+                <div
+                  className={cn(
+                    "overflow-x-auto rounded-xl border shadow-sm",
+                    isDark
+                      ? "border-zinc-700/70 bg-zinc-950/90 shadow-black/30 ring-1 ring-white/[0.04]"
+                      : "border-slate-200"
+                  )}
+                >
                   <table className="w-full text-left border-collapse text-[12.5px]">
                     {children}
                   </table>
@@ -168,24 +209,58 @@ function AssistantMessageContent({ content, isDark }: { content: string; isDark:
             )
           },
           thead: ({ children }) => (
-            <thead className={cn(
-              "border-b font-semibold",
-              isDark ? "bg-[#0B0B0C] border-zinc-800 text-white" : "bg-slate-200 border-slate-300 text-slate-900"
-            )}>
+            <thead
+              className={cn(
+                "border-b font-semibold",
+                isDark
+                  ? "bg-zinc-800/95 border-zinc-600/60 text-zinc-50"
+                  : "bg-slate-200 border-slate-300 text-slate-900"
+              )}
+            >
               {children}
             </thead>
           ),
-          tbody: ({ children }) => <tbody>{children}</tbody>,
+          tbody: ({ children }) => (
+            <tbody className={cn(isDark && "[&_tr:nth-child(even)]:bg-zinc-900/45")}>
+              {children}
+            </tbody>
+          ),
           tr: ({ children }) => (
-            <tr className={cn(
-              "border-b last:border-b-0 transition-colors",
-              isDark ? "border-zinc-850/60 hover:bg-zinc-900/60" : "border-slate-100 hover:bg-slate-100/60"
-            )}>
+            <tr
+              className={cn(
+                "border-b last:border-b-0 transition-colors",
+                isDark
+                  ? "border-zinc-800/90 bg-zinc-950/40 hover:bg-zinc-800/55"
+                  : "border-slate-100 hover:bg-slate-100/60"
+              )}
+            >
               {children}
             </tr>
           ),
-          th: ({ children }) => <th className="px-4 py-3 font-bold text-xs uppercase tracking-wider">{children}</th>,
-          td: ({ children }) => <td className="px-4 py-2.5 transition-colors">{children}</td>,
+          th: ({ children }) => (
+            <th
+              className={cn(
+                "px-4 py-3 font-bold text-[11px] uppercase tracking-wider",
+                isDark
+                  ? "text-zinc-100 border-r border-zinc-700/50 last:border-r-0 bg-zinc-800/95"
+                  : ""
+              )}
+            >
+              <TableCellContent>{children}</TableCellContent>
+            </th>
+          ),
+          td: ({ children }) => (
+            <td
+              className={cn(
+                "px-4 py-2.5 transition-colors",
+                isDark
+                  ? "text-zinc-300 border-r border-zinc-800/70 last:border-r-0"
+                  : ""
+              )}
+            >
+              <TableCellContent>{children}</TableCellContent>
+            </td>
+          ),
         }}
       >
         {content}
@@ -258,9 +333,16 @@ function MessageSources({
         pages: []
       }
     }
-    if (source.page_number !== undefined && source.page_number !== null) {
-      if (!aggregatedDocs[docId].pages.includes(source.page_number)) {
-        aggregatedDocs[docId].pages.push(source.page_number)
+
+    const pages = source.page_numbers?.length
+      ? source.page_numbers
+      : source.page_number != null
+        ? [source.page_number]
+        : []
+
+    for (const page of pages) {
+      if (!aggregatedDocs[docId].pages.includes(page)) {
+        aggregatedDocs[docId].pages.push(page)
       }
     }
   }
@@ -614,7 +696,7 @@ export function AgentChatThread({
 
   return (
     <ScrollArea ref={scrollRef} className="min-h-0 flex-1">
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 pb-4 pt-8">
         {messages.map((message) => {
           const isUser = message.role === "user"
           return (

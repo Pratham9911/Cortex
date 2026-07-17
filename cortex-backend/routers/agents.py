@@ -15,6 +15,7 @@ from database import SessionLocal
 from rag.generator import generate_answer
 from rag.agents.answer_validator import validate_answer
 from rag.orchestrator import run_pipeline
+from rag.evaluator import run_evaluation
 from models import ProjectMember, TeamMember
 
 
@@ -184,19 +185,19 @@ def ask_route_reranked(
          )
 
         answer = generate_answer(query, chunks)
-        validation = validate_answer(
-           query,
-           answer
-         )
+        # validation = validate_answer(
+        #    query,
+        #    answer
+        #  )
 
-        if validation["decision"] == "no":
+        # if validation["decision"] == "no":
 
-         return {
-            "desision": validation["decision"],
-            "answer": validation["user_response"],
+        #  return {
+        #     "desision": validation["decision"],
+        #     "answer": validation["user_response"],
          
 
-          }
+        #   }
         return {
             "project_id": project_id,
             "query": query,
@@ -205,25 +206,48 @@ def ask_route_reranked(
             "chunks": chunks
         }
 
-
-@router.post("/detect-intent")
-def detect_intent_route(
+@router.post("/projects/{project_id}/ask-hybrid")
+def ask_route_hybrid(
+    project_id: int,
     query: str,
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    intent = detect_intent(query)
-    return {"intent": intent}
-    
-from rag.agents.query_rewriter import rewrite_query
 
+    # Check project membership
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id
+    ).first()
 
-@router.post("/rewrite-test")
-def rewrite_test(
-    query: str
-):
+    if not membership:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied"
+        )
 
-    return rewrite_query(query)
+    # Hybrid Search (Semantic + Keyword + RRF)
+    chunks = hybrid_search(
+        query=query,
+        project_id=project_id,
+        user_id=user_id,
+        user_role=membership.role,
+        db=db
+    )
+
+    # Generate answer
+    answer = generate_answer(query, chunks)
+
+   
+
+    return {
+        "project_id": project_id,
+        "query": query,
+        "retrieved_chunks": len(chunks),
+        "answer": answer,
+        "chunks": chunks
+    }
+
 
 @router.post("/projects/{project_id}/ask")
 def ask_route(
@@ -299,124 +323,48 @@ def ask_route(
         }
     )
 
-from rag.agents.webagent import search, fetch
 
-@router.get("/test")
-def test_web_search(query: str):
+@router.post("/projects/{project_id}/evaluate-hybrid")
+def evaluate_hybrid(
+    project_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    start_row: int = 1,
+    end_row: int | None = None
+):
 
-    def event_stream():
+    # ----------------------------------------
+    # Verify project membership
+    # ----------------------------------------
 
-        try:
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id
+    ).first()
 
-            search_result = search(query)
+    if not membership:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied"
+        )
 
-            yield (
-               "data: "
-               + json.dumps({
-                   "type": "status",
-                   "message": (
-                       f"Found {len(search_result['results'])} "
-                       f"relevant web results."
-                   )
-               })
-               + "\n\n"
-      )
+    # ----------------------------------------
+    # Run evaluation
+    # ----------------------------------------
 
-            selected_results = [
-                search_result["results"][i - 1]
-                for i in search_result["selected_indices"]
-            ]
-
-            for event in fetch(
-                query=query,
-                selected_results=selected_results
-            ):
-                yield (
-                    f"data: "
-                    f"{json.dumps(event)}"
-                    f"\n\n"
-                )
-
-        except Exception as e:
-
-            yield (
-                f"data: "
-                f"{json.dumps({'error': str(e)})}"
-                f"\n\n"
-            )
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream"
+    results = run_evaluation(
+        project_id=project_id,
+        user_id=user_id,
+        user_role=membership.role,
+        db=db,
+        start_row=start_row,
+        end_row=end_row
     )
 
-
-# ============================================================
-# /test2  –  Groq compound-beta web search (SSE)
-# ============================================================
-from rag.agents.webagent2 import run_groq_web_search
-
-@router.get("/test2")
-async def test_groq_web_search(query: str):
-    """
-    SSE endpoint that streams Groq compound-beta web search results.
-    Events:
-        data: {"type": "status",  "step": "groq_search", "message": "..."}
-        data: {"type": "sources", "step": "groq_sources", "sources": [...]}
-        data: {"type": "final",   "answer": "..."}
-        event: done
-    """
-
-    async def event_stream():
-
-        loop = asyncio.get_event_loop()
-        queue: asyncio.Queue = asyncio.Queue()
-        _DONE = object()
-
-        def _run():
-            try:
-                for event in run_groq_web_search(query):
-                    loop.call_soon_threadsafe(queue.put_nowait, event)
-            except Exception as exc:
-                loop.call_soon_threadsafe(
-                    queue.put_nowait,
-                    {"type": "error", "message": str(exc)}
-                )
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, _DONE)
-
-        task = loop.run_in_executor(None, _run)
-
-        try:
-            while True:
-                event = await queue.get()
-                if event is _DONE:
-                    break
-                yield (
-                    "data: "
-                    + json.dumps(event)
-                    + "\n\n"
-                )
-
-            yield "event: done\ndata: complete\n\n"
-
-        except Exception as e:
-            yield (
-                "data: "
-                + json.dumps({"type": "error", "message": str(e)})
-                + "\n\n"
-            )
-
-        await task
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Access-Control-Allow-Origin": "*",
-        }
-    )
+    return {
+        "status": "success",
+        "questions_processed": len(results),
+        "output_file": "rag/evaluation/evaluation_results.csv",
+        "results": results
+    }
 

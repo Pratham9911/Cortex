@@ -168,9 +168,60 @@ def _normalize_web_sources(raw_sources: list) -> list[dict]:
     return normalized
 
 
+def _coalesce_document_sources(raw_sources: list) -> list[dict]:
+    """Merge per-page document rows into one entry per document/version with page_numbers."""
+    grouped: dict[tuple, dict] = {}
+
+    for source in raw_sources or []:
+        if not isinstance(source, dict):
+            continue
+
+        document_id = source.get("document_id")
+        if not document_id:
+            continue
+
+        version_number = source.get("version_number")
+        key = (document_id, version_number)
+
+        pages: list[int] = []
+        if isinstance(source.get("page_numbers"), list):
+            pages = [
+                int(page)
+                for page in source["page_numbers"]
+                if page is not None
+            ]
+        elif source.get("page_number") is not None:
+            pages = [int(source["page_number"])]
+
+        if key not in grouped:
+            grouped[key] = {
+                "document_id": document_id,
+                "document_title": source.get("document_title"),
+                "file_name": source.get("file_name"),
+                "version_number": version_number,
+                "page_numbers": [],
+            }
+
+        entry = grouped[key]
+        if not entry.get("document_title") and source.get("document_title"):
+            entry["document_title"] = source.get("document_title")
+        if not entry.get("file_name") and source.get("file_name"):
+            entry["file_name"] = source.get("file_name")
+
+        for page in pages:
+            if page not in entry["page_numbers"]:
+                entry["page_numbers"].append(page)
+
+    result = []
+    for entry in grouped.values():
+        entry["page_numbers"].sort()
+        result.append(entry)
+
+    return result
+
+
 def _normalize_document_sources(raw_chunks: list) -> list[dict]:
-    normalized = []
-    seen = set()
+    flat_sources = []
 
     for item in raw_chunks or []:
         if not isinstance(item, dict):
@@ -195,24 +246,15 @@ def _normalize_document_sources(raw_chunks: list) -> list[dict]:
         if not document_id:
             continue
 
-        source_key = (
-            document_id,
-            version_number,
-            page_number
-        )
-        if source_key in seen:
-            continue
-
-        seen.add(source_key)
-        normalized.append({
+        flat_sources.append({
             "document_id": document_id,
             "document_title": document_title,
             "file_name": file_name,
             "version_number": version_number,
-            "page_number": page_number
+            "page_number": page_number,
         })
 
-    return normalized
+    return _coalesce_document_sources(flat_sources)
 
 
 def _filter_document_sources(
@@ -236,7 +278,7 @@ def _filter_document_sources(
     user_team_ids = _user_team_ids(db, user_id)
     filtered = []
 
-    for source in raw_sources or []:
+    for source in _coalesce_document_sources(raw_sources):
         document_id = source.get("document_id") if isinstance(source, dict) else None
         if not document_id:
             continue
@@ -268,10 +310,11 @@ def _filter_document_sources(
             continue
 
         filtered.append({
-            **source,
+            "document_id": document_id,
             "document_title": source.get("document_title") or document.title,
             "file_name": source.get("file_name") or active_version.file_name,
             "version_number": source.get("version_number") or active_version.version_number,
+            "page_numbers": source.get("page_numbers") or [],
             "can_download": can_download_document(
                 project=project,
                 membership=membership,

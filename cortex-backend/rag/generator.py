@@ -19,6 +19,12 @@ def generate_answer(query: str, chunks):
     )
 
     prompt = f"""
+
+    Project Context:
+{context}
+
+User Question:
+{query}
 You are an enterprise AI knowledge assistant.
 
 Your task is to answer the user's question using ONLY the provided project context.
@@ -31,12 +37,8 @@ Instructions:
 - Explain clearly and professionally.
 - Do not invent information outside the provided context.
 - If information is missing, explicitly say so.
+- you will be checked for correctness, groundedness, and relevance so only give answer as asked without over explaining unless asked.
 
-Project Context:
-{context}
-
-User Question:
-{query}
 """
 
     if not FIREWORKS_API_KEY:

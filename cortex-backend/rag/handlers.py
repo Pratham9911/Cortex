@@ -3,7 +3,7 @@ import os
 import urllib.request
 
 from rag.agents.query_rewriter import rewrite_query
-from rag.agents.answer_validator import validate_answer
+# from rag.agents.answer_validator import validate_answer  # Disabled: extra token cost; re-enable when needed
 
 from rag.retriever import hybrid_search_with_rerank
 from rag.generator import generate_answer
@@ -510,24 +510,24 @@ def handle_project_knowledge(
     # ----------------------------------------
     # Rewrite Query
     # ----------------------------------------
-    yield {
-        "type": "status",
-        "step": "rewrite",
-        "message": "Preparing the search..."
-    }
+    # yield {
+    #     "type": "status",
+    #     "step": "rewrite",
+    #     "message": "Preparing the search..."
+    # }
 
-    rewrite_result = rewrite_query(query)
+    # rewrite_result = rewrite_query(query)
 
-    rewritten_query = rewrite_result[
-        "rewritten_query"
-    ]
+    # rewritten_query = rewrite_result[
+    #     "rewritten_query"
+    # ]
 
-    yield {
-        "type": "debug",
-        "step": "rewrite",
-        "original_query": query,
-        "rewritten_query": rewritten_query
-    }
+    # yield {
+    #     "type": "debug",
+    #     "step": "rewrite",
+    #     "original_query": query,
+    #     "rewritten_query": rewritten_query
+    # }
 
     # ----------------------------------------
     # Retrieval
@@ -539,7 +539,8 @@ def handle_project_knowledge(
     }
 
     chunks = hybrid_search_with_rerank(
-        rewritten_query,
+        # rewritten_query,
+        query,
         project_id,
         user_id,
         user_role,
@@ -560,7 +561,7 @@ def handle_project_knowledge(
         yield {
             "type": "final",
             "intent": "project_knowledge",
-            "rewritten_query": rewritten_query,
+            "rewritten_query": query,
             "answer": (
                 "I could not find any relevant information "
                 "in the project documents for this question."
@@ -584,61 +585,52 @@ def handle_project_knowledge(
         chunks
     )
 
-    if not validate_response:
-        yield {
-            "type": "final",
-            "intent": "project_knowledge",
-            "rewritten_query": rewritten_query,
-            "answer": answer,
-            "chunks": format_chunks_for_debug(chunks)
-        }
-
-        return
-
-    # ----------------------------------------
-    # Validation
-    # ----------------------------------------
     yield {
-        "type": "status",
-        "step": "validation",
-        "message": "Checking response quality..."
+        "type": "final",
+        "intent": "project_knowledge",
+        "rewritten_query": query,
+        "answer": answer,
+        "chunks": format_chunks_for_debug(chunks)
     }
 
-    validation = validate_answer(
-        query,
-        answer
-    )
-
-    yield {
-        "type": "debug",
-        "step": "validation",
-        "decision": validation["decision"]
-    }
+    return
 
     # ----------------------------------------
-    # Validation Failed
+    # Validation (disabled — burns extra tokens; re-enable in future if needed)
     # ----------------------------------------
-    if validation["decision"] == "no":
-
-        yield {
-            "type": "final",
-            "intent": "project_knowledge",
-            "rewritten_query": rewritten_query,
-            "answer": validation["user_response"],
-            "validation": validation,
-            "chunks": chunks
-        }
-
-        return
-
-    # ----------------------------------------
-    # Success
-    # ----------------------------------------
-    yield {
-    "type": "final",
-    "intent": "project_knowledge",
-    "rewritten_query": rewritten_query,
-    "answer": answer,
-    "validation": validation,
-    "chunks": format_chunks_for_debug(chunks)
-   }
+    # yield {
+    #     "type": "status",
+    #     "step": "validation",
+    #     "message": "Checking response quality..."
+    # }
+    #
+    # validation = validate_answer(
+    #     query,
+    #     answer
+    # )
+    #
+    # yield {
+    #     "type": "debug",
+    #     "step": "validation",
+    #     "decision": validation["decision"]
+    # }
+    #
+    # if validation["decision"] == "no":
+    #     yield {
+    #         "type": "final",
+    #         "intent": "project_knowledge",
+    #         "rewritten_query": rewritten_query,
+    #         "answer": validation["user_response"],
+    #         "validation": validation,
+    #         "chunks": chunks
+    #     }
+    #     return
+    #
+    # yield {
+    #     "type": "final",
+    #     "intent": "project_knowledge",
+    #     "rewritten_query": rewritten_query,
+    #     "answer": answer,
+    #     "validation": validation,
+    #     "chunks": format_chunks_for_debug(chunks)
+    # }

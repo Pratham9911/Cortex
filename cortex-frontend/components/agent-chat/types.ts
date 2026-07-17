@@ -34,7 +34,9 @@ export type DocumentSource = {
   document_title?: string | null
   file_name?: string | null
   version_number?: number | null
+  /** @deprecated legacy per-page rows — prefer page_numbers */
   page_number?: number | null
+  page_numbers?: number[]
   can_download?: boolean
 }
 
