@@ -14,7 +14,7 @@ import csv
 from pathlib import Path
 from sqlalchemy import text
 from rag.generator import generate_answer
-from rag.retriever import hybrid_search
+from rag.retriever import hybrid_search ,hybrid_search_with_rerank
 
 FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
 FIREWORKS_CHAT_COMPLETIONS_URL = (
@@ -411,7 +411,7 @@ def evaluate_single_question(
 
     start_time = time.perf_counter()
 
-    chunks = hybrid_search(
+    chunks = hybrid_search_with_rerank(
         query=row["question"],
         project_id=project_id,
         user_id=user_id,
