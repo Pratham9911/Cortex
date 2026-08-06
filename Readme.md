@@ -30,7 +30,7 @@ It focuses on **clarity, reliability, and actionable intelligence**, not just ra
 
 ---
 
-## 📊 System Evaluation Results
+## System Evaluation Results
 
 <p align="center">
   <img src="cortex-backend/rag/evaluation/Observations/Hybrid_Rerankers.png" width="750">
