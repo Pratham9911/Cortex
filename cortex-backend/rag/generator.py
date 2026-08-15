@@ -1,76 +1,61 @@
+# 
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_fireworks import ChatFireworks
 import os
-import json
-import urllib.request
 
 
-FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
-FIREWORKS_CHAT_COMPLETIONS_URL = (
-    "https://api.fireworks.ai/inference/v1/chat/completions"
-)
 FIREWORKS_GENERATOR_MODEL = "accounts/fireworks/models/gpt-oss-120b"
 
 
+generator_llm = ChatFireworks(
+    model=FIREWORKS_GENERATOR_MODEL,
+    temperature=0,
+    api_key=os.getenv("FIREWORKS_API_KEY")
+)
 
 
-def generate_answer(query: str, chunks):
-
-    context = "\n\n".join(
-        [chunk["content"] for chunk in chunks]
-    )
-
-    prompt = f"""
-
-    Project Context:
+prompt = PromptTemplate.from_template(
+    """
+Project Context:
 {context}
 
 User Question:
 {query}
+
 You are an enterprise AI knowledge assistant.
 
 Your task is to answer the user's question using ONLY the provided project context.
 
 Instructions:
 - Give detailed and well-structured answers.
-- MUST format your response using standard Markdown (e.g., tables, headings like ###, **bold text**, blockquotes, and lists).
+- MUST format your response using standard Markdown (e.g., headings, tables, bullet points, blockquotes).
 - Combine information from multiple retrieved chunks if needed.
-- Use bullet points or tables when comparing or listing multiple items.
+- Use bullet points or tables when appropriate.
 - Explain clearly and professionally.
 - Do not invent information outside the provided context.
 - If information is missing, explicitly say so.
-- you will be checked for correctness, groundedness, and relevance so only give answer as asked without over explaining unless asked.
-
+- You will be evaluated on correctness, groundedness, and relevance, so answer only what is supported by the context.
 """
+)
 
-    if not FIREWORKS_API_KEY:
-        raise RuntimeError("FIREWORKS_API_KEY environment variable is required")
+generation_chain = (
+    prompt
+    | generator_llm
+    | StrOutputParser()
+)
 
-    payload = {
-        "model": FIREWORKS_GENERATOR_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "temperature": 0
-    }
 
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {FIREWORKS_API_KEY}"
-    }
+def generate_answer(query: str, chunks):
 
-    request = urllib.request.Request(
-        FIREWORKS_CHAT_COMPLETIONS_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST"
+    context = "\n\n".join(
+        chunk["content"]
+        for chunk in chunks
     )
 
-    with urllib.request.urlopen(request, timeout=60) as response:
-        response_data = json.loads(response.read().decode("utf-8"))
-
-    return response_data["choices"][0]["message"]["content"]
-
-
+    return generation_chain.invoke(
+        {
+            "query": query,
+            "context": context,
+        }
+    )

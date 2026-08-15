@@ -40,16 +40,14 @@ app.include_router(user_profiles.router)
 app.include_router(chats_messages.router)
 app.include_router(agents.router)
 
+
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
-
-#
-
 
 
 

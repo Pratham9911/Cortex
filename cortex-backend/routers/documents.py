@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from document_acl import can_download_document, can_search_document, is_owner_override
 from dependencies import get_current_user
+from task_queue.ingestion_queue import enqueue_document_ingestion
 from sqlalchemy.sql import func
 from models import User, Project, ProjectMember, Document, DocumentVersion , DocumentChunk , Team , Folder, TeamMember
 from supabase_client import supabase
@@ -27,8 +28,331 @@ def safe_filename(name: str):
     name = re.sub(r"[^a-z0-9._-]", "", name)
     return name
 
+# @router.post("/projects/{project_id}/documents/upload")
+# def upload_document(
+#     project_id: int,
+
+#     title: str = Form(...),
+#     description: str = Form(""),
+#     tags: str = Form(""),
+
+#     download_access_level: str = Form("member"),
+#     search_access_level: str = Form("member"),
+
+#     allowed_team_ids: str = Form(...),
+
+#     folder_id: str | None = Form(None),
+
+#     file: UploadFile = File(...),
+
+#     user_id: int = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+
+#     # ---------------------------------------------------
+#     # 1. CHECK ADMIN ACCESS
+#     # ---------------------------------------------------
+#     membership = db.query(ProjectMember).filter(
+#         ProjectMember.project_id == project_id,
+#         ProjectMember.user_id == user_id
+#     ).first()
+
+#     user = db.query(User).filter(
+#         User.user_id == user_id
+#     ).first()
+
+#     if not membership or membership.role != "admin":
+#         raise HTTPException(
+#             status_code=403,
+#             detail="Only admin can upload"
+#         )
+
+#     # ---------------------------------------------------
+#     # 2. VALIDATE FILE TYPE
+#     # ---------------------------------------------------
+#     allowed_extensions = [".pdf", ".md", ".txt"]
+
+#     filename = file.filename.lower()
+
+#     if not any(filename.endswith(ext) for ext in allowed_extensions):
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Only PDF, MD, TXT files are allowed"
+#         )
+
+#     # ---------------------------------------------------
+#     # 3. VALIDATE ACCESS LEVELS
+#     # ---------------------------------------------------
+#     allowed_access_levels = ["admin", "member", "none"]
+
+#     if download_access_level not in allowed_access_levels:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Invalid download access level"
+#         )
+
+#     if search_access_level not in allowed_access_levels:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Invalid search access level"
+#         )
+
+#     # ---------------------------------------------------
+#     # 4. CHECK DUPLICATE TITLE IN SAME PROJECT
+#     # ---------------------------------------------------
+#     existing_doc = db.query(Document).filter(
+#         Document.project_id == project_id,
+#         Document.title == title
+#     ).first()
+
+#     if existing_doc:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Document title already exists in this project"
+#         )
+
+#     # ---------------------------------------------------
+#     # 5. VALIDATE TEAMS
+#     # allowed_team_ids example:
+#     # "1,2,3"
+#     # ---------------------------------------------------
+#     parsed_team_ids = []
+
+#     try:
+
+#         parsed_team_ids = [
+#             int(team_id.strip())
+#             for team_id in allowed_team_ids.split(",")
+#             if team_id.strip()
+#         ]
+
+#     except:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Invalid allowed_team_ids format"
+#         )
+
+#     if not parsed_team_ids:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Document must belong to at least one team"
+#         )
+
+#     existing_teams = db.query(Team).filter(
+#         Team.project_id == project_id,
+#         Team.team_id.in_(parsed_team_ids)
+#     ).all()
+
+#     if len(existing_teams) != len(parsed_team_ids):
+#         raise HTTPException(
+#             status_code=400,
+#             detail="One or more teams are invalid"
+#         )
+
+#     # ---------------------------------------------------
+#     # 6. VALIDATE FOLDER
+#     # ---------------------------------------------------
+#     if folder_id is not None:
+
+#         folder = db.query(Folder).filter(
+#             Folder.folder_id == folder_id,
+#             Folder.project_id == project_id
+#         ).first()
+
+#         if not folder:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail="Folder not found"
+#             )
+
+#     # ---------------------------------------------------
+#     # 7. PREPARE TAGS ARRAY
+#     # ---------------------------------------------------
+#     tag_list = []
+
+#     if tags.strip():
+
+#         tag_list = [
+#             tag.strip()
+#             for tag in tags.split(",")
+#             if tag.strip()
+#         ]
+
+#     # ---------------------------------------------------
+#     # 8. EXTRACT & EMBED FROM MEMORY (BEFORE DB/STORAGE WRITES)
+#     # ---------------------------------------------------
+#     try:
+#         file_bytes = file.file.read()
+#         file_size = len(file_bytes)
+#         mime_type = file.content_type
+        
+#         # Extract and embed inline (batched internally to 20 chunks)
+#         embedded_chunks = extract_and_embed_from_bytes(file_bytes, mime_type, file.filename)
+#     except HTTPException as he:
+#         raise he
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Failed to process and embed document: {str(e)}"
+#         )
+
+#     # ---------------------------------------------------
+#     # 9. CREATE DOCUMENT ROW
+#     # ---------------------------------------------------
+#     new_document = Document(
+#         project_id=project_id,
+#         title=title,
+#         description=description,
+#         owner_id=user_id,
+#         modified_by=user_id,
+
+#         tags=tag_list,
+
+#         folder_id=folder_id,
+
+#         allowed_team_ids=parsed_team_ids,
+
+#         download_access_level=download_access_level,
+#         search_access_level=search_access_level
+#     )
+
+#     try:
+#         db.add(new_document)
+#         db.flush()  # Generate ID without committing
+#     except Exception as e:
+#         db.rollback()
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Database error during document creation: {str(e)}"
+#         )
+
+#     version_number = 1
+#     clean_name = safe_filename(file.filename)
+#     file_path = (
+#         f"{project_id}/"
+#         f"{new_document.document_id}/"
+#         f"v1/{clean_name}"
+#     )
+
+#     # ---------------------------------------------------
+#     # 10. UPLOAD TO STORAGE
+#     # ---------------------------------------------------
+#     try:
+#         supabase.storage.from_("documents").upload(
+#             path=file_path,
+#             file=file_bytes,
+#             file_options={
+#                 "content-type": mime_type
+#             }
+#         )
+#     except Exception as upload_error:
+#         db.rollback()  # Deletes document row from transaction
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Failed to upload file to storage: {str(upload_error)}"
+#         )
+
+#     # ---------------------------------------------------
+#     # 11. CREATE VERSION & INSERT CHUNKS
+#     # ---------------------------------------------------
+#     try:
+#         new_version = DocumentVersion(
+#             document_id=new_document.document_id,
+
+#             version_number=version_number,
+
+#             storage_path=file_path,
+
+#             file_name=file.filename,
+#             mime_type=mime_type,
+#             file_size=file_size,
+
+#             is_active=True,
+
+#             uploaded_by=user_id,
+
+#             activated_by=user_id,
+#             activated_at=func.now()
+#         )
+
+#         db.add(new_version)
+#         db.flush()  # Generate version_id
+
+#         # Insert chunks
+#         for chunk in embedded_chunks:
+#             db_chunk = DocumentChunk(
+#                 project_id=project_id,
+#                 version_id=new_version.version_id,
+#                 chunk_index=chunk["chunk_index"],
+#                 content=chunk["content"],
+#                 page_number=chunk.get("page_number"),
+#                 embedding=chunk["embedding"]
+#             )
+#             db.add(db_chunk)
+#         db.flush()
+
+#         # Update search vector
+#         db.execute(text("""
+#             UPDATE document_chunks
+#             SET search_vector = to_tsvector('english', content)
+#             WHERE version_id = :version_id
+#         """), {
+#             "version_id": new_version.version_id
+#         })
+
+#         # Audit Log
+#         create_audit_log(
+#             db=db,
+#             project_id=project_id,
+#             user_id=user_id,
+#             action="create",
+#             detail=f"{user.name} uploaded document '{title}' with version 1"
+#         )
+
+#         # Update Folder Modified Date
+#         if folder_id is not None:
+#             folder = db.query(Folder).filter(Folder.folder_id == folder_id).first()
+#             if folder:
+#                 folder.last_modified = func.now()
+#                 folder.modified_by = user_id
+
+#         db.commit()
+
+#     except Exception as e:
+#         db.rollback()  # Rollback all database operations (document, version, chunks)
+#         # Attempt to clean up uploaded file in Supabase storage
+#         try:
+#             supabase.storage.from_("documents").remove([file_path])
+#         except Exception:
+#             pass
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Error finalizing document upload details: {str(e)}"
+#         )
+
+#     # ---------------------------------------------------
+#     # 12. RESPONSE
+#     # ---------------------------------------------------
+#     return {
+#         "message": "Document uploaded successfully",
+
+#         "document_id": new_document.document_id,
+
+#         "version": 1,
+
+#         "folder_id": folder_id,
+
+#         "allowed_team_ids": parsed_team_ids,
+
+#         "download_access_level": download_access_level,
+#         "search_access_level": search_access_level,
+
+#         "path": file_path
+#     }
+
+
 @router.post("/projects/{project_id}/documents/upload")
-def upload_document(
+async def upload_document(
     project_id: int,
 
     title: str = Form(...),
@@ -40,7 +364,7 @@ def upload_document(
 
     allowed_team_ids: str = Form(...),
 
-    folder_id: str | None = Form(None),
+    folder_id: int | None = Form(None),
 
     file: UploadFile = File(...),
 
@@ -51,6 +375,7 @@ def upload_document(
     # ---------------------------------------------------
     # 1. CHECK ADMIN ACCESS
     # ---------------------------------------------------
+
     membership = db.query(ProjectMember).filter(
         ProjectMember.project_id == project_id,
         ProjectMember.user_id == user_id
@@ -69,20 +394,35 @@ def upload_document(
     # ---------------------------------------------------
     # 2. VALIDATE FILE TYPE
     # ---------------------------------------------------
-    allowed_extensions = [".pdf", ".md", ".txt"]
+
+    allowed_extensions = [
+        ".pdf",
+        ".md",
+        ".txt",
+        ".docx",
+        ".pptx"
+    ]
 
     filename = file.filename.lower()
 
-    if not any(filename.endswith(ext) for ext in allowed_extensions):
+    if not any(
+        filename.endswith(ext)
+        for ext in allowed_extensions
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Only PDF, MD, TXT files are allowed"
+            detail="Unsupported file type"
         )
 
     # ---------------------------------------------------
     # 3. VALIDATE ACCESS LEVELS
     # ---------------------------------------------------
-    allowed_access_levels = ["admin", "member", "none"]
+
+    allowed_access_levels = [
+        "admin",
+        "member",
+        "none"
+    ]
 
     if download_access_level not in allowed_access_levels:
         raise HTTPException(
@@ -97,8 +437,9 @@ def upload_document(
         )
 
     # ---------------------------------------------------
-    # 4. CHECK DUPLICATE TITLE IN SAME PROJECT
+    # 4. CHECK DUPLICATE TITLE
     # ---------------------------------------------------
+
     existing_doc = db.query(Document).filter(
         Document.project_id == project_id,
         Document.title == title
@@ -112,10 +453,7 @@ def upload_document(
 
     # ---------------------------------------------------
     # 5. VALIDATE TEAMS
-    # allowed_team_ids example:
-    # "1,2,3"
     # ---------------------------------------------------
-    parsed_team_ids = []
 
     try:
 
@@ -125,7 +463,8 @@ def upload_document(
             if team_id.strip()
         ]
 
-    except:
+    except ValueError:
+
         raise HTTPException(
             status_code=400,
             detail="Invalid allowed_team_ids format"
@@ -151,6 +490,7 @@ def upload_document(
     # ---------------------------------------------------
     # 6. VALIDATE FOLDER
     # ---------------------------------------------------
+
     if folder_id is not None:
 
         folder = db.query(Folder).filter(
@@ -165,8 +505,9 @@ def upload_document(
             )
 
     # ---------------------------------------------------
-    # 7. PREPARE TAGS ARRAY
+    # 7. PREPARE TAGS
     # ---------------------------------------------------
+
     tag_list = []
 
     if tags.strip():
@@ -178,30 +519,33 @@ def upload_document(
         ]
 
     # ---------------------------------------------------
-    # 8. EXTRACT & EMBED FROM MEMORY (BEFORE DB/STORAGE WRITES)
+    # 8. READ FILE
     # ---------------------------------------------------
+
     try:
-        file_bytes = file.file.read()
+
+        file_bytes = await file.read()
+
         file_size = len(file_bytes)
         mime_type = file.content_type
-        
-        # Extract and embed inline (batched internally to 20 chunks)
-        embedded_chunks = extract_and_embed_from_bytes(file_bytes, mime_type, file.filename)
-    except HTTPException as he:
-        raise he
+
     except Exception as e:
+
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process and embed document: {str(e)}"
+            detail=f"Failed to read uploaded file: {str(e)}"
         )
 
     # ---------------------------------------------------
-    # 9. CREATE DOCUMENT ROW
+    # 9. CREATE DOCUMENT
     # ---------------------------------------------------
+
     new_document = Document(
         project_id=project_id,
+
         title=title,
         description=description,
+
         owner_id=user_id,
         modified_by=user_id,
 
@@ -216,27 +560,40 @@ def upload_document(
     )
 
     try:
+
         db.add(new_document)
-        db.flush()  # Generate ID without committing
+        db.flush()
+
     except Exception as e:
+
         db.rollback()
+
         raise HTTPException(
             status_code=500,
             detail=f"Database error during document creation: {str(e)}"
         )
 
+    # ---------------------------------------------------
+    # 10. STORAGE PATH
+    # ---------------------------------------------------
+
     version_number = 1
+
     clean_name = safe_filename(file.filename)
+
     file_path = (
         f"{project_id}/"
         f"{new_document.document_id}/"
-        f"v1/{clean_name}"
+        f"v1/"
+        f"{clean_name}"
     )
 
     # ---------------------------------------------------
-    # 10. UPLOAD TO STORAGE
+    # 11. UPLOAD TO SUPABASE
     # ---------------------------------------------------
+
     try:
+
         supabase.storage.from_("documents").upload(
             path=file_path,
             file=file_bytes,
@@ -244,18 +601,24 @@ def upload_document(
                 "content-type": mime_type
             }
         )
+
     except Exception as upload_error:
-        db.rollback()  # Deletes document row from transaction
+
+        db.rollback()
+
         raise HTTPException(
             status_code=500,
             detail=f"Failed to upload file to storage: {str(upload_error)}"
         )
 
     # ---------------------------------------------------
-    # 11. CREATE VERSION & INSERT CHUNKS
+    # 12. CREATE DOCUMENT VERSION
     # ---------------------------------------------------
+
     try:
+
         new_version = DocumentVersion(
+
             document_id=new_document.document_id,
 
             version_number=version_number,
@@ -268,6 +631,8 @@ def upload_document(
 
             is_active=True,
 
+            status="pending",
+
             uploaded_by=user_id,
 
             activated_by=user_id,
@@ -275,63 +640,133 @@ def upload_document(
         )
 
         db.add(new_version)
-        db.flush()  # Generate version_id
-
-        # Insert chunks
-        for chunk in embedded_chunks:
-            db_chunk = DocumentChunk(
-                project_id=project_id,
-                version_id=new_version.version_id,
-                chunk_index=chunk["chunk_index"],
-                content=chunk["content"],
-                page_number=chunk.get("page_number"),
-                embedding=chunk["embedding"]
-            )
-            db.add(db_chunk)
         db.flush()
 
-        # Update search vector
-        db.execute(text("""
-            UPDATE document_chunks
-            SET search_vector = to_tsvector('english', content)
-            WHERE version_id = :version_id
-        """), {
-            "version_id": new_version.version_id
-        })
+    except Exception as e:
 
-        # Audit Log
-        create_audit_log(
-            db=db,
-            project_id=project_id,
-            user_id=user_id,
-            action="create",
-            detail=f"{user.name} uploaded document '{title}' with version 1"
+        db.rollback()
+
+        try:
+            supabase.storage.from_("documents").remove(
+                [file_path]
+            )
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating document version: {str(e)}"
         )
 
-        # Update Folder Modified Date
-        if folder_id is not None:
-            folder = db.query(Folder).filter(Folder.folder_id == folder_id).first()
-            if folder:
-                folder.last_modified = func.now()
-                folder.modified_by = user_id
+    # ---------------------------------------------------
+    # 13. AUDIT LOG
+    # ---------------------------------------------------
+
+    create_audit_log(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        action="create",
+        detail=(
+            f"{user.name} uploaded document "
+            f"'{title}' with version 1"
+        )
+    )
+
+    # ---------------------------------------------------
+    # 14. UPDATE FOLDER
+    # ---------------------------------------------------
+
+    if folder_id is not None:
+
+        folder = db.query(Folder).filter(
+            Folder.folder_id == folder_id
+        ).first()
+
+        if folder:
+
+            folder.last_modified = func.now()
+            folder.modified_by = user_id
+
+    # ---------------------------------------------------
+    # 15. COMMIT DOCUMENT + VERSION
+    # ---------------------------------------------------
+
+    try:
 
         db.commit()
 
     except Exception as e:
-        db.rollback()  # Rollback all database operations (document, version, chunks)
-        # Attempt to clean up uploaded file in Supabase storage
+
+        db.rollback()
+
         try:
-            supabase.storage.from_("documents").remove([file_path])
+            supabase.storage.from_("documents").remove(
+                [file_path]
+            )
         except Exception:
             pass
+
         raise HTTPException(
             status_code=500,
-            detail=f"Error finalizing document upload details: {str(e)}"
+            detail=f"Error finalizing document upload: {str(e)}"
         )
+    # ---------------------------------------------------
+    # 16. ADD INGESTION JOB
+    # ---------------------------------------------------
+    
+    try:
+    
+        await enqueue_document_ingestion(
+            document_id=new_document.document_id,
+            version_id=new_version.version_id,
+            project_id=project_id,
+            storage_path=file_path
+        )
+    
+    except Exception as e:
+    
+        print(
+            "Failed to enqueue ingestion job:",
+            e
+        )
+    
+        # -----------------------------------------------
+        # Queue failed.
+        #
+        # The document/version already exists in DB,
+        # so preserve it and mark it as failed.
+        # This allows the user to retry manually.
+        # -----------------------------------------------
+    
+        try:
+    
+            new_version.status = "failed"
+    
+            db.commit()
+    
+        except Exception as status_error:
+    
+            db.rollback()
+    
+            print(
+                "Failed to mark version as failed:",
+                status_error
+            )
+    
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Document was uploaded, but the "
+                "ingestion job could not be queued. "
+                "The document is marked as failed and "
+                "can be retried."
+            )
+        )
+    # ---------------------------------------------------
+    # 17. RESPONSE
+    # ---------------------------------------------------
 
-    # ---------------------------------------------------
-    # 12. RESPONSE
-    # ---------------------------------------------------
     return {
         "message": "Document uploaded successfully",
 
@@ -346,9 +781,10 @@ def upload_document(
         "download_access_level": download_access_level,
         "search_access_level": search_access_level,
 
-        "path": file_path
-    }
+        "path": file_path,
 
+        "status": "processing"
+    }
 
 @router.get("/projects/{project_id}/documents")
 def list_documents(
@@ -480,7 +916,7 @@ def list_documents(
 
 
 @router.post("/documents/{document_id}/versions/upload")
-def upload_new_version(
+async def upload_new_version(
     document_id: int,
 
     file: UploadFile = File(...),
@@ -489,12 +925,18 @@ def upload_new_version(
     db: Session = Depends(get_db)
 ):
 
-    # ----------------------------------------
-    # 1. Find document
-    # ----------------------------------------
+    file_path = None
+    new_version = None
+
+    # ============================================================
+    # 1. FIND DOCUMENT
+    # ============================================================
+
+    # Lock the document row so two users cannot calculate
+    # the same next version at the same time.
     document = db.query(Document).filter(
         Document.document_id == document_id
-    ).first()
+    ).with_for_update().first()
 
     if not document:
         raise HTTPException(
@@ -502,11 +944,14 @@ def upload_new_version(
             detail="Document not found"
         )
 
-    # ----------------------------------------
-    # 2. Check admin access
-    # ----------------------------------------
+    project_id = document.project_id
+
+    # ============================================================
+    # 2. CHECK ADMIN ACCESS
+    # ============================================================
+
     membership = db.query(ProjectMember).filter(
-        ProjectMember.project_id == document.project_id,
+        ProjectMember.project_id == project_id,
         ProjectMember.user_id == user_id
     ).first()
 
@@ -520,35 +965,99 @@ def upload_new_version(
             detail="Only admin can upload new version"
         )
 
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # ============================================================
+    # 3. CHECK DOCUMENT ACCESS
+    # ============================================================
+
     project = db.query(Project).filter(
-        Project.project_id == document.project_id
+        Project.project_id == project_id
     ).first()
 
     if (
         document.search_access_level == "none"
-        and not is_owner_override(project, document, user_id)
+        and not is_owner_override(
+            project,
+            document,
+            user_id
+        )
     ):
         raise HTTPException(
             status_code=403,
             detail="Access denied"
         )
 
-    # ----------------------------------------
-    # 3. Validate file type
-    # ----------------------------------------
-    allowed_extensions = [".pdf", ".md", ".txt"]
+    # ============================================================
+    # 4. VALIDATE FILE
+    # ============================================================
 
-    filename = file.filename.lower()
+    allowed_extensions = [
+        ".pdf",
+        ".md",
+        ".txt",
+        ".docx",
+        ".pptx"
+    ]
 
-    if not any(filename.endswith(ext) for ext in allowed_extensions):
+    original_filename = file.filename or ""
+
+    if not original_filename:
         raise HTTPException(
             status_code=400,
-            detail="Only PDF, MD, TXT files are allowed"
+            detail="Filename is required"
         )
 
-    # ----------------------------------------
-    # 4. Get latest NON-DELETED version
-    # ----------------------------------------
+    filename = original_filename.lower()
+
+    if not any(
+        filename.endswith(ext)
+        for ext in allowed_extensions
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type"
+        )
+
+    # ============================================================
+    # 5. READ FILE
+    # ============================================================
+
+    try:
+
+        file_bytes = await file.read()
+
+        if not file_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty"
+            )
+
+        file_size = len(file_bytes)
+
+        mime_type = (
+            file.content_type
+            or "application/octet-stream"
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read uploaded file: {str(e)}"
+        )
+
+    # ============================================================
+    # 6. GET NEXT VERSION
+    # ============================================================
+
     latest_version = db.query(DocumentVersion).filter(
         DocumentVersion.document_id == document_id,
         DocumentVersion.is_deleted == False
@@ -562,128 +1071,90 @@ def upload_new_version(
             detail="Cannot upload version to fully deleted document"
         )
 
-    next_version = latest_version.version_number + 1
+    next_version = (
+        latest_version.version_number + 1
+    )
 
-    # ----------------------------------------
-    # 5. Extract & Chunk text from memory bytes BEFORE database modifications
-    # ----------------------------------------
-    try:
-        file_bytes = file.file.read()
-        file_size = len(file_bytes)
-        mime_type = file.content_type
-        
-        embedded_chunks = extract_and_embed_from_bytes(file_bytes, mime_type, file.filename)
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to process and embed document version: {str(e)}"
-        )
+    # ============================================================
+    # 7. CREATE STORAGE PATH
+    # ============================================================
 
-    # ----------------------------------------
-    # 6. Deactivate all active versions, generate new file path
-    # ----------------------------------------
-    try:
-        active_versions = db.query(DocumentVersion).filter(
-            DocumentVersion.document_id == document_id,
-            DocumentVersion.is_active == True,
-            DocumentVersion.is_deleted == False
-        ).all()
+    clean_name = safe_filename(
+        original_filename
+    )
 
-        for version in active_versions:
-            version.is_active = False
-            
-        db.flush()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to update existing versions: {str(e)}"
-        )
-
-    clean_name = safe_filename(file.filename)
     file_path = (
-        f"{document.project_id}/"
+        f"{project_id}/"
         f"{document_id}/"
         f"v{next_version}/"
         f"{clean_name}"
     )
 
-    # ----------------------------------------
-    # 7. Upload to Storage
-    # ----------------------------------------
     try:
-        supabase.storage.from_("documents").upload(
+
+        # ========================================================
+        # 8. UPLOAD FILE TO SUPABASE
+        # ========================================================
+
+        supabase.storage.from_(
+            "documents"
+        ).upload(
             path=file_path,
             file=file_bytes,
             file_options={
                 "content-type": mime_type
             }
         )
-    except Exception as upload_error:
-        db.rollback()  # Reactivates old versions since it cancels session changes
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to upload file to storage: {str(upload_error)}"
-        )
 
-    # ----------------------------------------
-    # 8. Create new version, chunks, and finalize
-    # ----------------------------------------
-    try:
+        # ========================================================
+        # 9. CREATE NEW VERSION
+        # ========================================================
+
         new_version = DocumentVersion(
+
             document_id=document_id,
 
             version_number=next_version,
 
             storage_path=file_path,
 
-            file_name=file.filename,
+            file_name=original_filename,
+
             mime_type=mime_type,
+
             file_size=file_size,
 
-            is_active=True,
+            # IMPORTANT:
+            # New version is NOT active yet.
+            #
+            # The previous completed version remains
+            # active until this version is successfully
+            # ingested by the worker.
+            is_active=False,
+
+            # Worker has not started yet.
+            status="pending",
 
             uploaded_by=user_id,
-
-            activated_by=user_id,
-            activated_at=func.now(),
 
             is_deleted=False
         )
 
         db.add(new_version)
+
         db.flush()
 
-        # Insert chunks
-        for chunk in embedded_chunks:
-            db_chunk = DocumentChunk(
-                project_id=document.project_id,
-                version_id=new_version.version_id,
-                chunk_index=chunk["chunk_index"],
-                content=chunk["content"],
-                page_number=chunk.get("page_number"),
-                embedding=chunk["embedding"]
-            )
-            db.add(db_chunk)
-        db.flush()
+        version_id = new_version.version_id
 
-        # Update search vector
-        db.execute(text("""
-            UPDATE document_chunks
-            SET search_vector = to_tsvector('english', content)
-            WHERE version_id = :version_id
-        """), {
-            "version_id": new_version.version_id
-        })
+        # ========================================================
+        # 10. AUDIT LOG
+        # ========================================================
 
-        # Audit log
         create_audit_log(
             db=db,
-            project_id=document.project_id,
+            project_id=project_id,
             user_id=user_id,
-            action="create",
+            action="update",
             detail=(
                 f"{user.name} uploaded "
                 f"version {next_version} "
@@ -691,38 +1162,362 @@ def upload_new_version(
             )
         )
 
-        # Update Document and Folder Modified Date
+        # ========================================================
+        # 11. UPDATE DOCUMENT MODIFIED INFORMATION
+        # ========================================================
+
         document.last_modified = func.now()
         document.modified_by = user_id
 
         if document.folder_id is not None:
-            folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+
+            folder = db.query(Folder).filter(
+                Folder.folder_id == document.folder_id
+            ).first()
+
             if folder:
+
                 folder.last_modified = func.now()
                 folder.modified_by = user_id
 
+        # ========================================================
+        # 12. COMMIT VERSION
+        #
+        # At this point:
+        #
+        # Document        → exists
+        # New version     → pending
+        # Old version     → still active
+        # Source file     → stored
+        #
+        # No chunks exist yet.
+        # Worker will create them.
+        # ========================================================
+
         db.commit()
 
+    except HTTPException:
+        db.rollback()
+
+        if file_path:
+
+            try:
+
+                supabase.storage.from_(
+                    "documents"
+                ).remove(
+                    [file_path]
+                )
+
+            except Exception as cleanup_error:
+
+                print(
+                    "Storage cleanup failed:",
+                    cleanup_error
+                )
+
+        raise
+
     except Exception as e:
-        db.rollback()  # Restores active versions, deletes new version & chunks
-        # Clean up Supabase
-        try:
-            supabase.storage.from_("documents").remove([file_path])
-        except Exception:
-            pass
+
+        db.rollback()
+
+        # ========================================================
+        # CLEAN STORAGE
+        # ========================================================
+
+        if file_path:
+
+            try:
+
+                supabase.storage.from_(
+                    "documents"
+                ).remove(
+                    [file_path]
+                )
+
+            except Exception as cleanup_error:
+
+                print(
+                    "Storage cleanup failed:",
+                    cleanup_error
+                )
+
         raise HTTPException(
             status_code=500,
-            detail=f"Error finalizing document version details: {str(e)}"
+            detail=(
+                "Failed to create new document version: "
+                f"{str(e)}"
+            )
         )
 
+    # ============================================================
+    # 13. QUEUE INGESTION
+    # ============================================================
+
+    try:
+
+        await enqueue_document_ingestion(
+            document_id=document_id,
+            version_id=version_id,
+            project_id=project_id,
+            storage_path=file_path
+        )
+
+    except Exception as e:
+
+        print(
+            "Failed to enqueue ingestion job:",
+            e
+        )
+
+        # ========================================================
+        # Queue failed.
+        #
+        # Keep the version because the user can retry it.
+        # ========================================================
+
+        try:
+
+            version = db.query(
+                DocumentVersion
+            ).filter(
+                DocumentVersion.version_id == version_id
+            ).first()
+
+            if version:
+
+                version.status = "failed"
+
+                db.commit()
+
+        except Exception as status_error:
+
+            db.rollback()
+
+            print(
+                "Failed to mark version as failed:",
+                status_error
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "New version was uploaded, but the "
+                "ingestion job could not be queued. "
+                "The version is marked as failed and "
+                "can be retried."
+            )
+        )
+
+    # ============================================================
+    # 14. RESPONSE
+    # ============================================================
+
     return {
+
         "message": "New version uploaded successfully",
 
         "document_id": document_id,
 
         "version": next_version,
 
-        "file_name": file.filename
+        "version_id": version_id,
+
+        "file_name": original_filename,
+
+        "status": "pending"
+    }
+
+@router.post("/documents/{document_id}/versions/{version_id}/retry")
+async def retry_document_version(
+    document_id: int,
+    version_id: int,
+
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+
+    # ============================================================
+    # 1. FIND DOCUMENT
+    # ============================================================
+
+    document = db.query(Document).filter(
+        Document.document_id == document_id
+    ).first()
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found"
+        )
+
+    # ============================================================
+    # 2. CHECK ADMIN ACCESS
+    # ============================================================
+
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == document.project_id,
+        ProjectMember.user_id == user_id
+    ).first()
+
+    if not membership or membership.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only admin can retry document ingestion"
+        )
+
+    # ============================================================
+    # 3. FIND VERSION
+    # ============================================================
+
+    version = db.query(DocumentVersion).filter(
+        DocumentVersion.version_id == version_id,
+        DocumentVersion.document_id == document_id,
+        DocumentVersion.is_deleted == False
+    ).first()
+
+    if not version:
+        raise HTTPException(
+            status_code=404,
+            detail="Document version not found"
+        )
+
+    # ============================================================
+    # 4. ONLY FAILED VERSIONS CAN BE RETRIED
+    # ============================================================
+
+    if version.status != "failed":
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Only failed versions can be retried. "
+                f"Current status: {version.status}"
+            )
+        )
+
+    # ============================================================
+    # 5. CHECK STORAGE PATH
+    # ============================================================
+
+    if not version.storage_path:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Version has no storage file to retry"
+        )
+
+    # ============================================================
+    # 6. MARK PENDING
+    # ============================================================
+
+    version.status = "pending"
+
+    db.commit()
+
+    # ============================================================
+    # 7. QUEUE INGESTION AGAIN
+    # ============================================================
+
+    try:
+
+        await enqueue_document_ingestion(
+            document_id=document_id,
+            version_id=version_id,
+            project_id=document.project_id,
+            storage_path=version.storage_path
+        )
+
+    except Exception as e:
+
+        print(
+            "Failed to queue retry:",
+            e
+        )
+
+        # ----------------------------------------------
+        # Queue failed again.
+        # Keep version retryable.
+        # ----------------------------------------------
+
+        try:
+
+            version = db.query(
+                DocumentVersion
+            ).filter(
+                DocumentVersion.version_id == version_id
+            ).first()
+
+            if version:
+
+                version.status = "failed"
+
+                db.commit()
+
+        except Exception as status_error:
+
+            db.rollback()
+
+            print(
+                "Failed to mark retry as failed:",
+                status_error
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Failed to queue document ingestion retry. "
+                "The version remains failed and can be retried again."
+            )
+        )
+
+    # ============================================================
+    # 8. AUDIT
+    # ============================================================
+
+    try:
+
+        user = db.query(User).filter(
+            User.user_id == user_id
+        ).first()
+
+        create_audit_log(
+            db=db,
+            project_id=document.project_id,
+            user_id=user_id,
+            action="system",
+            detail=(
+                f"{user.name if user else 'User'} "
+                f"requested retry of version "
+                f"{version.version_number} "
+                f"of document '{document.title}'"
+            )
+        )
+
+        db.commit()
+
+    except Exception as audit_error:
+
+        # Audit failure should NOT turn a successfully queued
+        # ingestion job into a failed retry.
+        db.rollback()
+
+        print(
+            "Failed to create retry audit log:",
+            audit_error
+        )
+
+    # ============================================================
+    # 9. RESPONSE
+    # ============================================================
+
+    return {
+        "message": "Document ingestion retry queued successfully",
+        "document_id": document_id,
+        "version_id": version_id,
+        "version": version.version_number,
+        "status": "pending"
     }
 
 @router.patch("/documents/{document_id}")

@@ -181,7 +181,7 @@ def run_groq_web_search(query: str):
     yield {
         "type": "status",
         "step": "groq_search",
-        "message": f"Searching and reasoning about: {query}"
+        "message": f"Searching {query}"
     }
 
     try:

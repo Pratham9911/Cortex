@@ -634,3 +634,4 @@ def handle_project_knowledge(
     #     "validation": validation,
     #     "chunks": format_chunks_for_debug(chunks)
     # }
+

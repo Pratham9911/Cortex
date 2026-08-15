@@ -175,7 +175,7 @@ class DocumentVersion(Base):
     uploaded_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
 
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
-
+    status = Column(String, nullable=False, default="pending")  # pending | processing | completed | failed
 
     activated_by = Column(
     Integer,

@@ -7,6 +7,7 @@ from routers.audit import create_audit_log
 from models import Project, ProjectMember, User , Team, TeamMember
 from dependencies import get_current_user
 
+from app.services.redis_service import RedisService
 
 router = APIRouter()
 
@@ -101,11 +102,22 @@ def create_project(
         "message": "Project created successfully",
         "project_id": new_project.project_id
     }
+
 @router.get("/getprojects")
 def list_projects(
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    cache_key = f"user:{user_id}:projects"
+
+    # Try Redis first
+    cached_projects = RedisService.get_json(cache_key)
+
+    if cached_projects:
+        
+        return cached_projects
+
+    
 
     membership_alias = aliased(ProjectMember)
 
@@ -168,7 +180,7 @@ def list_projects(
         .all()
     )
 
-    return [
+    response = [
         {
             "project_id": project.project_id,
 
@@ -189,6 +201,16 @@ def list_projects(
         }
         for project in projects
     ]
+
+    # Store in Redis (30 min)
+    RedisService.set_json(
+        cache_key,
+        response,
+        ttl=1800
+    )
+
+    return response
+
 
 class UpdateProjectRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
