@@ -1,30 +1,36 @@
-# 📊 Cortex Hybrid Retrieval Evaluation
+<h1>
+  <img  src="../../../cortex-frontend/public/cortex_icon.png"
+       width="56"
+       valign="middle"
+       alt="Cortex Logo">
+  Cortex Hybrid Retrieval Evaluation 
+</h1>
+
 
 The Cortex Hybrid Retrieval pipeline was evaluated on a **127-question benchmark dataset** containing **Easy (38)**, **Medium (45)**, and **Hard (44)** questions. The evaluation measures both **retrieval performance** and **answer quality** using an LLM-based judge.
 
 ---
 
-## 🔍 Hybrid Retrieval Evaluation
-
-The baseline evaluation measures how effectively the hybrid search pipeline retrieves the relevant document chunks before answer generation.
-
-<p align="center">
-  <img src="rag/evaluation/Observations/Hybrid_Evaluation.png" width="750">
-</p>
-
-> **Observation:** The hybrid retrieval achieves high recall and ranking quality, making it a strong retrieval baseline.
-
----
-
-## 🤖 Hybrid Retrieval + LLM Evaluation
+## Hybrid Retrieval + LLM Evaluation
 
 This evaluation extends the retrieval benchmark by generating answers with the LLM and scoring their quality using an automated LLM judge.
 
 <p align="center">
-  <img src="cortex-backend\rag\evaluation\Observations\Hybrid_Evaluation.png" width="750">
+  <img src="Observations/Hybrid_WithLLM.png" width="750">
 </p>
 
 > **Observation:** Along with retrieval metrics, the evaluation measures **Correctness**, **Groundedness**, and **Relevance** to assess the quality of generated answers.
+---
+
+##  Hybrid Retrieval Evaluation
+
+The baseline evaluation measures how effectively the hybrid search pipeline retrieves the relevant document chunks before answer generation.
+
+<p align="center">
+  <img src="Observations/Hybrid_Evaluation.png" width="750">
+</p>
+
+> **Observation:** The hybrid retrieval achieves high recall and ranking quality, making it a strong retrieval baseline.
 
 ---
 

@@ -28,7 +28,15 @@ It focuses on **clarity, reliability, and actionable intelligence**, not just ra
 
 ![System Design](cortex-frontend/public/diagram/cortexArchitecture.png)
 
+---
 
+## System Evaluation Results
+
+<p align="center">
+  <img src="cortex-backend/rag/evaluation/Observations/Hybrid_Rerankers.png" width="750">
+</p>
+
+**[Detailed Evaluation Report](cortex-backend/rag/evaluation/readme.md)**
 
 ---
 
