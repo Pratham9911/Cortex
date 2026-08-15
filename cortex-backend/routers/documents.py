@@ -907,6 +907,8 @@ def list_documents(
             "owner_id": doc.owner_id,
 
             "active_version": active_version.version_number,
+            "active_version_id": active_version.version_id,
+            "status": active_version.status,
             "file_name": active_version.file_name,
             "file_size": active_version.file_size
 
@@ -2527,6 +2529,7 @@ def list_document_versions(
             "file_size": v.file_size,
             "is_active": v.is_active,
             "is_deleted": v.is_deleted,
+            "status": v.status,
             "uploaded_by": v.uploaded_by,
             "uploaded_by_name": user_names.get(v.uploaded_by, f"User {v.uploaded_by}"),
             "uploaded_at": v.uploaded_at,

@@ -19,6 +19,11 @@ import {
   Square,
   Eye,
   ChevronDown,
+  RotateCw,
+  AlertCircle,
+  Sparkles,
+  Clock,
+  AlertTriangle,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -130,6 +135,7 @@ export default function DocumentsPage() {
   const [permDeleteOpen, setPermDeleteOpen]             = useState(false)
   const [permDeleteVersion, setPermDeleteVersion]       = useState<number | null>(null)
   const [permDeleteLoading, setPermDeleteLoading]       = useState(false)
+  const [retryingVersionId, setRetryingVersionId]       = useState<number | null>(null)
   const verFileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Lock modal ──────────────────────────────────────────────────────────────
@@ -243,8 +249,8 @@ export default function DocumentsPage() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  const fetchDocVersions = useCallback(async (docId: number) => {
-    setFetchingVersions(true)
+  const fetchDocVersions = useCallback(async (docId: number, silent: boolean = false) => {
+    if (!silent) setFetchingVersions(true)
     try {
       const token = localStorage.getItem("access_token")
       const incDel = currentUserRole === "admin"
@@ -258,7 +264,7 @@ export default function DocumentsPage() {
     } catch (err) {
       console.error("Failed to fetch versions:", err)
     } finally {
-      setFetchingVersions(false)
+      if (!silent) setFetchingVersions(false)
     }
   }, [apiUrl, currentUserRole])
 
@@ -269,6 +275,44 @@ export default function DocumentsPage() {
       setDocVersions([])
     }
   }, [selectedDoc, fetchDocVersions])
+
+  // Polling for pending / processing versions (silent background refresh)
+  useEffect(() => {
+    if (!selectedDoc) return
+    const hasPendingOrProcessing = docVersions.some(
+      (v) => v.status === "pending" || v.status === "processing"
+    )
+    if (!hasPendingOrProcessing) return
+
+    const interval = setInterval(() => {
+      fetchDocVersions(selectedDoc.document_id, true)
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [selectedDoc, docVersions, fetchDocVersions])
+
+  const handleRetryVersion = async (versionId: number) => {
+    if (!selectedDoc) return
+    setRetryingVersionId(versionId)
+    try {
+      const token = localStorage.getItem("access_token")
+      const res = await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/versions/${versionId}/retry`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        fetchDocVersions(selectedDoc.document_id, true)
+        fetchAll()
+      } else {
+        const errData = await res.json()
+        alert(errData.detail || "Failed to retry version ingestion")
+      }
+    } catch (err) {
+      console.error("Failed to retry version:", err)
+    } finally {
+      setRetryingVersionId(null)
+    }
+  }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
   const formatSize = (b: number | null | undefined) => {
@@ -923,25 +967,73 @@ export default function DocumentsPage() {
                 ) : (
                   <div className="space-y-3">
                     {docVersions.map(v => (
-                      <div key={v.version_id} className={cn("p-3 rounded-lg border flex flex-col gap-1.5 text-xs relative",
+                      <div key={v.version_id} className={cn("p-3 rounded-lg border flex flex-col gap-1.5 text-xs relative transition-colors",
                         isDark
-                          ? v.is_active ? "bg-violet-500/5 border-violet-500/30" : v.is_deleted ? "bg-red-500/5 border-red-500/20 opacity-70" : "bg-zinc-900 border-zinc-800"
-                          : v.is_active ? "bg-violet-50 border-violet-200" : v.is_deleted ? "bg-red-50 border-red-100 opacity-70" : "bg-white border-slate-200"
+                          ? v.is_active
+                            ? "bg-emerald-950/20 border-emerald-600/40"
+                            : v.is_deleted
+                              ? "bg-zinc-900/50 border-zinc-800 opacity-60"
+                              : v.status === "failed"
+                                ? "bg-red-950/20 border-red-800/40"
+                                : v.status === "processing"
+                                  ? "bg-amber-950/20 border-amber-800/40"
+                                  : v.status === "pending"
+                                    ? "bg-sky-950/20 border-sky-800/40"
+                                    : "bg-zinc-900 border-zinc-800"
+                          : v.is_active
+                            ? "bg-emerald-50/80 border-emerald-200"
+                            : v.is_deleted
+                              ? "bg-slate-100/70 border-slate-200 opacity-60"
+                              : v.status === "failed"
+                                ? "bg-red-50/80 border-red-200"
+                                : v.status === "processing"
+                                  ? "bg-amber-50/80 border-amber-200"
+                                  : v.status === "pending"
+                                    ? "bg-sky-50/80 border-sky-200"
+                                    : "bg-white border-slate-200"
                       )}>
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold">v{v.version_number}</span>
-                          {v.is_active && (
-                            <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
-                              isDark ? "bg-violet-500/20 text-violet-400" : "bg-violet-100 text-violet-700"
-                            )}>
-                              Active
-                            </span>
-                          )}
-                          {v.is_deleted && (
-                            <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-red-500/10 text-red-400")}>
-                              Trash
-                            </span>
-                          )}
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <span className={cn("font-bold", v.is_active && "text-emerald-500 font-extrabold")}>
+                            v{v.version_number}
+                          </span>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {v.is_active && (
+                              <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
+                                isDark ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                              )}>
+                                Active
+                              </span>
+                            )}
+                            {v.status === "processing" && (
+                              <span className={cn("flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
+                                isDark ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : "bg-amber-100 text-amber-700 border border-amber-200"
+                              )}>
+                                <Spinner className="w-2.5 h-2.5 text-amber-500 animate-spin" />
+                                Processing
+                              </span>
+                            )}
+                            {v.status === "pending" && (
+                              <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
+                                isDark ? "bg-sky-500/20 text-sky-400 border border-sky-500/30" : "bg-sky-100 text-sky-700 border border-sky-200"
+                              )}>
+                                Pending
+                              </span>
+                            )}
+                            {v.status === "failed" && (
+                              <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
+                                isDark ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-red-100 text-red-700 border border-red-200"
+                              )}>
+                                Failed
+                              </span>
+                            )}
+                            {v.is_deleted && (
+                              <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
+                                isDark ? "bg-zinc-800 text-zinc-400" : "bg-slate-200 text-slate-600"
+                              )}>
+                                Trash
+                              </span>
+                            )}
+                          </div>
                         </div>
                         
                         <p className="text-[10px] font-medium text-zinc-500 truncate" title={v.file_name}>{v.file_name}</p>
@@ -953,7 +1045,17 @@ export default function DocumentsPage() {
 
                         {/* Actions for Admin */}
                         {currentUserRole === "admin" && (
-                          <div className="flex items-center gap-1.5 mt-2 border-t pt-2 border-zinc-200 dark:border-zinc-800/60 justify-end">
+                          <div className="flex items-center gap-1.5 mt-2 border-t pt-2 border-zinc-200 dark:border-zinc-800/60 justify-end flex-wrap">
+                            {v.status === "failed" && !v.is_deleted && (
+                              <button
+                                onClick={() => handleRetryVersion(v.version_id)}
+                                disabled={retryingVersionId === v.version_id}
+                                className="h-6 px-2.5 rounded bg-red-600 hover:bg-red-700 text-white font-semibold text-[10px] flex items-center gap-1 transition-colors shadow-sm active:scale-95 disabled:opacity-50"
+                              >
+                                <RotateCw className={cn("w-3 h-3", retryingVersionId === v.version_id && "animate-spin")} />
+                                {retryingVersionId === v.version_id ? "Retrying..." : "Retry"}
+                              </button>
+                            )}
                             {!v.is_deleted && !v.is_active && (
                               <>
                                 <button
@@ -963,7 +1065,7 @@ export default function DocumentsPage() {
                                       const res = await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/activate/${v.version_number}`, {
                                         method: "POST", headers: { Authorization: `Bearer ${token}` }
                                       })
-                                      if (res.ok) fetchDocVersions(selectedDoc.document_id)
+                                      if (res.ok) fetchDocVersions(selectedDoc.document_id, true)
                                     } catch {}
                                   }}
                                   className="h-6 px-2.5 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold text-[10px] transition-colors shadow-sm active:scale-95"
@@ -977,7 +1079,7 @@ export default function DocumentsPage() {
                                       const res = await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/versions/${v.version_number}/delete`, {
                                         method: "PATCH", headers: { Authorization: `Bearer ${token}` }
                                       })
-                                      if (res.ok) fetchDocVersions(selectedDoc.document_id)
+                                      if (res.ok) fetchDocVersions(selectedDoc.document_id, true)
                                     } catch {}
                                   }}
                                   className="h-6 px-2.5 rounded bg-red-600/10 hover:bg-red-600/20 text-red-500 font-semibold text-[10px] transition-colors"
@@ -995,7 +1097,7 @@ export default function DocumentsPage() {
                                       const res = await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/versions/${v.version_number}/restore`, {
                                         method: "PATCH", headers: { Authorization: `Bearer ${token}` }
                                       })
-                                      if (res.ok) fetchDocVersions(selectedDoc.document_id)
+                                      if (res.ok) fetchDocVersions(selectedDoc.document_id, true)
                                     } catch {}
                                   }}
                                   className="h-6 px-2.5 rounded bg-green-600/10 hover:bg-green-600/20 text-green-500 font-semibold text-[10px] transition-colors"
