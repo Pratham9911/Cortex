@@ -185,6 +185,19 @@ export default function FolderPage() {
   const [settingsTeams, setSettingsTeams]       = useState<Record<number, boolean>>({})
   const [settingsError, setSettingsError]       = useState("")
 
+  const handleRetryVersion = async (versionId: number) => {
+    const docItem = panelItem as DocumentItem
+    if (!docItem?.document_id) return
+    setRetryingVersionId(versionId)
+    try {
+      const token = localStorage.getItem("access_token")
+      await fetch(`${apiUrl}/documents/${docItem.document_id}/versions/${versionId}/retry-ingestion`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}` }
+      })
+      fetchDocVersions(docItem.document_id, true)
+    } catch {} finally { setRetryingVersionId(null) }
+  }
+
   // ─── Fetch everything inside this folder ──────────────────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true)

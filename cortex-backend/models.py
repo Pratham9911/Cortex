@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Column,
     Integer,
+    BigInteger,
     String,
     DateTime,
     ForeignKey,
@@ -316,6 +317,50 @@ class ProjectAuditLog(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    log_id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    event_type = Column(String(50), nullable=False, index=True)
+
+    actor_type = Column(String(20), nullable=False, server_default="user")
+    actor_user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
+    resource_type = Column(String(50), nullable=False, index=True)
+    resource_id = Column(String(100), nullable=False, index=True)
+
+    action = Column(String(20), nullable=False, index=True)
+
+    before = Column(JSONB, nullable=True)
+    after = Column(JSONB, nullable=True)
+
+    status = Column(String(20), nullable=False, server_default="success", index=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True
+    )
+
+    metadata_ = Column("metadata", JSONB, nullable=True)
+
+    description = Column(String(500), nullable=False)
 
 class Team(Base):
     __tablename__ = "teams"

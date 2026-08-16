@@ -10,7 +10,7 @@ import {
   Search, Inbox, Bell, LayoutGrid, BarChart3, LineChart,
   Bot, FileText, Receipt, Building2, Trash2, Sparkles,
   Sliders, Moon, Sun, Palette, HelpCircle, ChevronsUpDown,
-  PanelLeftClose, PanelLeftOpen, LogOut, User, X, Settings
+  PanelLeftClose, PanelLeftOpen, LogOut, User, X, Settings, ClipboardList
 } from "lucide-react"
 
 interface SidebarProps {
@@ -30,6 +30,7 @@ const MENU_ITEMS = [
   { id: "Projects", label: "Projects", icon: Receipt },
   { id: "ProjectSettings", label: "Project settings", icon: Settings },
   { id: "Teams", label: "Teams", icon: Building2 },
+  { id: "AuditLogs", label: "Audit logs", icon: ClipboardList },
   { id: "Trash", label: "Trash", icon: Trash2 },
 ]
 
@@ -92,6 +93,7 @@ function SidebarContent({
       Projects: "/projects",
       ProjectSettings: "/project-settings",
       Teams: "/teams",
+      AuditLogs: "/audit-logs",
       Trash: "/trash",
     }
     const target = routeMap[id]
@@ -136,6 +138,10 @@ function SidebarContent({
     }
     if (pathname.startsWith("/trash")) {
       setActive("Trash")
+      return
+    }
+    if (pathname.startsWith("/audit-logs")) {
+      setActive("AuditLogs")
       return
     }
     setActive("Dashboard")

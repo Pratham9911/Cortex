@@ -198,6 +198,18 @@ export default function DocumentsPage() {
   const [folderSettingsTeams, setFolderSettingsTeams] = useState<Record<number, boolean>>({})
   const [settingsError, setSettingsError]       = useState("")
 
+  const handleRetryVersion = async (versionId: number) => {
+    if (!selectedDoc) return
+    setRetryingVersionId(versionId)
+    try {
+      const token = localStorage.getItem("access_token")
+      await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/versions/${versionId}/retry-ingestion`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}` }
+      })
+      fetchDocVersions(selectedDoc.document_id, true)
+    } catch {} finally { setRetryingVersionId(null) }
+  }
+
   // ─── Fetch everything ─────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -1106,7 +1118,6 @@ export default function DocumentsPage() {
                           <span>{formatDate(v.uploaded_at)}</span>
                         </div>
 
-                        {/* Actions for Admin */}
                         {currentUserRole === "admin" && (
                           <div className="flex items-center gap-1.5 mt-2 border-t pt-2 border-zinc-200 dark:border-zinc-800/60 justify-end flex-wrap">
                             {v.status === "failed" && !v.is_deleted && (
@@ -1123,6 +1134,7 @@ export default function DocumentsPage() {
                               <>
                                 <button
                                   onClick={async () => {
+                                    if (!selectedDoc) return
                                     try {
                                       const token = localStorage.getItem("access_token")
                                       const res = await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/activate/${v.version_number}`, {
@@ -1137,6 +1149,7 @@ export default function DocumentsPage() {
                                 </button>
                                 <button
                                   onClick={async () => {
+                                    if (!selectedDoc) return
                                     try {
                                       const token = localStorage.getItem("access_token")
                                       const res = await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/versions/${v.version_number}/delete`, {
@@ -1155,6 +1168,7 @@ export default function DocumentsPage() {
                               <>
                                 <button
                                   onClick={async () => {
+                                    if (!selectedDoc) return
                                     try {
                                       const token = localStorage.getItem("access_token")
                                       const res = await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/versions/${v.version_number}/restore`, {

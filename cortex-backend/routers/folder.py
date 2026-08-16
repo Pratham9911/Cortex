@@ -19,6 +19,7 @@ from models import (
 )
 
 from routers.audit import create_audit_log
+from services.audit_service import AuditService
 from supabase_client import supabase
 
 
@@ -131,12 +132,17 @@ def create_folder(
         User.user_id == user_id
     ).first()
 
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="folder",
+        resource_id=folder.folder_id,
         action="create",
-        detail=f"{user.name} created folder '{folder.name}'"
+        actor_user_id=user_id,
+        after={"name": folder.name, "allowed_team_ids": parsed_team_ids},
+        metadata={"folder_name": folder.name},
+        description=f"User {{user:{user_id}}} created folder {{folder:{folder.folder_id}}}"
     )
 
     db.commit()
@@ -258,45 +264,53 @@ def update_folder(
         User.user_id == user_id
     ).first()
 
+    changed_fields = []
+    before_state = {}
+    after_state = {}
+
     if request.name is not None:
-        # Duplicate name check
-        existing_folder = db.query(Folder).filter(
-            Folder.project_id == folder.project_id,
-            func.lower(Folder.name) == request.name.lower(),
-            Folder.folder_id != folder_id
-        ).first()
+        cleaned_name = request.name.strip()
+        if cleaned_name != folder.name:
+            # Duplicate name check
+            existing_folder = db.query(Folder).filter(
+                Folder.project_id == folder.project_id,
+                func.lower(Folder.name) == cleaned_name.lower(),
+                Folder.folder_id != folder_id
+            ).first()
 
-        if existing_folder:
-            raise HTTPException(
-                status_code=400,
-                detail="Folder name already exists"
-            )
+            if existing_folder:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Folder name already exists"
+                )
 
-        old_name = folder.name
-        folder.name = request.name.strip()
-
-        create_audit_log(
-            db=db,
-            project_id=folder.project_id,
-            user_id=user_id,
-            action="update",
-            detail=f"{user.name} renamed folder '{old_name}' to '{folder.name}'"
-        )
+            before_state["name"] = folder.name
+            after_state["name"] = cleaned_name
+            folder.name = cleaned_name
+            changed_fields.append("name")
 
     if request.allowed_team_ids is not None:
         old_team_ids = folder.allowed_team_ids or []
         new_team_ids = _validate_folder_team_ids(db, folder.project_id, request.allowed_team_ids)
-        folder.allowed_team_ids = new_team_ids
+        if sorted(old_team_ids) != sorted(new_team_ids or []):
+            before_state["allowed_team_ids"] = old_team_ids
+            after_state["allowed_team_ids"] = new_team_ids
+            folder.allowed_team_ids = new_team_ids
+            changed_fields.append("allowed_team_ids")
 
-        create_audit_log(
+    if changed_fields:
+        AuditService.record_event(
             db=db,
             project_id=folder.project_id,
-            user_id=user_id,
+            event_type="document",
+            resource_type="folder",
+            resource_id=folder.folder_id,
             action="update",
-            detail=(
-                f"{user.name} updated folder '{folder.name}' access teams "
-                f"from {old_team_ids} to {new_team_ids or []}"
-            )
+            actor_user_id=user_id,
+            before=before_state,
+            after=after_state,
+            metadata={"updated_fields": changed_fields},
+            description=f"User {{user:{user_id}}} updated folder {{folder:{folder.folder_id}}} ({', '.join(changed_fields)})"
         )
 
     folder.modified_by = user_id
@@ -493,12 +507,16 @@ def delete_folder(
         User.user_id == user_id
     ).first()
 
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=folder.project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="folder",
+        resource_id=folder.folder_id,
         action="delete",
-        detail=f"{user.name} deleted folder '{folder_name}'"
+        actor_user_id=user_id,
+        metadata={"folder_name": folder_name},
+        description=f"User {{user:{user_id}}} deleted folder {{folder:{folder.folder_id}}}"
     )
 
     db.commit()

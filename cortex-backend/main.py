@@ -5,7 +5,8 @@ from sqlalchemy import text
 from database import SessionLocal, engine
 from models import Base, User
 from dependencies import get_current_user
-from routers import auth , projects  , documents , teams , folder , inbox, user_profiles , agents, chats_messages
+from routers import auth, projects, documents, teams, folder, inbox, user_profiles, agents, chats_messages, audit
+from migrations.migrate_audit_logs import init_audit_logs_table_and_migrate
 
 app = FastAPI()
 
@@ -18,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Run schema migration for user avatar column
+# Run schema migration for user avatar column & audit logs
 db = SessionLocal()
 try:
     db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR;"))
@@ -30,6 +31,8 @@ finally:
     db.close()
 
 Base.metadata.create_all(bind=engine)
+init_audit_logs_table_and_migrate()
+
 app.include_router(projects.router)
 app.include_router(auth.router)
 app.include_router(teams.router)
@@ -39,7 +42,7 @@ app.include_router(documents.router)
 app.include_router(user_profiles.router)
 app.include_router(chats_messages.router)
 app.include_router(agents.router)
-
+app.include_router(audit.router)
 
 
 def get_db():
@@ -50,11 +53,9 @@ def get_db():
         db.close()
 
 
-
 @app.get("/")
 def read_root():
     return {"message": "Cortex Backend is running!"}
-
 
 
 @app.get("/me")
@@ -68,5 +69,3 @@ def get_me(user_id: int = Depends(get_current_user), db: Session = Depends(get_d
         "email": user.email,
         "created_at": user.created_at
     }
-
-

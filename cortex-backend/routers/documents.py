@@ -12,6 +12,7 @@ from sqlalchemy.sql import func
 from models import User, Project, ProjectMember, Document, DocumentVersion , DocumentChunk , Team , Folder, TeamMember
 from supabase_client import supabase
 from routers.audit import create_audit_log
+from services.audit_service import AuditService
 import re
 import logging
 from ingestion.extractor import extract_text
@@ -345,15 +346,22 @@ async def upload_document(
     # 13. AUDIT LOG
     # ---------------------------------------------------
 
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="document",
+        resource_id=new_document.document_id,
         action="create",
-        detail=(
-            f"{user.name} uploaded document "
-            f"'{title}' with version 1"
-        )
+        actor_user_id=user_id,
+        after={"title": title, "folder_id": folder_id},
+        metadata={
+            "filename": file.filename,
+            "file_size": file_size,
+            "mime_type": mime_type,
+            "version": 1
+        },
+        description=f"User {{user:{user_id}}} created document {{document:{new_document.document_id}}}"
     )
 
     # ---------------------------------------------------
@@ -835,16 +843,22 @@ async def upload_new_version(
         # 10. AUDIT LOG
         # ========================================================
 
-        create_audit_log(
+        AuditService.record_event(
             db=db,
             project_id=project_id,
-            user_id=user_id,
-            action="update",
-            detail=(
-                f"{user.name} uploaded "
-                f"version {next_version} "
-                f"of document '{document.title}'"
-            )
+            event_type="document",
+            resource_type="version",
+            resource_id=version_id,
+            action="create",
+            actor_user_id=user_id,
+            after={"version_number": next_version},
+            metadata={
+                "document_id": document.document_id,
+                "version_number": next_version,
+                "filename": original_filename,
+                "file_size": file_size
+            },
+            description=f"User {{user:{user_id}}} uploaded version {next_version} for document {{document:{document.document_id}}}"
         )
 
         # ========================================================
@@ -1163,21 +1177,19 @@ async def retry_document_version(
 
     try:
 
-        user = db.query(User).filter(
-            User.user_id == user_id
-        ).first()
-
-        create_audit_log(
+        AuditService.record_event(
             db=db,
             project_id=document.project_id,
-            user_id=user_id,
+            event_type="document",
+            resource_type="version",
+            resource_id=version.version_id,
             action="system",
-            detail=(
-                f"{user.name if user else 'User'} "
-                f"requested retry of version "
-                f"{version.version_number} "
-                f"of document '{document.title}'"
-            )
+            actor_user_id=user_id,
+            metadata={
+                "document_id": document.document_id,
+                "version_number": version.version_number
+            },
+            description=f"User {{user:{user_id}}} requested retry of version {version.version_number} of document {{document:{document.document_id}}}"
         )
 
         db.commit()
@@ -1188,8 +1200,8 @@ async def retry_document_version(
         # ingestion job into a failed retry.
         db.rollback()
 
-        print(
-            "Failed to create retry audit log:",
+        logger.warning(
+            "Failed to create retry audit log: %s",
             audit_error
         )
 
@@ -1272,6 +1284,8 @@ def update_document(
         )
 
     changed_fields = []
+    before_state = {}
+    after_state = {}
 
     # ----------------------------------------
     # Validate access levels
@@ -1323,9 +1337,11 @@ def update_document(
                     detail="Document title already exists in this project"
                 )
     
+            before_state["name"] = document.title
+            after_state["name"] = cleaned_title
             document.title = cleaned_title
     
-            changed_fields.append("title")
+            changed_fields.append("name")
     
     
     # ----------------------------------------
@@ -1335,6 +1351,8 @@ def update_document(
     
         if description != document.description:
     
+            before_state["description"] = document.description
+            after_state["description"] = description
             document.description = description
     
             changed_fields.append("description")
@@ -1355,6 +1373,8 @@ def update_document(
     
         if sorted(tag_list) != sorted(current_tags):
     
+            before_state["tags"] = current_tags
+            after_state["tags"] = tag_list
             document.tags = tag_list
     
             changed_fields.append("tags")
@@ -1371,8 +1391,10 @@ def update_document(
         if raw_folder_id.lower() in {"", "null", "none"}:
             # Explicit clear-folder path
             if document.folder_id is not None:
+                before_state["folder_id"] = document.folder_id
+                after_state["folder_id"] = None
                 document.folder_id = None
-                changed_fields.append("folder")
+                changed_fields.append("folder_id")
         else:
             try:
                 target_folder_id = int(raw_folder_id)
@@ -1394,8 +1416,10 @@ def update_document(
                 )
 
             if target_folder_id != document.folder_id:
+                before_state["folder_id"] = document.folder_id
+                after_state["folder_id"] = target_folder_id
                 document.folder_id = target_folder_id
-                changed_fields.append("folder")
+                changed_fields.append("folder_id")
     
     
     # ----------------------------------------
@@ -1438,6 +1462,8 @@ def update_document(
     
         if sorted(parsed_team_ids) != sorted(current_team_ids):
     
+            before_state["allowed_team_ids"] = current_team_ids
+            after_state["allowed_team_ids"] = parsed_team_ids
             document.allowed_team_ids = parsed_team_ids
     
             changed_fields.append("allowed_team_ids")
@@ -1452,6 +1478,8 @@ def update_document(
     
         if download_access_level != document.download_access_level:
     
+            before_state["download_access_level"] = document.download_access_level
+            after_state["download_access_level"] = download_access_level
             document.download_access_level = download_access_level
     
             changed_fields.append("download_access_level")
@@ -1466,6 +1494,8 @@ def update_document(
     
         if search_access_level != document.search_access_level:
     
+            before_state["search_access_level"] = document.search_access_level
+            after_state["search_access_level"] = search_access_level
             document.search_access_level = search_access_level
     
             changed_fields.append("search_access_level")
@@ -1480,16 +1510,18 @@ def update_document(
     
         action_type = "system" if system_change else "update"
     
-        create_audit_log(
+        AuditService.record_event(
             db=db,
             project_id=document.project_id,
-            user_id=user_id,
+            event_type="document",
+            resource_type="document",
+            resource_id=document.document_id,
             action=action_type,
-            detail=(
-                f"{user.name} updated document "
-                f"'{document.title}' "
-                f"({', '.join(changed_fields)})"
-            )
+            actor_user_id=user_id,
+            before=before_state,
+            after=after_state,
+            metadata={"updated_fields": changed_fields},
+            description=f"User {{user:{user_id}}} updated document {{document:{document.document_id}}} ({', '.join(changed_fields)})"
         )
     
     # ----------------------------------------
@@ -1601,19 +1633,16 @@ def download_document(
     # ----------------------------------------
     # Audit log
     # ----------------------------------------
-    user = db.query(User).filter(
-        User.user_id == user_id
-    ).first()
-
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=document.project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="document",
+        resource_id=document.document_id,
         action="system",
-        detail=(
-            f"{user.name} downloaded "
-            f"document '{document.title}'"
-        )
+        actor_user_id=user_id,
+        metadata={"document_id": document.document_id},
+        description=f"User {{user:{user_id}}} downloaded document {{document:{document.document_id}}}"
     )
 
     db.commit()
@@ -1725,12 +1754,16 @@ def delete_document_version(
     # Delete version
     # ----------------------------------------
     db.delete(version)
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=document.project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="version",
+        resource_id=version.version_id,
         action="delete",
-        detail=f"{user.name} permanently deleted version {version_number} of document '{document.title}'"
+        actor_user_id=user_id,
+        metadata={"document_id": document.document_id, "version_number": version_number},
+        description=f"User {{user:{user_id}}} permanently deleted version {version_number} of document {{document:{document.document_id}}}"
     )
     
     db.commit()
@@ -1776,12 +1809,16 @@ def delete_document_version(
         # audit metadata
         latest_version.activated_by = user_id
         latest_version.activated_at = func.now()
-        create_audit_log(
+        AuditService.record_event(
             db=db,
             project_id=document.project_id,
-            user_id=user_id,
+            event_type="document",
+            resource_type="version",
+            resource_id=latest_version.version_id,
             action="system",
-            detail=f"{user.name} triggered fallback activation to version {latest_version.version_number} of document '{document.title}'"
+            actor_user_id=user_id,
+            metadata={"document_id": document.document_id, "activated_version": latest_version.version_number},
+            description=f"User {{user:{user_id}}} triggered fallback activation to version {latest_version.version_number} of document {{document:{document.document_id}}}"
         )
     
         db.commit()
@@ -1876,13 +1913,19 @@ def soft_delete_document_version(
     # ----------------------------------------
     # Audit log
     # ----------------------------------------
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=document.project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="version",
+        resource_id=version.version_id,
         action="delete",
-        detail=f"{user.name} moved version {version_number} of document '{document.title}' to trash"
-     )
+        actor_user_id=user_id,
+        before={"is_deleted": False},
+        after={"is_deleted": True},
+        metadata={"document_id": document.document_id, "version_number": version_number},
+        description=f"User {{user:{user_id}}} moved version {version_number} of document {{document:{document.document_id}}} to trash"
+    )
 
     # ----------------------------------------
     # Activate latest remaining non-deleted version
@@ -1907,12 +1950,16 @@ def soft_delete_document_version(
             # ----------------------------------------
             # Audit log
             # ----------------------------------------
-            create_audit_log(
+            AuditService.record_event(
                 db=db,
                 project_id=document.project_id,
-                user_id=user_id,
+                event_type="document",
+                resource_type="version",
+                resource_id=latest_version.version_id,
                 action="system",
-                detail=f"{user.name} triggered fallback activation to version {latest_version.version_number} of document '{document.title}'"
+                actor_user_id=user_id,
+                metadata={"document_id": document.document_id, "activated_version": latest_version.version_number},
+                description=f"User {{user:{user_id}}} triggered fallback activation to version {latest_version.version_number} of document {{document:{document.document_id}}}"
             )
 
     # ----------------------------------------
@@ -2000,12 +2047,18 @@ def restore_document_version(
     version.deleted_by = None
     version.is_active = False
     db.flush()
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=document.project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="version",
+        resource_id=version.version_id,
         action="system",
-        detail=f"{user.name} restored version {version_number} of document '{document.title}' from trash"
+        actor_user_id=user_id,
+        before={"is_deleted": True},
+        after={"is_deleted": False},
+        metadata={"document_id": document.document_id, "version_number": version_number},
+        description=f"User {{user:{user_id}}} restored version {version_number} of document {{document:{document.document_id}}} from trash"
     )
     # If this is the only non-deleted version, make it active
     non_deleted_versions = db.query(DocumentVersion).filter(
@@ -2017,12 +2070,16 @@ def restore_document_version(
         version.is_active = True
         version.activated_by = user_id
         version.activated_at = func.now()
-        create_audit_log(
+        AuditService.record_event(
             db=db,
             project_id=document.project_id,
-            user_id=user_id,
+            event_type="document",
+            resource_type="version",
+            resource_id=version.version_id,
             action="system",
-            detail=f"{user.name} auto-activated restored version {version_number} of document '{document.title}'"
+            actor_user_id=user_id,
+            metadata={"document_id": document.document_id, "activated_version": version_number},
+            description=f"User {{user:{user_id}}} auto-activated restored version {version_number} of document {{document:{document.document_id}}}"
         )
 
     db.commit()
@@ -2121,12 +2178,16 @@ def activate_document_version(
     # audit metadata
     target_version.activated_by = user_id
     target_version.activated_at = func.now()
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=document.project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="version",
+        resource_id=target_version.version_id,
         action="create",
-        detail=f"{user.name} activated version {version_number} of document '{document.title}'"
+        actor_user_id=user_id,
+        metadata={"document_id": document.document_id, "version_number": version_number},
+        description=f"User {{user:{user_id}}} activated version {version_number} of document {{document:{document.document_id}}}"
     )
 
     db.commit()
@@ -2302,6 +2363,7 @@ def move_document(
             old_folder.modified_by = user_id
 
     # Update document folder_id
+    old_folder_id = document.folder_id
     document.folder_id = folder_id
     document.last_modified = func.now()
     document.modified_by = user_id
@@ -2316,12 +2378,18 @@ def move_document(
     user = db.query(User).filter(User.user_id == user_id).first()
     user_name = user.name if user else f"User {user_id}"
 
-    create_audit_log(
+    AuditService.record_event(
         db=db,
         project_id=document.project_id,
-        user_id=user_id,
+        event_type="document",
+        resource_type="document",
+        resource_id=document.document_id,
         action="update",
-        detail=f"{user_name} moved document '{document.title}' to '{target_folder_name}'"
+        actor_user_id=user_id,
+        before={"folder_id": old_folder_id},
+        after={"folder_id": folder_id},
+        metadata={"updated_fields": ["folder_id"], "target_folder_name": target_folder_name},
+        description=f"User {{user:{user_id}}} moved document {{document:{document.document_id}}} to folder '{target_folder_name}'"
     )
 
     db.commit()
@@ -2523,12 +2591,16 @@ def bulk_restore_document_versions(
                     folder.last_modified = func.now()
                     folder.modified_by = user_id
 
-            create_audit_log(
+            AuditService.record_event(
                 db=db,
                 project_id=project_id,
-                user_id=user_id,
+                event_type="document",
+                resource_type="version",
+                resource_id=version.version_id,
                 action="system",
-                detail=f"{user_name} restored version {version.version_number} of document '{doc.title}' from trash"
+                actor_user_id=user_id,
+                metadata={"document_id": doc.document_id, "version_number": version.version_number},
+                description=f"User {{user:{user_id}}} restored version {version.version_number} of document {{document:{doc.document_id}}} from trash"
             )
 
             affected_doc_ids.add(doc.document_id)
@@ -2814,16 +2886,16 @@ def bulk_permanent_delete_document_versions(
         )
 
         for version, doc in target_rows:
-            create_audit_log(
+            AuditService.record_event(
                 db=db,
                 project_id=project_id,
-                user_id=user_id,
+                event_type="document",
+                resource_type="version",
+                resource_id=version.version_id,
                 action="delete",
-                detail=(
-                    f"{user_name} permanently deleted version "
-                    f"{version.version_number} of document "
-                    f"'{doc.title}'"
-                ),
+                actor_user_id=user_id,
+                metadata={"document_id": doc.document_id, "version_number": version.version_number},
+                description=f"User {{user:{user_id}}} permanently deleted version {version.version_number} of document {{document:{doc.document_id}}}"
             )
 
             db.delete(version)
