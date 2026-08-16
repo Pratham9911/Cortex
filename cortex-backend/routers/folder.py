@@ -400,6 +400,7 @@ def get_folder_documents(
             "owner_id": doc.owner_id,
 
             "version": active_version.version_number,
+            "active_version": active_version.version_number,
             "file_name": active_version.file_name,
             "file_size": active_version.file_size
 

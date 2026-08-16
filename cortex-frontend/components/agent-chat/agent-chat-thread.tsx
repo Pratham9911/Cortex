@@ -289,6 +289,15 @@ function getSourceIcon(fileName?: string | null) {
   if (lower.endsWith(".txt")) {
     return <img src="/icons/txt.svg" className="size-4.5 object-contain shrink-0" alt="TXT" />
   }
+  if (lower.endsWith(".md")) {
+    return <img src="/icons/md.png" className="size-4.5 object-contain shrink-0" alt="MD" />
+  }
+  if (lower.endsWith(".docx")) {
+    return <img src="/icons/docx.png" className="size-4.5 object-contain shrink-0" alt="DOCX" />
+  }
+  if (lower.endsWith(".pptx")) {
+    return <img src="/icons/pptx.png" className="size-4.5 object-contain shrink-0" alt="PPTX" />
+  }
   return <FileText className="size-4.5 text-indigo-500" />
 }
 
@@ -390,8 +399,12 @@ function MessageSources({
         >
           <div className="flex -space-x-1.5">
             {allIconSources.slice(0, 3).map((src, i) => {
-              const isPdf = src.title.toLowerCase().endsWith(".pdf")
-              const isTxt = src.title.toLowerCase().endsWith(".txt")
+              const lower = src.title.toLowerCase()
+              const isPdf = lower.endsWith(".pdf")
+              const isTxt = lower.endsWith(".txt")
+              const isMd = lower.endsWith(".md")
+              const isDocx = lower.endsWith(".docx")
+              const isPptx = lower.endsWith(".pptx")
               return (
                 <div
                   key={i}
@@ -410,6 +423,12 @@ function MessageSources({
                     <img src="/icons/pdf.svg" className="size-3.5 object-contain" alt="" />
                   ) : isTxt ? (
                     <img src="/icons/txt.svg" className="size-3.5 object-contain" alt="" />
+                  ) : isMd ? (
+                    <img src="/icons/md.png" className="size-3.5 object-contain" alt="" />
+                  ) : isDocx ? (
+                    <img src="/icons/docx.png" className="size-3.5 object-contain" alt="" />
+                  ) : isPptx ? (
+                    <img src="/icons/pptx.png" className="size-3.5 object-contain" alt="" />
                   ) : (
                     <FileText className="size-3 text-indigo-500" />
                   )}

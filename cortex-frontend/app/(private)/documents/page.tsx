@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef, useCallback } from "react"
+import { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
 import {
@@ -24,6 +24,7 @@ import {
   Sparkles,
   Clock,
   AlertTriangle,
+  FolderInput,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -68,7 +69,8 @@ type DocumentItem = {
   last_modified: string
   modified_by: number
   owner_id: number
-  active_version: number
+  active_version?: number
+  version?: number
   file_name: string
   file_size: number
   download_access_level?: "member" | "admin" | "none"
@@ -86,9 +88,11 @@ type TeamItem = { team_id: number; name: string }
 function FileIcon({ fileName, size = "sm" }: { fileName?: string; size?: "sm" | "lg" }) {
   const ext = fileName?.split(".").pop()?.toLowerCase()
   const dim = size === "lg" ? "w-16 h-16" : "w-4 h-4"
-  if (ext === "pdf") return <img src="/icons/pdf.svg" className={cn(dim, "object-contain")} alt="PDF" />
-  if (ext === "txt") return <img src="/icons/txt.svg" className={cn(dim, "object-contain")} alt="TXT" />
-  if (ext === "md")  return <img src="/icons/md.png"  className={cn(dim, "object-contain")} alt="MD" />
+  if (ext === "pdf")  return <img src="/icons/pdf.svg"  className={cn(dim, "object-contain")} alt="PDF" />
+  if (ext === "txt")  return <img src="/icons/txt.svg"  className={cn(dim, "object-contain")} alt="TXT" />
+  if (ext === "md")   return <img src="/icons/md.png"   className={cn(dim, "object-contain")} alt="MD" />
+  if (ext === "docx") return <img src="/icons/docx.png" className={cn(dim, "object-contain")} alt="DOCX" />
+  if (ext === "pptx") return <img src="/icons/pptx.png" className={cn(dim, "object-contain")} alt="PPTX" />
   return (
     <div className={cn("flex items-center justify-center rounded", size === "lg" ? "w-16 h-16 bg-zinc-200 dark:bg-zinc-700" : "")}>
       <svg className={cn(dim, "text-zinc-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -155,10 +159,18 @@ export default function DocumentsPage() {
   const [folderToDelete, setFolderToDelete]     = useState<FolderItem | null>(null)
   const [deleteDocsInFolder, setDeleteDocsInFolder] = useState(false)
 
-  // ── Document CRUD ───────────────────────────────────────────────────────────
+  // ── Document CRUD & Move ─────────────────────────────────────────────────────
   const [deleteDocOpen, setDeleteDocOpen]   = useState(false)
   const [docToDelete, setDocToDelete]       = useState<DocumentItem | null>(null)
   const [deleteDocLoading, setDeleteDocLoading] = useState(false)
+
+  const [moveModalOpen, setMoveModalOpen]                 = useState(false)
+  const [movingDoc, setMovingDoc]                         = useState<DocumentItem | null>(null)
+  const [selectedTargetFolderId, setSelectedTargetFolderId] = useState<number | "root" | null>(null)
+  const [isMoving, setIsMoving]                           = useState(false)
+  const [moveError, setMoveError]                         = useState("")
+  const [dragConfirmOpen, setDragConfirmOpen]             = useState(false)
+  const [dragTargetFolder, setDragTargetFolder]           = useState<{ folder_id: number; name: string } | null>(null)
 
   // ── Upload modal ─────────────────────────────────────────────────────────────
   const [uploadOpen, setUploadOpen]                     = useState(false)
@@ -291,30 +303,54 @@ export default function DocumentsPage() {
     return () => clearInterval(interval)
   }, [selectedDoc, docVersions, fetchDocVersions])
 
-  const handleRetryVersion = async (versionId: number) => {
-    if (!selectedDoc) return
-    setRetryingVersionId(versionId)
+  const canMoveDoc = (doc: DocumentItem) => {
+    if (currentUserRole === "admin") return true
+    if (!canViewDocContent(doc)) return false
+    if (doc.owner_id === user?.user_id) return true
+    return true
+  }
+
+  const handleMoveDocument = async (docId: number, targetFolderId: number | null) => {
+    setIsMoving(true)
+    setMoveError("")
     try {
       const token = localStorage.getItem("access_token")
-      const res = await fetch(`${apiUrl}/documents/${selectedDoc.document_id}/versions/${versionId}/retry`, {
-        method: "POST",
+      const url = targetFolderId != null
+        ? `${apiUrl}/documents/${docId}/move?folder_id=${targetFolderId}`
+        : `${apiUrl}/documents/${docId}/move`
+      const res = await fetch(url, {
+        method: "PATCH",
         headers: { Authorization: `Bearer ${token}` }
       })
       if (res.ok) {
-        fetchDocVersions(selectedDoc.document_id, true)
+        setMoveModalOpen(false)
+        setDragConfirmOpen(false)
+        setMovingDoc(null)
+        setMoveError("")
         fetchAll()
       } else {
         const errData = await res.json()
-        alert(errData.detail || "Failed to retry version ingestion")
+        setMoveError(errData.detail || "Failed to move document.")
       }
     } catch (err) {
-      console.error("Failed to retry version:", err)
+      console.error("Failed to move document:", err)
+      setMoveError("Something went wrong. Please try again.")
     } finally {
-      setRetryingVersionId(null)
+      setIsMoving(false)
     }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
+  const folderSizeMap = useMemo(() => {
+    const map: Record<number, number> = {}
+    allDocuments.forEach((doc) => {
+      if (doc.folder_id != null) {
+        map[doc.folder_id] = (map[doc.folder_id] || 0) + (doc.file_size || 0)
+      }
+    })
+    return map
+  }, [allDocuments])
+
   const formatSize = (b: number | null | undefined) => {
     if (b === null || b === undefined) return "--"
     if (b === 0) return "0 B"
@@ -363,12 +399,8 @@ export default function DocumentsPage() {
 
   const filteredFolders = folders.filter(f => f.name.toLowerCase().includes(query.toLowerCase()))
   const filteredDocs    = documents.filter(d => (d.title || d.file_name).toLowerCase().includes(query.toLowerCase()))
-  const folderSizeMap = allDocuments.reduce<Record<number, number>>((acc, doc) => {
-    if (doc.folder_id != null) {
-      acc[doc.folder_id] = (acc[doc.folder_id] || 0) + (doc.file_size || 0)
-    }
-    return acc
-  }, {})
+
+
 
   // ─── Folder CRUD ──────────────────────────────────────────────────────────
   const handleCreateFolder = async () => {
@@ -440,7 +472,8 @@ export default function DocumentsPage() {
     setDeleteDocLoading(true)
     try {
       const token = localStorage.getItem("access_token")
-      await fetch(`${apiUrl}/documents/${docToDelete.document_id}/versions/${docToDelete.active_version}/delete`, {
+      const verNum = docToDelete.active_version ?? docToDelete.version ?? 1
+      await fetch(`${apiUrl}/documents/${docToDelete.document_id}/versions/${verNum}/delete`, {
         method: "PATCH", headers: { Authorization: `Bearer ${token}` }
       })
       setDeleteDocOpen(false)
@@ -572,7 +605,7 @@ export default function DocumentsPage() {
   const handleFileSelect = (f: File) => {
     if (f.size > 5 * 1024 * 1024) { setUploadError("File exceeds 5MB limit."); return }
     const ext = f.name.split(".").pop()?.toLowerCase()
-    if (!["pdf","txt","md"].includes(ext||"")) { setUploadError("Only PDF, TXT, MD files are supported."); return }
+    if (!["pdf","txt","md","docx","pptx"].includes(ext||"")) { setUploadError("Only PDF, TXT, MD, DOCX, PPTX files are supported."); return }
     setUploadError("")
     setUploadFile(f)
     if (!uploadTitle) setUploadTitle(f.name.replace(/\.[^.]+$/, ""))
@@ -710,7 +743,7 @@ export default function DocumentsPage() {
           {/* ── Folders ── */}
           {filteredFolders.map(folder => (
             <div key={`f-${folder.folder_id}`}
-              className={cn(rowBase, isSelFolder(folder) ? rowSelected : rowIdle)}
+              className={cn(rowBase, isSelFolder(folder) ? rowSelected : rowIdle, folder.is_locked_for_user && "opacity-80")}
               onClick={() => selectFolder(folder)}
               onDoubleClick={() => {
                 if (folder.is_locked_for_user) {
@@ -718,15 +751,34 @@ export default function DocumentsPage() {
                 }
                 router.push(`/documents/${folder.folder_id}`)
               }}
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = "move"
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                try {
+                  const data = JSON.parse(e.dataTransfer.getData("application/json"))
+                  if (data && data.documentId) {
+                    if (data.currentFolderId === folder.folder_id) return
+                    const targetDoc = allDocuments.find(d => d.document_id === data.documentId) || ({ document_id: data.documentId, title: data.title, folder_id: data.currentFolderId } as DocumentItem)
+                    setMovingDoc(targetDoc)
+                    setDragTargetFolder({ folder_id: folder.folder_id, name: folder.name })
+                    setDragConfirmOpen(true)
+                  }
+                } catch (err) {}
+              }}
             >
               <div className="flex-1 flex items-center gap-2 min-w-0 pl-4">
-                {folder.is_locked_for_user
-                  ? <button onClick={e=>{e.stopPropagation();setLockedFolderInfo(folder);setLockModalOpen(true)}}
-                      className="flex items-center justify-center shrink-0 hover:scale-110 active:scale-95 transition-transform">
-                      <Lock className="h-3.5 w-3.5 text-red-500" />
-                    </button>
-                  : <FolderIcon className="w-4 h-4 text-amber-400 shrink-0" fill="currentColor" strokeWidth={0} />}
-                <span className={cn("truncate text-sm", isDark ? "text-zinc-200" : "text-slate-800")}>{folder.name}</span>
+                {folder.is_locked_for_user ? (
+                  <button onClick={e=>{e.stopPropagation();setLockedFolderInfo(folder);setLockModalOpen(true)}}
+                    className="flex items-center justify-center shrink-0 hover:scale-110 active:scale-95 transition-transform">
+                    <Lock className="h-3.5 w-3.5 text-red-500" />
+                  </button>
+                ) : (
+                  <FolderIcon className="w-4 h-4 text-amber-400 shrink-0" fill="currentColor" strokeWidth={0} />
+                )}
+                <span className={cn("truncate text-sm font-medium", isDark ? "text-zinc-200" : "text-slate-800")}>{folder.name}</span>
               </div>
               <div className={cn(colDate, isDark ? "text-zinc-500" : "text-slate-400")}>{formatDate(folder.last_modified || folder.created_at)}</div>
               <div className={cn(colSize, isDark ? "text-zinc-500" : "text-slate-400")}>{formatSize(folderSizeMap[folder.folder_id] ?? 0)}</div>
@@ -756,8 +808,12 @@ export default function DocumentsPage() {
           {/* ── Documents ── */}
           {filteredDocs.map(doc => (
             <div key={`d-${doc.document_id}`}
-              className={cn(rowBase, isSelDoc(doc) ? rowSelected : rowIdle)}
+              className={cn(rowBase, isSelDoc(doc) ? rowSelected : rowIdle, canMoveDoc(doc) && "cursor-grab active:cursor-grabbing")}
               onClick={() => selectDoc(doc)}
+              draggable={canMoveDoc(doc)}
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/json", JSON.stringify({ documentId: doc.document_id, title: doc.title, currentFolderId: doc.folder_id }))
+              }}
             >
               <div className="flex-1 flex items-center gap-2 min-w-0 pl-4">
                 {!canViewDocContent(doc) && (
@@ -770,7 +826,7 @@ export default function DocumentsPage() {
               <div className={cn(colSize, isDark ? "text-zinc-500" : "text-slate-400")}>{formatSize(doc.file_size)}</div>
               <div className={colUser}><UserAvatarSmall userId={doc.modified_by || doc.owner_id} /></div>
               <div className={colMenu} onClick={e=>e.stopPropagation()}>
-                {currentUserRole === "admin" && canViewDocContent(doc) && (
+                {canViewDocContent(doc) && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button className={cn("w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors", isDark ? "text-zinc-400" : "text-slate-400")}>
@@ -783,9 +839,16 @@ export default function DocumentsPage() {
                           <Download className="w-3.5 h-3.5 mr-2" /> Download
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem className="text-xs text-red-500" onClick={()=>{setDocToDelete(doc);setDeleteDocOpen(true)}}>
-                        <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
-                      </DropdownMenuItem>
+                      {canMoveDoc(doc) && (
+                        <DropdownMenuItem className="text-xs" onClick={() => { setMovingDoc(doc); setSelectedTargetFolderId(doc.folder_id ?? "root"); setMoveModalOpen(true) }}>
+                          <FolderInput className="w-3.5 h-3.5 mr-2" /> Move...
+                        </DropdownMenuItem>
+                      )}
+                      {currentUserRole === "admin" && (
+                        <DropdownMenuItem className="text-xs text-red-500" onClick={()=>{setDocToDelete(doc);setDeleteDocOpen(true)}}>
+                          <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
@@ -1346,6 +1409,137 @@ export default function DocumentsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Move document dialog */}
+      <Dialog open={moveModalOpen} onOpenChange={setMoveModalOpen}>
+        <DialogContent className={cn("sm:max-w-md", isDark ? "bg-[#181b24] border-zinc-800 text-white" : "")}>
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <FolderInput className="w-4 h-4 text-violet-500" />
+              Move Document
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-400 mt-1">
+              Select destination folder for <strong>"{movingDoc?.title}"</strong>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 max-h-64 overflow-y-auto my-2 pr-1">
+            {/* Root Option */}
+            <div
+              onClick={() => { setSelectedTargetFolderId("root"); setMoveError("") }}
+              className={cn(
+                "p-3 rounded-lg border flex items-center justify-between cursor-pointer transition-all text-xs",
+                selectedTargetFolderId === "root"
+                  ? isDark ? "border-violet-500 bg-violet-500/10 text-violet-400 font-bold" : "border-violet-500 bg-violet-50 text-violet-700 font-bold"
+                  : isDark ? "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+              )}
+            >
+              <div className="flex items-center gap-2.5">
+                <FolderIcon className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>Root (Main Workspace)</span>
+              </div>
+              {selectedTargetFolderId === "root" && <CheckSquare className="w-4 h-4 text-violet-500" />}
+            </div>
+
+            {/* Project Folders */}
+            {folders.map(f => {
+              const isSelected = selectedTargetFolderId === f.folder_id
+              const isCurrent = movingDoc?.folder_id === f.folder_id
+              return (
+                <div
+                  key={f.folder_id}
+                  onClick={() => { setSelectedTargetFolderId(f.folder_id); setMoveError("") }}
+                  className={cn(
+                    "p-3 rounded-lg border flex items-center justify-between cursor-pointer transition-all text-xs",
+                    isSelected
+                      ? isDark ? "border-violet-500 bg-violet-500/10 text-violet-400 font-bold" : "border-violet-500 bg-violet-50 text-violet-700 font-bold"
+                      : isDark ? "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                  )}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <FolderIcon className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span className="truncate">{f.name}</span>
+                    {isCurrent && <span className="text-[10px] text-zinc-500 font-normal ml-1">(Current)</span>}
+                  </div>
+                  {isSelected && <CheckSquare className="w-4 h-4 text-violet-500" />}
+                </div>
+              )
+            })}
+          </div>
+
+          {moveError && (
+            <div className={cn("flex items-start gap-2 px-3 py-2.5 rounded-lg border text-xs",
+              isDark ? "bg-red-500/10 border-red-500/30 text-red-400" : "bg-red-50 border-red-200 text-red-600")}>
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>{moveError}</span>
+            </div>
+          )}
+
+          <DialogFooter className="mt-2">
+            <button
+              onClick={() => { setMoveModalOpen(false); setMoveError("") }}
+              className="h-8 px-4 rounded-md text-sm border border-zinc-300 dark:border-zinc-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (!movingDoc) return
+                const targetId = selectedTargetFolderId === "root" ? null : selectedTargetFolderId
+                handleMoveDocument(movingDoc.document_id, targetId)
+              }}
+              disabled={isMoving || selectedTargetFolderId == null}
+              className="h-8 px-4 rounded-md text-sm bg-violet-600 hover:bg-violet-700 text-white font-semibold disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {isMoving ? <Spinner className="w-3.5 h-3.5 animate-spin" /> : null}
+              {isMoving ? "Moving..." : "Move Document"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Drag & drop confirmation dialog */}
+      <Dialog open={dragConfirmOpen} onOpenChange={(v) => { if (!v) { setDragConfirmOpen(false); setMoveError("") } }}>
+        <DialogContent className={cn("sm:max-w-sm", isDark ? "bg-[#181b24] border-zinc-800 text-white" : "")}>
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <FolderInput className="w-4 h-4 text-amber-500" />
+              Confirm Move
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-400 mt-2">
+              Move document <strong>"{movingDoc?.title}"</strong> into folder <strong>"{dragTargetFolder?.name}"</strong>?
+            </DialogDescription>
+          </DialogHeader>
+
+          {moveError && (
+            <div className={cn("flex items-start gap-2 px-3 py-2.5 rounded-lg border text-xs mt-2",
+              isDark ? "bg-red-500/10 border-red-500/30 text-red-400" : "bg-red-50 border-red-200 text-red-600")}>
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>{moveError}</span>
+            </div>
+          )}
+
+          <DialogFooter className="mt-4">
+            <button
+              onClick={() => { setDragConfirmOpen(false); setMoveError("") }}
+              className="h-8 px-4 rounded-md text-sm border border-zinc-300 dark:border-zinc-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (!movingDoc || !dragTargetFolder) return
+                handleMoveDocument(movingDoc.document_id, dragTargetFolder.folder_id)
+              }}
+              disabled={isMoving}
+              className="h-8 px-4 rounded-md text-sm bg-violet-600 hover:bg-violet-700 text-white font-semibold disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {isMoving ? <Spinner className="w-3.5 h-3.5 animate-spin" /> : null}
+              {isMoving ? "Moving..." : "Move"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Locked folder info */}
       <Dialog open={lockModalOpen} onOpenChange={setLockModalOpen}>
         <DialogContent className={cn("sm:max-w-md p-6 rounded-xl border backdrop-blur-md",
@@ -1441,7 +1635,7 @@ export default function DocumentsPage() {
                     : isDark ? "border-zinc-700 hover:border-zinc-500 bg-zinc-900/40" : "border-slate-200 hover:border-slate-300 bg-slate-50"
               )}
             >
-              <input ref={fileInputRef} type="file" accept=".pdf,.txt,.md" className="hidden"
+              <input ref={fileInputRef} type="file" accept=".pdf,.txt,.md,.docx,.pptx" className="hidden"
                 onChange={e=>{ const f=e.target.files?.[0]; if(f) handleFileSelect(f) }} />
               {uploadFile ? (
                 <>
@@ -1460,7 +1654,7 @@ export default function DocumentsPage() {
                     <p className={cn("text-xs font-semibold", isDark ? "text-zinc-300" : "text-slate-600")}>
                       Click here to upload your file or drag.
                     </p>
-                    <p className="text-[10px] text-zinc-400 mt-1">Supported Format: pdf, txt, md (upto 5mb each)</p>
+                    <p className="text-[10px] text-zinc-400 mt-1">Supported Format: pdf, txt, md, docx, pptx (upto 5mb each)</p>
                   </div>
                 </>
               )}
@@ -1618,7 +1812,7 @@ export default function DocumentsPage() {
           <DialogHeader>
             <DialogTitle className="text-sm">Upload New Version</DialogTitle>
             <DialogDescription className="text-xs text-zinc-400">
-              Select a new PDF, TXT, or MD file to upload as the latest version of this document.
+              Select a new PDF, TXT, MD, DOCX, or PPTX file to upload as the latest version of this document.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 mt-2">
@@ -1633,14 +1827,14 @@ export default function DocumentsPage() {
               <input
                 ref={verFileInputRef}
                 type="file"
-                accept=".pdf,.txt,.md"
+                accept=".pdf,.txt,.md,.docx,.pptx"
                 className="hidden"
                 onChange={e => {
                   const f = e.target.files?.[0]
                   if (f) {
                     if (f.size > 5 * 1024 * 1024) { setUploadVerError("File exceeds 5MB limit."); return }
                     const ext = f.name.split(".").pop()?.toLowerCase()
-                    if (!["pdf","txt","md"].includes(ext||"")) { setUploadVerError("Supported formats: PDF, TXT, MD"); return }
+                    if (!["pdf","txt","md","docx","pptx"].includes(ext||"")) { setUploadVerError("Supported formats: PDF, TXT, MD, DOCX, PPTX"); return }
                     setUploadVerError("")
                     setUploadVerFile(f)
                   }

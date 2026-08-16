@@ -1,9 +1,11 @@
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
-from document_acl import can_download_document, can_search_document, is_owner_override
+from document_acl import can_download_document, can_search_document, is_owner_override, is_project_owner, is_document_owner
 from dependencies import get_current_user
 from task_queue.ingestion_queue import enqueue_document_ingestion
 from sqlalchemy.sql import func
@@ -11,8 +13,11 @@ from models import User, Project, ProjectMember, Document, DocumentVersion , Doc
 from supabase_client import supabase
 from routers.audit import create_audit_log
 import re
+import logging
 from ingestion.extractor import extract_text
 from ingestion.inline_extractor import extract_and_embed_from_bytes
+
+logger = logging.getLogger("cortex.documents")
 
 router = APIRouter()
 def get_db():
@@ -27,328 +32,6 @@ def safe_filename(name: str):
     name = name.replace(" ", "_")
     name = re.sub(r"[^a-z0-9._-]", "", name)
     return name
-
-# @router.post("/projects/{project_id}/documents/upload")
-# def upload_document(
-#     project_id: int,
-
-#     title: str = Form(...),
-#     description: str = Form(""),
-#     tags: str = Form(""),
-
-#     download_access_level: str = Form("member"),
-#     search_access_level: str = Form("member"),
-
-#     allowed_team_ids: str = Form(...),
-
-#     folder_id: str | None = Form(None),
-
-#     file: UploadFile = File(...),
-
-#     user_id: int = Depends(get_current_user),
-#     db: Session = Depends(get_db)
-# ):
-
-#     # ---------------------------------------------------
-#     # 1. CHECK ADMIN ACCESS
-#     # ---------------------------------------------------
-#     membership = db.query(ProjectMember).filter(
-#         ProjectMember.project_id == project_id,
-#         ProjectMember.user_id == user_id
-#     ).first()
-
-#     user = db.query(User).filter(
-#         User.user_id == user_id
-#     ).first()
-
-#     if not membership or membership.role != "admin":
-#         raise HTTPException(
-#             status_code=403,
-#             detail="Only admin can upload"
-#         )
-
-#     # ---------------------------------------------------
-#     # 2. VALIDATE FILE TYPE
-#     # ---------------------------------------------------
-#     allowed_extensions = [".pdf", ".md", ".txt"]
-
-#     filename = file.filename.lower()
-
-#     if not any(filename.endswith(ext) for ext in allowed_extensions):
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Only PDF, MD, TXT files are allowed"
-#         )
-
-#     # ---------------------------------------------------
-#     # 3. VALIDATE ACCESS LEVELS
-#     # ---------------------------------------------------
-#     allowed_access_levels = ["admin", "member", "none"]
-
-#     if download_access_level not in allowed_access_levels:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Invalid download access level"
-#         )
-
-#     if search_access_level not in allowed_access_levels:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Invalid search access level"
-#         )
-
-#     # ---------------------------------------------------
-#     # 4. CHECK DUPLICATE TITLE IN SAME PROJECT
-#     # ---------------------------------------------------
-#     existing_doc = db.query(Document).filter(
-#         Document.project_id == project_id,
-#         Document.title == title
-#     ).first()
-
-#     if existing_doc:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Document title already exists in this project"
-#         )
-
-#     # ---------------------------------------------------
-#     # 5. VALIDATE TEAMS
-#     # allowed_team_ids example:
-#     # "1,2,3"
-#     # ---------------------------------------------------
-#     parsed_team_ids = []
-
-#     try:
-
-#         parsed_team_ids = [
-#             int(team_id.strip())
-#             for team_id in allowed_team_ids.split(",")
-#             if team_id.strip()
-#         ]
-
-#     except:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Invalid allowed_team_ids format"
-#         )
-
-#     if not parsed_team_ids:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Document must belong to at least one team"
-#         )
-
-#     existing_teams = db.query(Team).filter(
-#         Team.project_id == project_id,
-#         Team.team_id.in_(parsed_team_ids)
-#     ).all()
-
-#     if len(existing_teams) != len(parsed_team_ids):
-#         raise HTTPException(
-#             status_code=400,
-#             detail="One or more teams are invalid"
-#         )
-
-#     # ---------------------------------------------------
-#     # 6. VALIDATE FOLDER
-#     # ---------------------------------------------------
-#     if folder_id is not None:
-
-#         folder = db.query(Folder).filter(
-#             Folder.folder_id == folder_id,
-#             Folder.project_id == project_id
-#         ).first()
-
-#         if not folder:
-#             raise HTTPException(
-#                 status_code=404,
-#                 detail="Folder not found"
-#             )
-
-#     # ---------------------------------------------------
-#     # 7. PREPARE TAGS ARRAY
-#     # ---------------------------------------------------
-#     tag_list = []
-
-#     if tags.strip():
-
-#         tag_list = [
-#             tag.strip()
-#             for tag in tags.split(",")
-#             if tag.strip()
-#         ]
-
-#     # ---------------------------------------------------
-#     # 8. EXTRACT & EMBED FROM MEMORY (BEFORE DB/STORAGE WRITES)
-#     # ---------------------------------------------------
-#     try:
-#         file_bytes = file.file.read()
-#         file_size = len(file_bytes)
-#         mime_type = file.content_type
-        
-#         # Extract and embed inline (batched internally to 20 chunks)
-#         embedded_chunks = extract_and_embed_from_bytes(file_bytes, mime_type, file.filename)
-#     except HTTPException as he:
-#         raise he
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to process and embed document: {str(e)}"
-#         )
-
-#     # ---------------------------------------------------
-#     # 9. CREATE DOCUMENT ROW
-#     # ---------------------------------------------------
-#     new_document = Document(
-#         project_id=project_id,
-#         title=title,
-#         description=description,
-#         owner_id=user_id,
-#         modified_by=user_id,
-
-#         tags=tag_list,
-
-#         folder_id=folder_id,
-
-#         allowed_team_ids=parsed_team_ids,
-
-#         download_access_level=download_access_level,
-#         search_access_level=search_access_level
-#     )
-
-#     try:
-#         db.add(new_document)
-#         db.flush()  # Generate ID without committing
-#     except Exception as e:
-#         db.rollback()
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Database error during document creation: {str(e)}"
-#         )
-
-#     version_number = 1
-#     clean_name = safe_filename(file.filename)
-#     file_path = (
-#         f"{project_id}/"
-#         f"{new_document.document_id}/"
-#         f"v1/{clean_name}"
-#     )
-
-#     # ---------------------------------------------------
-#     # 10. UPLOAD TO STORAGE
-#     # ---------------------------------------------------
-#     try:
-#         supabase.storage.from_("documents").upload(
-#             path=file_path,
-#             file=file_bytes,
-#             file_options={
-#                 "content-type": mime_type
-#             }
-#         )
-#     except Exception as upload_error:
-#         db.rollback()  # Deletes document row from transaction
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to upload file to storage: {str(upload_error)}"
-#         )
-
-#     # ---------------------------------------------------
-#     # 11. CREATE VERSION & INSERT CHUNKS
-#     # ---------------------------------------------------
-#     try:
-#         new_version = DocumentVersion(
-#             document_id=new_document.document_id,
-
-#             version_number=version_number,
-
-#             storage_path=file_path,
-
-#             file_name=file.filename,
-#             mime_type=mime_type,
-#             file_size=file_size,
-
-#             is_active=True,
-
-#             uploaded_by=user_id,
-
-#             activated_by=user_id,
-#             activated_at=func.now()
-#         )
-
-#         db.add(new_version)
-#         db.flush()  # Generate version_id
-
-#         # Insert chunks
-#         for chunk in embedded_chunks:
-#             db_chunk = DocumentChunk(
-#                 project_id=project_id,
-#                 version_id=new_version.version_id,
-#                 chunk_index=chunk["chunk_index"],
-#                 content=chunk["content"],
-#                 page_number=chunk.get("page_number"),
-#                 embedding=chunk["embedding"]
-#             )
-#             db.add(db_chunk)
-#         db.flush()
-
-#         # Update search vector
-#         db.execute(text("""
-#             UPDATE document_chunks
-#             SET search_vector = to_tsvector('english', content)
-#             WHERE version_id = :version_id
-#         """), {
-#             "version_id": new_version.version_id
-#         })
-
-#         # Audit Log
-#         create_audit_log(
-#             db=db,
-#             project_id=project_id,
-#             user_id=user_id,
-#             action="create",
-#             detail=f"{user.name} uploaded document '{title}' with version 1"
-#         )
-
-#         # Update Folder Modified Date
-#         if folder_id is not None:
-#             folder = db.query(Folder).filter(Folder.folder_id == folder_id).first()
-#             if folder:
-#                 folder.last_modified = func.now()
-#                 folder.modified_by = user_id
-
-#         db.commit()
-
-#     except Exception as e:
-#         db.rollback()  # Rollback all database operations (document, version, chunks)
-#         # Attempt to clean up uploaded file in Supabase storage
-#         try:
-#             supabase.storage.from_("documents").remove([file_path])
-#         except Exception:
-#             pass
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Error finalizing document upload details: {str(e)}"
-#         )
-
-#     # ---------------------------------------------------
-#     # 12. RESPONSE
-#     # ---------------------------------------------------
-#     return {
-#         "message": "Document uploaded successfully",
-
-#         "document_id": new_document.document_id,
-
-#         "version": 1,
-
-#         "folder_id": folder_id,
-
-#         "allowed_team_ids": parsed_team_ids,
-
-#         "download_access_level": download_access_level,
-#         "search_access_level": search_access_level,
-
-#         "path": file_path
-#     }
 
 
 @router.post("/projects/{project_id}/documents/upload")
@@ -2542,3 +2225,766 @@ def list_document_versions(
         })
 
     return result
+
+
+# ---------------------------------------------------
+# MOVE DOCUMENT TO FOLDER / ROOT
+# ---------------------------------------------------
+@router.patch("/documents/{document_id}/move")
+def move_document(
+    document_id: int,
+    folder_id: Optional[int] = None,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    document = db.query(Document).filter(
+        Document.document_id == document_id
+    ).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    project = db.query(Project).filter(
+        Project.project_id == document.project_id
+    ).first()
+
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == document.project_id,
+        ProjectMember.user_id == user_id
+    ).first()
+
+    if not membership:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Authorization Check
+    is_admin = membership.role == "admin"
+    is_proj_owner = is_project_owner(project, user_id)
+    is_doc_owner = is_document_owner(document, user_id)
+    
+    if not (is_admin or is_proj_owner or is_doc_owner):
+        # If regular member, check if document permission is "none"
+        if document.search_access_level == "none" or document.download_access_level == "none":
+            raise HTTPException(status_code=403, detail="You do not have permission to move this document")
+        
+        # Check team access for member if applicable
+        user_team_ids = [
+            m.team_id for m in db.query(TeamMember).filter(TeamMember.user_id == user_id).all()
+        ]
+        if document.allowed_team_ids and not (set(document.allowed_team_ids) & set(user_team_ids)):
+            raise HTTPException(status_code=403, detail="You do not have team access to move this document")
+
+    # Target Folder Check
+    target_folder_name = "Root"
+    if folder_id is not None:
+        target_folder = db.query(Folder).filter(
+            Folder.folder_id == folder_id,
+            Folder.project_id == document.project_id
+        ).first()
+
+        if not target_folder:
+            raise HTTPException(status_code=404, detail="Target folder not found in this project")
+
+        # If regular member, verify folder team access
+        if not (is_admin or is_proj_owner):
+            user_team_ids = [
+                m.team_id for m in db.query(TeamMember).filter(TeamMember.user_id == user_id).all()
+            ]
+            if target_folder.allowed_team_ids and not (set(target_folder.allowed_team_ids) & set(user_team_ids)):
+                raise HTTPException(status_code=403, detail="You do not have access to the target folder")
+        
+        target_folder_name = target_folder.name
+
+    # Update modified date on old folder if exists
+    if document.folder_id is not None:
+        old_folder = db.query(Folder).filter(Folder.folder_id == document.folder_id).first()
+        if old_folder:
+            old_folder.last_modified = func.now()
+            old_folder.modified_by = user_id
+
+    # Update document folder_id
+    document.folder_id = folder_id
+    document.last_modified = func.now()
+    document.modified_by = user_id
+
+    # Update modified date on new folder if exists
+    if folder_id is not None:
+        new_folder = db.query(Folder).filter(Folder.folder_id == folder_id).first()
+        if new_folder:
+            new_folder.last_modified = func.now()
+            new_folder.modified_by = user_id
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    user_name = user.name if user else f"User {user_id}"
+
+    create_audit_log(
+        db=db,
+        project_id=document.project_id,
+        user_id=user_id,
+        action="update",
+        detail=f"{user_name} moved document '{document.title}' to '{target_folder_name}'"
+    )
+
+    db.commit()
+
+    return {
+        "message": "Document moved successfully",
+        "document_id": document.document_id,
+        "folder_id": document.folder_id
+    }
+
+
+# ---------------------------------------------------
+# TRASH & BULK OPERATIONS MODELS AND ROUTES
+# ---------------------------------------------------
+
+class BulkItemTarget(BaseModel):
+    version_id: Optional[int] = None
+    document_id: Optional[int] = None
+    version_number: Optional[int] = None
+
+
+class BulkActionRequest(BaseModel):
+    items: Optional[List[BulkItemTarget]] = None
+    version_ids: Optional[List[int]] = None
+
+
+@router.get("/projects/{project_id}/trash")
+@router.get("/projects/{project_id}/documents/trash")
+def list_trashed_documents(
+    project_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify membership
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id
+    ).first()
+
+    if not membership:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    project = db.query(Project).filter(Project.project_id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    is_admin = membership.role == "admin"
+    is_proj_owner = is_project_owner(project, user_id)
+
+    # Get all trashed versions for documents in this project
+    trashed_versions = db.query(DocumentVersion, Document).join(
+        Document, DocumentVersion.document_id == Document.document_id
+    ).filter(
+        Document.project_id == project_id,
+        DocumentVersion.is_deleted == True
+    ).order_by(
+        DocumentVersion.deleted_at.desc()
+    ).all()
+
+    # Pre-fetch user names and folder names
+    user_ids = set()
+    folder_ids = set()
+    for ver, doc in trashed_versions:
+        if doc.owner_id:
+            user_ids.add(doc.owner_id)
+        if ver.deleted_by:
+            user_ids.add(ver.deleted_by)
+        if doc.folder_id:
+            folder_ids.add(doc.folder_id)
+
+    users = db.query(User).filter(User.user_id.in_(list(user_ids))).all() if user_ids else []
+    user_map = {u.user_id: u.name for u in users}
+
+    folders = db.query(Folder).filter(Folder.folder_id.in_(list(folder_ids))).all() if folder_ids else []
+    folder_map = {f.folder_id: f.name for f in folders}
+
+    result = []
+    for ver, doc in trashed_versions:
+        is_doc_owner = is_document_owner(doc, user_id)
+        if not (is_admin or is_proj_owner or is_doc_owner):
+            if doc.search_access_level == "none":
+                continue
+
+        # Extract file extension / type
+        file_name = ver.file_name or doc.file_name or ""
+        ext = ""
+        if "." in file_name:
+            ext = "." + file_name.rsplit(".", 1)[-1].lower()
+        else:
+            ext = "file"
+
+        location_name = folder_map.get(doc.folder_id, "Root") if doc.folder_id else "Root"
+
+        result.append({
+            "version_id": ver.version_id,
+            "document_id": doc.document_id,
+            "version_number": ver.version_number,
+            "document": doc.title,
+            "title": doc.title,
+            "file_name": file_name,
+            "type": ext,
+            "owner_id": doc.owner_id,
+            "owner": user_map.get(doc.owner_id, f"User {doc.owner_id}"),
+            "size": ver.file_size or doc.file_size or 0,
+            "location": location_name,
+            "folder_id": doc.folder_id,
+            "delete_time": ver.deleted_at.isoformat() if ver.deleted_at else None,
+            "deleted_by": ver.deleted_by,
+            "deleted_by_name": user_map.get(ver.deleted_by, f"User {ver.deleted_by}") if ver.deleted_by else None,
+            "last_modified": (doc.last_modified or doc.created_at).isoformat() if (doc.last_modified or doc.created_at) else None
+        })
+
+    return result
+
+
+@router.post("/projects/{project_id}/documents/versions/bulk-restore")
+def bulk_restore_document_versions(
+    project_id: int,
+    payload: BulkActionRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id
+    ).first()
+
+    if not membership:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    project = db.query(Project).filter(Project.project_id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    is_admin = membership.role == "admin"
+    is_proj_owner = is_project_owner(project, user_id)
+
+    if not (is_admin or is_proj_owner):
+        raise HTTPException(status_code=403, detail="Only admins or project owners can perform bulk restore")
+
+    # Input resolution & deduplication
+    v_ids = set(payload.version_ids or [])
+    doc_ver_pairs = set()
+
+    if payload.items:
+        for item in payload.items:
+            if item.version_id:
+                v_ids.add(item.version_id)
+            elif item.document_id and item.version_number:
+                doc_ver_pairs.add((item.document_id, item.version_number))
+
+    total_items = len(v_ids) + len(doc_ver_pairs)
+    if total_items == 0:
+        return {"message": "No versions provided", "restored_count": 0, "restored_items": []}
+    if total_items > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 items allowed per bulk restore request")
+
+    query_conditions = []
+    if v_ids:
+        query_conditions.append(DocumentVersion.version_id.in_(list(v_ids)))
+    if doc_ver_pairs:
+        for doc_id, ver_num in doc_ver_pairs:
+            query_conditions.append(
+                (DocumentVersion.document_id == doc_id) & (DocumentVersion.version_number == ver_num)
+            )
+
+    from sqlalchemy import or_
+    target_rows = db.query(DocumentVersion, Document).join(
+        Document, DocumentVersion.document_id == Document.document_id
+    ).filter(
+        Document.project_id == project_id,
+        DocumentVersion.is_deleted == True,
+        or_(*query_conditions)
+    ).all()
+
+    if not target_rows:
+        return {"message": "No matching trashed versions found in project", "restored_count": 0, "restored_items": []}
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    user_name = user.name if user else f"User {user_id}"
+
+    restored_count = 0
+    restored_items = []
+    affected_doc_ids = set()
+
+    try:
+        for version, doc in target_rows:
+            version.is_deleted = False
+            version.deleted_at = None
+            version.deleted_by = None
+            version.is_active = False
+
+            doc.last_modified = func.now()
+            doc.modified_by = user_id
+
+            if doc.folder_id:
+                folder = db.query(Folder).filter(Folder.folder_id == doc.folder_id).first()
+                if folder:
+                    folder.last_modified = func.now()
+                    folder.modified_by = user_id
+
+            create_audit_log(
+                db=db,
+                project_id=project_id,
+                user_id=user_id,
+                action="system",
+                detail=f"{user_name} restored version {version.version_number} of document '{doc.title}' from trash"
+            )
+
+            affected_doc_ids.add(doc.document_id)
+            restored_count += 1
+            restored_items.append({
+                "document_id": doc.document_id,
+                "version_number": version.version_number,
+                "version_id": version.version_id
+            })
+
+        db.flush()
+
+        for doc_id in affected_doc_ids:
+            non_deleted = db.query(DocumentVersion).filter(
+                DocumentVersion.document_id == doc_id,
+                DocumentVersion.is_deleted == False
+            ).all()
+
+            if len(non_deleted) == 1:
+                sole_v = non_deleted[0]
+                sole_v.is_active = True
+                sole_v.activated_by = user_id
+                sole_v.activated_at = func.now()
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error during bulk restore in project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Bulk restore failed due to a database error")
+
+    return {
+        "message": f"Successfully restored {restored_count} versions",
+        "restored_count": restored_count,
+        "restored_items": restored_items
+    }
+
+
+@router.post("/projects/{project_id}/documents/versions/bulk-permanent-delete")
+def bulk_permanent_delete_document_versions(
+    project_id: int,
+    payload: BulkActionRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently delete document versions belonging to a project.
+
+    Guarantees:
+    - User must be a project admin.
+    - Maximum 20 unique requested targets.
+    - Cross-project version IDs cannot be deleted.
+    - Target rows and affected documents are locked during the transaction.
+    - DB changes are committed before Supabase storage cleanup.
+    - Latest remaining version is activated when necessary.
+    - Documents with no remaining versions are deleted.
+    - DB failures are rolled back.
+    - Storage cleanup failures do not corrupt the DB state.
+    """
+
+    from sqlalchemy import exists, func, or_, tuple_
+
+    MAX_BULK_DELETE = 20
+
+    # ------------------------------------------------------------------
+    # 1. Validate project admin access
+    # ------------------------------------------------------------------
+
+    membership = (
+        db.query(ProjectMember)
+        .filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not membership or membership.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only project admins can permanently delete versions",
+        )
+
+    # ------------------------------------------------------------------
+    # 2. Normalize request
+    #
+    # A version_id and a (document_id, version_number) pair are treated
+    # as the same target if they resolve to the same version.
+    # ------------------------------------------------------------------
+
+    requested_version_ids = {
+        int(version_id)
+        for version_id in (payload.version_ids or [])
+        if version_id is not None
+    }
+
+    requested_pairs = {
+        (int(item.document_id), int(item.version_number))
+        for item in (payload.items or [])
+        if (
+            item.version_id is None
+            and item.document_id is not None
+            and item.version_number is not None
+        )
+    }
+
+    # Items containing version_id take precedence.
+    for item in payload.items or []:
+        if item.version_id is not None:
+            requested_version_ids.add(int(item.version_id))
+
+    if not requested_version_ids and not requested_pairs:
+        return {
+            "message": "No versions provided",
+            "requested_count": 0,
+            "deleted_count": 0,
+            "not_found_count": 0,
+            "storage_cleanup_failed_count": 0,
+        }
+
+    # This is the maximum number of unique request selectors.
+    # Actual versions are deduplicated again after resolution.
+    requested_selector_count = (
+        len(requested_version_ids) + len(requested_pairs)
+    )
+
+    if requested_selector_count > MAX_BULK_DELETE:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Maximum {MAX_BULK_DELETE} unique versions are allowed "
+                "per bulk delete request"
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # 3. Build project-scoped target query
+    #
+    # The project filter is mandatory. This prevents a version_id from
+    # another project from being deleted.
+    # ------------------------------------------------------------------
+
+    conditions = []
+
+    if requested_version_ids:
+        conditions.append(
+            DocumentVersion.version_id.in_(requested_version_ids)
+        )
+
+    if requested_pairs:
+        conditions.append(
+            tuple_(
+                DocumentVersion.document_id,
+                DocumentVersion.version_number,
+            ).in_(list(requested_pairs))
+        )
+
+    target_rows = (
+        db.query(DocumentVersion, Document)
+        .join(
+            Document,
+            DocumentVersion.document_id == Document.document_id,
+        )
+        .filter(
+            Document.project_id == project_id,
+            or_(*conditions),
+        )
+        .with_for_update()
+        .all()
+    )
+
+    # ------------------------------------------------------------------
+    # 4. Deduplicate actual versions
+    # ------------------------------------------------------------------
+
+    target_by_version_id = {
+        version.version_id: (version, doc)
+        for version, doc in target_rows
+    }
+
+    target_rows = list(target_by_version_id.values())
+
+    if not target_rows:
+        return {
+            "message": "No matching versions found in project",
+            "requested_count": requested_selector_count,
+            "deleted_count": 0,
+            "not_found_count": requested_selector_count,
+            "storage_cleanup_failed_count": 0,
+        }
+
+    # ------------------------------------------------------------------
+    # 5. Calculate exact matched selectors
+    # ------------------------------------------------------------------
+
+    matched_version_ids = {
+        version.version_id
+        for version, _doc in target_rows
+    }
+
+    matched_pairs = {
+        (version.document_id, version.version_number)
+        for version, _doc in target_rows
+    }
+
+    matched_selector_count = (
+        len(requested_version_ids & matched_version_ids)
+        + len(requested_pairs & matched_pairs)
+    )
+
+    not_found_count = max(
+        requested_selector_count - matched_selector_count,
+        0,
+    )
+
+    deleted_version_ids = list(matched_version_ids)
+    deleted_count = len(deleted_version_ids)
+
+    affected_doc_ids = {
+        doc.document_id
+        for _version, doc in target_rows
+    }
+
+    # ------------------------------------------------------------------
+    # 6. Lock affected documents too.
+    # ------------------------------------------------------------------
+
+    locked_documents = (
+        db.query(Document)
+        .filter(
+            Document.document_id.in_(affected_doc_ids),
+            Document.project_id == project_id,
+        )
+        .with_for_update()
+        .all()
+    )
+
+    locked_doc_ids = {
+        doc.document_id
+        for doc in locked_documents
+    }
+
+    if locked_doc_ids != affected_doc_ids:
+        raise HTTPException(
+            status_code=409,
+            detail="One or more affected documents changed during deletion",
+        )
+
+    # ------------------------------------------------------------------
+    # 7. Collect storage paths before deleting ORM objects.
+    # ------------------------------------------------------------------
+
+    storage_paths_to_delete = {
+        version.storage_path
+        for version, _doc in target_rows
+        if version.storage_path
+    }
+
+    # ------------------------------------------------------------------
+    # 8. Load user for audit logging.
+    # ------------------------------------------------------------------
+
+    user = (
+        db.query(User)
+        .filter(User.user_id == user_id)
+        .first()
+    )
+
+    user_name = user.name if user else f"User {user_id}"
+
+    # ------------------------------------------------------------------
+    # 9. Database transaction
+    # ------------------------------------------------------------------
+
+    try:
+        (
+            db.query(DocumentChunk)
+            .filter(
+                DocumentChunk.version_id.in_(deleted_version_ids)
+            )
+            .delete(
+                synchronize_session=False
+            )
+        )
+
+        for version, doc in target_rows:
+            create_audit_log(
+                db=db,
+                project_id=project_id,
+                user_id=user_id,
+                action="delete",
+                detail=(
+                    f"{user_name} permanently deleted version "
+                    f"{version.version_number} of document "
+                    f"'{doc.title}'"
+                ),
+            )
+
+            db.delete(version)
+
+        db.flush()
+
+        for doc_id in affected_doc_ids:
+            remaining_versions = (
+                db.query(DocumentVersion)
+                .filter(
+                    DocumentVersion.document_id == doc_id
+                )
+                .with_for_update()
+                .order_by(
+                    DocumentVersion.version_number.desc()
+                )
+                .all()
+            )
+
+            if not remaining_versions:
+                document = (
+                    db.query(Document)
+                    .filter(
+                        Document.document_id == doc_id,
+                        Document.project_id == project_id,
+                    )
+                    .with_for_update()
+                    .first()
+                )
+
+                if document:
+                    db.delete(document)
+
+                continue
+
+            active_version_exists = (
+                db.query(
+                    exists().where(
+                        (DocumentVersion.document_id == doc_id)
+                        & (
+                            DocumentVersion.is_active.is_(True)
+                        )
+                    )
+                )
+                .scalar()
+            )
+
+            if not active_version_exists:
+                latest_remaining_version = remaining_versions[0]
+
+                latest_remaining_version.is_active = True
+                latest_remaining_version.activated_by = user_id
+                latest_remaining_version.activated_at = func.now()
+
+        db.flush()
+        db.commit()
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception:
+        db.rollback()
+
+        logger.exception(
+            "Bulk permanent deletion failed: project_id=%s user_id=%s "
+            "requested_version_ids=%s requested_pairs=%s",
+            project_id,
+            user_id,
+            list(requested_version_ids),
+            list(requested_pairs),
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Bulk deletion failed due to a database error",
+        )
+
+    # ------------------------------------------------------------------
+    # 10. Storage cleanup AFTER successful DB commit
+    # ------------------------------------------------------------------
+
+    storage_cleanup_failed_count = 0
+    storage_cleanup_failed_paths = []
+
+    if storage_paths_to_delete:
+        try:
+            storage_result = (
+                supabase.storage
+                .from_("documents")
+                .remove(list(storage_paths_to_delete))
+            )
+
+            if isinstance(storage_result, list):
+                removed_paths = set()
+
+                for item in storage_result:
+                    if isinstance(item, str):
+                        removed_paths.add(item)
+
+                    elif isinstance(item, dict):
+                        path = (
+                            item.get("name")
+                            or item.get("path")
+                        )
+
+                        if path:
+                            removed_paths.add(path)
+
+                if removed_paths:
+                    storage_cleanup_failed_paths = sorted(
+                        storage_paths_to_delete - removed_paths
+                    )
+
+        except Exception:
+            storage_cleanup_failed_paths = sorted(
+                storage_paths_to_delete
+            )
+
+            logger.exception(
+                "Supabase storage cleanup failed after DB commit: "
+                "project_id=%s user_id=%s version_ids=%s paths=%s",
+                project_id,
+                user_id,
+                deleted_version_ids,
+                storage_cleanup_failed_paths,
+            )
+
+    storage_cleanup_failed_count = len(
+        storage_cleanup_failed_paths
+    )
+
+    # ------------------------------------------------------------------
+    # 11. Response
+    # ------------------------------------------------------------------
+
+    if storage_cleanup_failed_count:
+        message = (
+            f"Successfully deleted {deleted_count} versions from the "
+            "database, but some storage files require cleanup"
+        )
+
+    elif not_found_count:
+        message = (
+            f"Successfully deleted {deleted_count} versions; "
+            f"{not_found_count} requested targets were not found "
+            "in this project"
+        )
+
+    else:
+        message = (
+            f"Successfully deleted {deleted_count} versions permanently"
+        )
+
+    return {
+        "message": message,
+        "requested_count": requested_selector_count,
+        "deleted_count": deleted_count,
+        "not_found_count": not_found_count,
+        "storage_cleanup_failed_count": storage_cleanup_failed_count,
+        "storage_cleanup_failed_paths": storage_cleanup_failed_paths,
+    }
+
+
