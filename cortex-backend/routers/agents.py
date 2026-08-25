@@ -368,3 +368,173 @@ def evaluate_hybrid(
         "results": results
     }
 
+import json
+
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage
+
+from agentic.main_graph import workflow
+
+
+
+
+
+@router.get("/agent")
+async def run_agent(question: str):
+
+    initial_state = {
+        "messages": [
+            HumanMessage(content=question)
+        ],
+        "question": question,
+        "answer": "",
+        "reasoning": "",
+        "tool_calls": [],
+        "sources": [],
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "iterations": 0,
+    }
+
+    def emit(event_type: str, **data):
+        payload = {"type": event_type, **data}
+        return f"data: {json.dumps(payload)}\n\n"
+
+
+    def event_generator():
+
+        # Final accumulated result
+        final_answer = ""
+        final_sources = []
+        input_tokens = 0
+        output_tokens = 0
+
+        # -------------------------
+        # AGENT STARTED
+        # -------------------------
+
+        yield emit(
+            "agent_started",
+            agent="main",
+        )
+
+        # -------------------------
+        # GRAPH STREAM
+        # -------------------------
+
+        for update in workflow.stream(
+            initial_state,
+            stream_mode="updates",
+        ):
+
+            for node_name, node_update in update.items():
+
+                # =========================
+                # CHAT NODE
+                # =========================
+
+                if node_name == "chat_node":
+
+                    reasoning = node_update.get(
+                        "reasoning",
+                        ""
+                    )
+
+                    answer = node_update.get(
+                        "answer",
+                        ""
+                    )
+
+                    tool_calls = node_update.get(
+                        "tool_calls",
+                        []
+                    )
+
+                    iteration = node_update.get(
+                        "iterations"
+                    )
+
+                    # Keep final values
+                    if answer:
+                        final_answer = answer
+
+                    input_tokens = node_update.get(
+                        "input_tokens",
+                        input_tokens,
+                    )
+
+                    output_tokens = node_update.get(
+                        "output_tokens",
+                        output_tokens,
+                    )
+
+                    # -------------------------
+                    # REASONING
+                    # -------------------------
+
+                    if reasoning:
+
+                        yield emit(
+                            "reasoning",
+                            iteration=iteration,
+                            content=reasoning,
+                        )
+
+                    # -------------------------
+                    # TOOL STARTED
+                    # -------------------------
+
+                    for tool_call in tool_calls:
+
+                        yield emit(
+                            "tool_started",
+                            iteration=iteration,
+                            tool=tool_call["name"],
+                            args=tool_call["args"],
+                            call_id=tool_call.get("id"),
+                        )
+
+                # =========================
+                # TOOL NODE
+                # =========================
+
+                elif node_name == "tool_node":
+
+                    yield emit(
+                        "tool_completed",
+                        tool="tool_node",
+                    )
+
+                # =========================
+                # COLLECT SOURCES
+                # =========================
+
+                elif node_name == "collect_tool_results":
+
+                    sources = node_update.get(
+                        "sources",
+                        []
+                    )
+
+                    if sources:
+                        final_sources = sources
+
+        # -------------------------
+        # EVERYTHING AT THE END
+        # -------------------------
+
+        yield emit(
+            "agent_completed",
+            agent="main",
+            answer=final_answer,
+            sources=final_sources,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+    )

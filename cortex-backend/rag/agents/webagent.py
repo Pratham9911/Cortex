@@ -225,6 +225,7 @@ Instructions:
 - Give clear answer and whatever information is relevant.
 - If you refer to a source, include its exact URL from the source data.
 - If the sources do not contain enough information, clearly say so.
+- DO NOT explain much unless the user asks for it.
 - Do NOT return JSON.
 - Return only the final answer.
 """

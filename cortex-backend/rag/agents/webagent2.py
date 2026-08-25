@@ -20,7 +20,7 @@ _TIGHTER_SYSTEM = (
 )
 
 # Fallback model used when compound search itself is too large.
-_FALLBACK_MODEL = "llama-3.3-70b-versatile"
+_FALLBACK_MODEL = "openai/gpt-oss-20b"
 
 
 def _is_413(exc: Exception) -> bool:
@@ -255,7 +255,7 @@ def run_groq_web_search(query: str):
 
     # ── Emit final answer ─────────────────────────────────────────────
     yield {
-        "type": "final",
+        "type": "final",    
         "intent": "web_search",
         "answer": message.content or "",
         "sources": sources
