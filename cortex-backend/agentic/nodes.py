@@ -1,8 +1,6 @@
 import os
 import json
 
-from typing import TypedDict, Annotated
-
 from dotenv import load_dotenv
 
 from langchain_core.messages import HumanMessage
@@ -14,14 +12,18 @@ from langgraph.prebuilt import ToolNode
 
 from langchain_core.messages import ToolMessage, AIMessage, HumanMessage, SystemMessage
 
-from agentic.tools import calculator , web_search
+from agentic.tools import calculator, web_agent_tool
 from agentic.state.main_state import AnswerState
 
 SYSTEM_PROMPT = SystemMessage(
-    content="You are a helpful, accurate AI assistant. do not waste tokens , Use available tools when necessary to provide precise and up-to-date answers." 
-    
-    
+    content=(
+        "You are a helpful, accurate AI assistant.\n"
+        "When web research is required, invoke the `web_agent` tool ONCE with a full, comprehensive prompt "
+        "combining all related sub-questions and research goals at once (e.g. 'Find A, then B, and C'). "
+        "Do NOT make fragmented, separate calls to `web_agent` for each individual sub-question."
+    )
 )
+
 
 load_dotenv()
 
@@ -31,13 +33,16 @@ MAX_ITERATIONS = 10
 
 
 llm = ChatFireworks(
-    model="accounts/fireworks/models/gpt-oss-20b",
+    model="accounts/fireworks/models/gpt-oss-120b",
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
 )
 
 
-tools = [calculator, web_search]
+
+
+
+tools = [calculator, web_agent_tool]
 
 llm = llm.bind_tools(tools)
 
@@ -175,6 +180,8 @@ def collect_tool_results(state: AnswerState) -> dict:
     sources = list(state.get("sources", []))
     existing_urls = {s.get("url") for s in sources if s.get("url")}
 
+    additional_input_tokens = 0
+    additional_output_tokens = 0
     updated_messages = []
 
     for message in state.get("messages", []):
@@ -190,6 +197,9 @@ def collect_tool_results(state: AnswerState) -> dict:
                 parsed = content
 
             if isinstance(parsed, dict):
+                additional_input_tokens += parsed.get("input_tokens", 0)
+                additional_output_tokens += parsed.get("output_tokens", 0)
+
                 new_sources = parsed.get("sources", [])
                 if isinstance(new_sources, list):
                     for src in new_sources:
@@ -201,11 +211,15 @@ def collect_tool_results(state: AnswerState) -> dict:
                             if url:
                                 existing_urls.add(url)
 
-                clean_answer = parsed.get("answer", content)
+                clean_answer = parsed.get("answer", "")
                 if isinstance(clean_answer, (dict, list)):
                     clean_answer = json.dumps(clean_answer)
                 else:
                     clean_answer = str(clean_answer)
+
+                # Strict Guard: Never leak sources array into ToolMessage content
+                if not clean_answer.strip():
+                    clean_answer = "Tool execution completed."
 
                 msg_id = getattr(message, "id", None)
                 if clean_answer != content and msg_id:
@@ -218,23 +232,64 @@ def collect_tool_results(state: AnswerState) -> dict:
                         )
                     )
 
-    res = {"sources": sources}
+    res = {
+        "sources": sources,
+        "input_tokens": state.get("input_tokens", 0) + additional_input_tokens,
+        "output_tokens": state.get("output_tokens", 0) + additional_output_tokens,
+    }
     if updated_messages:
         res["messages"] = updated_messages
 
     return res
 
 
-def route_after_chat(state: AnswerState):
+def force_synthesis_node(state: AnswerState) -> dict:
+    """
+    Graph-enforced synthesis node for Main Agent.
+    Uses base LLM with NO tools bound to force final answer synthesis.
+    """
+    raw_messages = state.get("messages", [])
+    clean_messages = sanitize_messages(raw_messages)
 
-    if state.get("iterations", 0) >= MAX_ITERATIONS:
+    synthesis_prompt = SystemMessage(
+        content=(
+            "You have reached maximum tool iterations. "
+            "Using ONLY the information gathered so far in the conversation, provide a clear, final answer to the user."
+        )
+    )
+
+    messages_to_send = [synthesis_prompt] + clean_messages
+    llm_base = ChatFireworks(
+        model="accounts/fireworks/models/gpt-oss-120b",
+        api_key=os.getenv("FIREWORKS_API_KEY"),
+        temperature=0,
+    )
+    response = llm_base.invoke(messages_to_send)
+    usage = response.usage_metadata or {}
+    reasoning = response.additional_kwargs.get("reasoning_content", "")
+
+    return {
+        "messages": [response],
+        "answer": response.content or "",
+        "reasoning": reasoning,
+        "tool_calls": [],
+        "input_tokens": state.get("input_tokens", 0) + usage.get("input_tokens", 0),
+        "output_tokens": state.get("output_tokens", 0) + usage.get("output_tokens", 0),
+        "iterations": state.get("iterations", 0) + 1,
+    }
+
+
+def route_after_chat(state: AnswerState):
+    iterations = state.get("iterations", 0)
+
+    if iterations >= MAX_ITERATIONS:
         return END
 
-    last_message = state["messages"][-1]
+    if iterations >= MAX_ITERATIONS - 1:
+        return "force_synthesis_node"
 
+    last_message = state["messages"][-1]
     if getattr(last_message, "tool_calls", None):
         return "tool_node"
 
     return END
-
-

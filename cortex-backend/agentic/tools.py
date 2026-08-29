@@ -1,6 +1,45 @@
 import os
-from groq import Groq
+import contextvars
+import threading
 from langchain_core.tools import tool
+
+_global_callback_lock = threading.Lock()
+_global_active_callback = None
+active_event_callback: contextvars.ContextVar = contextvars.ContextVar("active_event_callback", default=None)
+
+
+def set_active_event_callback(cb):
+    global _global_active_callback
+    with _global_callback_lock:
+        _global_active_callback = cb
+    active_event_callback.set(cb)
+
+
+def get_active_event_callback():
+    cb = active_event_callback.get()
+    if cb is not None:
+        return cb
+    with _global_callback_lock:
+        return _global_active_callback
+
+
+@tool("web_agent")
+def web_agent_tool(query: str) -> dict:
+    """
+    Delegate ALL web research tasks to the specialized Web Agent in ONE call.
+    The Web Agent can research multiple unrelated topics simultaneously and return a combined answer.
+    CRITICAL: Bundle 3-4 web sub-questions into a single call — e.g. 'find population of india and china and compare with us'.
+    Do NOT call web_agent separately for each sub-question. One comprehensive call handles everything.
+    The agent returns a single structured result with the full answer and sources.
+    """
+    from agentic.sub_agents.web_agent import run_web_agent
+
+    callback = get_active_event_callback()
+    result = run_web_agent(query=query, event_callback=callback)
+    return result
+
+
+
 
 
 @tool
@@ -49,10 +88,13 @@ def summarize_tool_output(query: str, answer: str, threshold: int = LARGE_OUTPUT
         from langchain_core.messages import HumanMessage
 
         llm = ChatFireworks(
-            model="accounts/fireworks/models/gpt-oss-20b",
+            model="accounts/fireworks/models/gpt-oss-120b",
             api_key=os.getenv("FIREWORKS_API_KEY"),
             temperature=0,
         )
+
+
+
 
         prompt = (
             f"Synthesize and summarize the following web search text "
@@ -74,7 +116,9 @@ def summarize_tool_output(query: str, answer: str, threshold: int = LARGE_OUTPUT
 @tool
 def web_search(query: str) -> dict:
     """
-    Search the web for current, factual, or recent information for similar things at a time.
+    Search the web for current information. You can combine 1-2 related or unrelated topics in one query and give it clear query with what needed
+    (e.g. 'actual india gdp per capital compared to us in 2023') — the tool returns a direct answer
+    covering all topics. Use this with 1-2 tasks at once and not call it again and again increasing iterations
     """
 
     answer = ""
@@ -94,7 +138,8 @@ def web_search(query: str) -> dict:
 
         search_results = tavily_client.search(
             query=query,
-            include_answer=True,
+            include_answer="advanced",
+            search_depth="fast",
             include_raw_content=False,
             include_favicon=True,
             max_results=5
@@ -195,6 +240,7 @@ def web_search(query: str) -> dict:
                         "sources",
                         []
                     )
+
 
         except Exception as e:
 

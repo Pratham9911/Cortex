@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage
 
 from agentic.main_graph import workflow
 from agentic.state.main_state import AnswerState
+from agentic.tools import active_event_callback
 
 load_dotenv()
 
@@ -12,15 +13,12 @@ if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-
     question = (
-      "find the ceo of tinyfish and glean and compare  pricing of both and find the best option for a small business with 10 employees"
+        "find the ceo of tinyfish and glean and compare pricing of both and find the best option for a small business with 10 employees"
     )
 
     initial_state: AnswerState = {
-        "messages": [
-            HumanMessage(content=question)
-        ],
+        "messages": [HumanMessage(content=question)],
         "question": question,
         "answer": "",
         "reasoning": "",
@@ -31,7 +29,14 @@ if __name__ == "__main__":
         "iterations": 0,
     }
 
-    result = workflow.invoke(initial_state)
+    def print_agent_event(event_type: str, agent: str = "main", **data):
+        print(f"[{agent.upper()} EVENT] {event_type} -> {data}")
+
+    token = active_event_callback.set(print_agent_event)
+    try:
+        result = workflow.invoke(initial_state)
+    finally:
+        active_event_callback.reset(token)
 
     print("\n\n==============================")
     print("FINAL RESULT")
@@ -57,7 +62,5 @@ if __name__ == "__main__":
 
     print(f"\nSources ({len(result.get('sources', []))} found):")
     for source in result.get("sources", []):
-        print(
-            f"- {source.get('title', '')} "
-            f"| {source.get('url', '')}"
-        )
+        print(f"- {source.get('title', '')} | {source.get('url', '')}")
+

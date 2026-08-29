@@ -380,6 +380,9 @@ from agentic.main_graph import workflow
 
 
 
+from agentic.tools import active_event_callback
+
+
 @router.get("/agent")
 async def run_agent(question: str):
 
@@ -401,7 +404,6 @@ async def run_agent(question: str):
         payload = {"type": event_type, **data}
         return f"data: {json.dumps(payload)}\n\n"
 
-
     def event_generator():
 
         # Final accumulated result
@@ -409,6 +411,10 @@ async def run_agent(question: str):
         final_sources = []
         input_tokens = 0
         output_tokens = 0
+        pending_events = []
+
+        def sub_event_emitter(event_type: str, agent: str = "main", **data):
+            pending_events.append((event_type, {"agent": agent, **data}))
 
         # -------------------------
         # AGENT STARTED
@@ -423,102 +429,132 @@ async def run_agent(question: str):
         # GRAPH STREAM
         # -------------------------
 
-        for update in workflow.stream(
-            initial_state,
-            stream_mode="updates",
-        ):
+        from agentic.tools import set_active_event_callback
+        set_active_event_callback(sub_event_emitter)
 
-            for node_name, node_update in update.items():
+        try:
+            for update in workflow.stream(
+                initial_state,
+                stream_mode="updates",
+            ):
 
-                # =========================
-                # CHAT NODE
-                # =========================
+                while pending_events:
+                    evt_type, evt_data = pending_events.pop(0)
+                    yield emit(evt_type, **evt_data)
 
-                if node_name == "chat_node":
+                for node_name, node_update in update.items():
 
-                    reasoning = node_update.get(
-                        "reasoning",
-                        ""
-                    )
+                    # =========================
+                    # CHAT NODE & FORCE SYNTHESIS NODE
+                    # =========================
 
-                    answer = node_update.get(
-                        "answer",
-                        ""
-                    )
+                    if node_name in ("chat_node", "force_synthesis_node"):
 
-                    tool_calls = node_update.get(
-                        "tool_calls",
-                        []
-                    )
-
-                    iteration = node_update.get(
-                        "iterations"
-                    )
-
-                    # Keep final values
-                    if answer:
-                        final_answer = answer
-
-                    input_tokens = node_update.get(
-                        "input_tokens",
-                        input_tokens,
-                    )
-
-                    output_tokens = node_update.get(
-                        "output_tokens",
-                        output_tokens,
-                    )
-
-                    # -------------------------
-                    # REASONING
-                    # -------------------------
-
-                    if reasoning:
-
-                        yield emit(
+                        reasoning = node_update.get(
                             "reasoning",
-                            iteration=iteration,
-                            content=reasoning,
+                            ""
                         )
 
-                    # -------------------------
-                    # TOOL STARTED
-                    # -------------------------
+                        answer = node_update.get(
+                            "answer",
+                            ""
+                        )
 
-                    for tool_call in tool_calls:
+                        tool_calls = node_update.get(
+                            "tool_calls",
+                            []
+                        )
+
+                        iteration = node_update.get(
+                            "iterations"
+                        )
+
+                        # Keep final values
+                        if answer:
+                            final_answer = answer
+
+                        input_tokens = node_update.get(
+                            "input_tokens",
+                            input_tokens,
+                        )
+
+                        output_tokens = node_update.get(
+                            "output_tokens",
+                            output_tokens,
+                        )
+
+                        # -------------------------
+                        # REASONING
+                        # -------------------------
+
+                        if reasoning:
+
+                            yield emit(
+                                "reasoning",
+                                agent="main",
+                                iteration=iteration,
+                                content=reasoning,
+                            )
+
+                        # -------------------------
+                        # TOOL STARTED
+                        # -------------------------
+
+                        for tool_call in tool_calls:
+
+                            yield emit(
+                                "tool_started",
+                                agent="main",
+                                iteration=iteration,
+                                tool=tool_call["name"],
+                                args=tool_call["args"],
+                                call_id=tool_call.get("id"),
+                            )
+
+                    # =========================
+                    # TOOL NODE
+                    # =========================
+
+                    elif node_name == "tool_node":
 
                         yield emit(
-                            "tool_started",
-                            iteration=iteration,
-                            tool=tool_call["name"],
-                            args=tool_call["args"],
-                            call_id=tool_call.get("id"),
+                            "tool_completed",
+                            agent="main",
+                            tool="web_agent",
                         )
 
-                # =========================
-                # TOOL NODE
-                # =========================
+                    # =========================
+                    # COLLECT SOURCES & TOKENS
+                    # =========================
 
-                elif node_name == "tool_node":
+                    elif node_name == "collect_tool_results":
 
-                    yield emit(
-                        "tool_completed",
-                        tool="tool_node",
-                    )
+                        sources = node_update.get(
+                            "sources",
+                            []
+                        )
 
-                # =========================
-                # COLLECT SOURCES
-                # =========================
+                        if sources:
+                            final_sources = sources
 
-                elif node_name == "collect_tool_results":
+                        input_tokens = node_update.get(
+                            "input_tokens",
+                            input_tokens,
+                        )
 
-                    sources = node_update.get(
-                        "sources",
-                        []
-                    )
+                        output_tokens = node_update.get(
+                            "output_tokens",
+                            output_tokens,
+                        )
 
-                    if sources:
-                        final_sources = sources
+                while pending_events:
+                    evt_type, evt_data = pending_events.pop(0)
+                    yield emit(evt_type, **evt_data)
+
+        finally:
+            set_active_event_callback(None)
+
+
 
         # -------------------------
         # EVERYTHING AT THE END
