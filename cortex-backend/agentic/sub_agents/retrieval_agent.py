@@ -7,8 +7,8 @@ from langchain_fireworks import ChatFireworks
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 
-from agentic.tools import web_search
-from agentic.state.web_state import WebSearchState
+from agentic.tools import project_search
+from agentic.state.retrieval_state import RetrievalState
 from agentic.sub_agents.base import SubAgentResult, SubAgentEventCallback
 
 load_dotenv()
@@ -17,38 +17,35 @@ MAX_ITERATIONS = 8
 
 SYSTEM_PROMPT = SystemMessage(
     content=(
-        "You are a specialized Web Search Sub-Agent. Your task is to perform targeted web searches "
-        "using the web_search tool to answer all parts of the user's research query efficiently.\n\n"
+        "You are a specialized Retrieval Sub-Agent. Your task is to search internal project documents "
+        "using the project_search tool to answer all parts of the user's project research query efficiently.\n\n"
         "RULES:\n"
-        "1. Use Web Search with clear sentence and not just simple keywords.\n"
+        "1. Execute project_search tool calls to gather necessary facts from internal project files.\n"
         "2. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately.\n"
-        "HOW TO ANSWER:\n"
-        " - Only use the information gathered without adding any external knowledge.\n" \
-        " - Only answer what is important to the user's query. Do not include irrelevant information.\n"
+        "3. Synthesize your final answer directly as a clear, facts-only text response without making any further tool calls."
     )
 )
 
-
-# LLM with tools — used for iterative web search
-web_llm_with_tools = ChatFireworks(
-    model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
-    api_key=os.getenv("FIREWORKS_API_KEY"),
-    temperature=0,
-)
-
-# LLM without tools — used for forced synthesis (graph-level enforcement)
-web_llm_base = ChatFireworks(
+# LLM with tools — used for iterative project document retrieval
+retrieval_llm_with_tools = ChatFireworks(
     model="accounts/fireworks/models/gpt-oss-120b",
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
 )
 
-tools = [web_search]
-web_llm = web_llm_with_tools.bind_tools(tools)
-web_tool_node = ToolNode(tools)
+# LLM without tools — used for forced synthesis (graph-level enforcement)
+retrieval_llm_base = ChatFireworks(
+    model="accounts/fireworks/models/gpt-oss-120b",
+    api_key=os.getenv("FIREWORKS_API_KEY"),
+    temperature=0,
+)
+
+tools = [project_search]
+retrieval_llm = retrieval_llm_with_tools.bind_tools(tools)
+retrieval_tool_node = ToolNode(tools)
 
 
-def sanitize_web_messages(messages: list) -> list:
+def sanitize_retrieval_messages(messages: list) -> list:
     sanitized = []
     for msg in messages:
         if isinstance(msg, AIMessage):
@@ -97,9 +94,9 @@ def sanitize_web_messages(messages: list) -> list:
     return sanitized
 
 
-def print_web_messages(node_name: str, messages: list, iteration: int):
-    print(f"\n==================== WEB AGENT [{node_name}] (Iteration: {iteration}) ====================")
-    print(f"--- MESSAGES SENT TO WEB LLM (Count: {len(messages)}) ---")
+def print_retrieval_messages(node_name: str, messages: list, iteration: int):
+    print(f"\n==================== RETRIEVAL AGENT [{node_name}] (Iteration: {iteration}) ====================")
+    print(f"--- MESSAGES SENT TO RETRIEVAL LLM (Count: {len(messages)}) ---")
     for i, msg in enumerate(messages):
         msg_type = type(msg).__name__
         content_preview = repr(msg.content)
@@ -116,9 +113,9 @@ def print_web_messages(node_name: str, messages: list, iteration: int):
     print("--------------------------------------------------------------------------------")
 
 
-def web_chat_node(state: WebSearchState) -> dict:
+def retrieval_chat_node(state: RetrievalState) -> dict:
     raw_messages = state.get("messages", [])
-    clean_messages = sanitize_web_messages(raw_messages)
+    clean_messages = sanitize_retrieval_messages(raw_messages)
     current_iteration = state.get("iterations", 0)
 
     if not clean_messages or not isinstance(clean_messages[0], SystemMessage):
@@ -126,9 +123,9 @@ def web_chat_node(state: WebSearchState) -> dict:
     else:
         messages_to_send = clean_messages
 
-    print_web_messages("web_chat_node", messages_to_send, current_iteration + 1)
+    print_retrieval_messages("retrieval_chat_node", messages_to_send, current_iteration + 1)
 
-    response = web_llm.invoke(messages_to_send)
+    response = retrieval_llm.invoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
@@ -142,11 +139,11 @@ def web_chat_node(state: WebSearchState) -> dict:
     ]
 
     if reasoning:
-        print(f"[WEB AGENT REASONING]: {reasoning}")
+        print(f"[RETRIEVAL AGENT REASONING]: {reasoning}")
     if tool_calls:
-        print(f"[WEB AGENT TOOL CALLS]: {tool_calls}")
+        print(f"[RETRIEVAL AGENT TOOL CALLS]: {tool_calls}")
     if response.content:
-        print(f"[WEB AGENT RESPONSE PREVIEW]: {repr(response.content[:200])}...")
+        print(f"[RETRIEVAL AGENT RESPONSE PREVIEW]: {repr(response.content[:200])}...")
 
     return {
         "messages": [response],
@@ -159,10 +156,13 @@ def web_chat_node(state: WebSearchState) -> dict:
     }
 
 
-
-def collect_web_tool_results(state: WebSearchState) -> dict:
-    sources = list(state.get("sources", []))
-    existing_urls = {s.get("url") for s in sources if s.get("url")}
+def collect_retrieval_tool_results(state: RetrievalState) -> dict:
+    chunks = list(state.get("chunks", []))
+    existing_chunk_ids = {
+        (c.get("document", {}).get("document_id"), c.get("chunk", {}).get("page_number"))
+        for c in chunks
+        if isinstance(c, dict)
+    }
     updated_messages = []
 
     for message in state.get("messages", []):
@@ -178,26 +178,26 @@ def collect_web_tool_results(state: WebSearchState) -> dict:
                 parsed = content
 
             if isinstance(parsed, dict):
-                new_sources = parsed.get("sources", [])
-                if isinstance(new_sources, list):
-                    for src in new_sources:
-                        if isinstance(src, dict):
-                            url = src.get("url")
-                            if url and url in existing_urls:
+                new_chunks = parsed.get("chunks", [])
+                if isinstance(new_chunks, list):
+                    for chk in new_chunks:
+                        if isinstance(chk, dict):
+                            doc_id = chk.get("document", {}).get("document_id")
+                            page_no = chk.get("chunk", {}).get("page_number")
+                            key = (doc_id, page_no)
+                            if key in existing_chunk_ids:
                                 continue
-                            sources.append(src)
-                            if url:
-                                existing_urls.add(url)
+                            chunks.append(chk)
+                            existing_chunk_ids.add(key)
 
-                clean_answer = parsed.get("answer", content)
+                clean_answer = parsed.get("answer", "")
                 if isinstance(clean_answer, (dict, list)):
                     clean_answer = json.dumps(clean_answer)
                 else:
                     clean_answer = str(clean_answer)
 
-                # Guard: never overwrite with empty string
                 if not clean_answer.strip():
-                    clean_answer = content if isinstance(content, str) else json.dumps(parsed)
+                    clean_answer = "Project retrieval tool execution completed."
 
                 msg_id = getattr(message, "id", None)
                 if clean_answer != content and msg_id:
@@ -210,42 +210,35 @@ def collect_web_tool_results(state: WebSearchState) -> dict:
                         )
                     )
 
-    res = {"sources": sources}
+    res = {"chunks": chunks}
     if updated_messages:
         res["messages"] = updated_messages
     return res
 
 
-def force_synthesis_node(state: WebSearchState) -> dict:
-    """
-    Graph-enforced synthesis node — called when MAX_ITERATIONS-1 is reached.
-    Uses the base LLM (NO tools bound) so the model physically cannot call
-    any tool regardless of what it wants to do.
-    """
+def force_synthesis_node(state: RetrievalState) -> dict:
     raw_messages = state.get("messages", [])
-    clean_messages = sanitize_web_messages(raw_messages)
+    clean_messages = sanitize_retrieval_messages(raw_messages)
 
     synthesis_prompt = SystemMessage(
         content=(
-            "You have completed all allowed web searches. "
+            "You have completed all allowed project document searches. "
             "Using ONLY the information gathered so far, write a complete, clear, facts-only final answer. "
             "Do not ask for more information or suggest further searches."
         )
     )
 
     messages_to_send = [synthesis_prompt] + clean_messages
-    print_web_messages("force_synthesis_node", messages_to_send, state.get("iterations", 0) + 1)
+    print_retrieval_messages("force_synthesis_node", messages_to_send, state.get("iterations", 0) + 1)
 
-    # web_llm_base has NO tools bound — LLM cannot call tools even if it tries
-    response = web_llm_base.invoke(messages_to_send)
+    response = retrieval_llm_base.invoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
     if reasoning:
-        print(f"[WEB AGENT FORCE SYNTHESIS REASONING]: {reasoning}")
+        print(f"[RETRIEVAL AGENT FORCE SYNTHESIS REASONING]: {reasoning}")
     if response.content:
-        print(f"[WEB AGENT FORCE SYNTHESIS RESPONSE PREVIEW]: {repr(response.content[:200])}...")
-
+        print(f"[RETRIEVAL AGENT FORCE SYNTHESIS RESPONSE PREVIEW]: {repr(response.content[:200])}...")
 
     return {
         "messages": [response],
@@ -258,76 +251,73 @@ def force_synthesis_node(state: WebSearchState) -> dict:
     }
 
 
-def web_route_after_chat(state: WebSearchState):
+def retrieval_route_after_chat(state: RetrievalState):
     iterations = state.get("iterations", 0)
 
-    # Hard limit
     if iterations >= MAX_ITERATIONS:
         return END
 
-    # At MAX_ITERATIONS-1, force synthesis via dedicated node (no tool calls possible)
     if iterations >= MAX_ITERATIONS - 1:
         return "force_synthesis_node"
 
     last_message = state["messages"][-1]
     if getattr(last_message, "tool_calls", None):
-        return "web_tool_node"
+        return "retrieval_tool_node"
 
     return END
 
 
-
-builder = StateGraph(WebSearchState)
-builder.add_node("web_chat_node", web_chat_node)
-builder.add_node("web_tool_node", web_tool_node)
-builder.add_node("collect_web_tool_results", collect_web_tool_results)
+builder = StateGraph(RetrievalState)
+builder.add_node("retrieval_chat_node", retrieval_chat_node)
+builder.add_node("retrieval_tool_node", retrieval_tool_node)
+builder.add_node("collect_retrieval_tool_results", collect_retrieval_tool_results)
 builder.add_node("force_synthesis_node", force_synthesis_node)
 
-builder.add_edge(START, "web_chat_node")
+builder.add_edge(START, "retrieval_chat_node")
 builder.add_conditional_edges(
-    "web_chat_node",
-    web_route_after_chat,
+    "retrieval_chat_node",
+    retrieval_route_after_chat,
     {
-        "web_tool_node": "web_tool_node",
+        "retrieval_tool_node": "retrieval_tool_node",
         "force_synthesis_node": "force_synthesis_node",
         END: END,
     },
 )
-builder.add_edge("web_tool_node", "collect_web_tool_results")
-builder.add_edge("collect_web_tool_results", "web_chat_node")
+builder.add_edge("retrieval_tool_node", "collect_retrieval_tool_results")
+builder.add_edge("collect_retrieval_tool_results", "retrieval_chat_node")
 builder.add_edge("force_synthesis_node", END)
 
-web_subgraph = builder.compile()
+retrieval_subgraph = builder.compile()
 
 
-def run_web_agent(query: str, event_callback: SubAgentEventCallback = None) -> SubAgentResult:
+def run_retrieval_agent(query: str, event_callback: SubAgentEventCallback = None) -> SubAgentResult:
     """
-    Execute Web Agent Subgraph, stream events via callback tagged with agent="web_agent",
+    Execute Retrieval Agent Subgraph, stream events via callback tagged with agent="retrieval_agent",
     and return final SubAgentResult.
     """
-    initial_state: WebSearchState = {
+    initial_state: RetrievalState = {
         "messages": [HumanMessage(content=query)],
         "question": query,
         "answer": "",
         "reasoning": "",
         "tool_calls": [],
-        "sources": [],
+        "chunks": [],
         "input_tokens": 0,
         "output_tokens": 0,
         "iterations": 0,
     }
 
     if event_callback:
-        event_callback("agent_started", agent="web_agent", goal=query)
+        event_callback("agent_started", agent="retrieval_agent", goal=query)
 
     final_answer = ""
-    final_sources = []
+    final_chunks = []
     input_tokens = 0
     output_tokens = 0
 
-    for update in web_subgraph.stream(initial_state, stream_mode="updates"):
+    for update in retrieval_subgraph.stream(initial_state, stream_mode="updates"):
         for node_name, node_update in update.items():
-            if node_name in ("web_chat_node", "force_synthesis_node"):
+            if node_name in ("retrieval_chat_node", "force_synthesis_node"):
                 reasoning = node_update.get("reasoning", "")
                 answer = node_update.get("answer", "")
                 tool_calls = node_update.get("tool_calls", [])
@@ -342,7 +332,7 @@ def run_web_agent(query: str, event_callback: SubAgentEventCallback = None) -> S
                 if event_callback and reasoning:
                     event_callback(
                         "reasoning",
-                        agent="web_agent",
+                        agent="retrieval_agent",
                         iteration=iteration,
                         content=reasoning,
                     )
@@ -351,48 +341,44 @@ def run_web_agent(query: str, event_callback: SubAgentEventCallback = None) -> S
                     for call in tool_calls:
                         event_callback(
                             "tool_started",
-                            agent="web_agent",
+                            agent="retrieval_agent",
                             iteration=iteration,
                             tool=call["name"],
                             args=call["args"],
                             call_id=call.get("id"),
                         )
 
-            elif node_name == "web_tool_node":
+            elif node_name == "retrieval_tool_node":
                 if event_callback:
-                    event_callback("tool_completed", agent="web_agent", tool="web_search")
+                    event_callback("tool_completed", agent="retrieval_agent", tool="project_search")
 
-            elif node_name == "collect_web_tool_results":
-                sources = node_update.get("sources", [])
-                if sources:
-                    final_sources = sources
+            elif node_name == "collect_retrieval_tool_results":
+                chunks = node_update.get("chunks", [])
+                if chunks:
+                    final_chunks = chunks
 
-    # Fallback: if web agent never emitted a text answer, use a placeholder
-    # so the ToolMessage is never empty and the main agent doesn't loop again
     if not final_answer.strip():
-        if final_sources:
+        if final_chunks:
             final_answer = (
-                "Web research completed. Gathered sources are listed. "
-                "Please synthesize the answer from the collected sources."
+                "Project document search completed. Retrieved relevant passages from project files."
             )
         else:
-            final_answer = "No relevant web results were found for the given query."
+            final_answer = "No relevant information found in the project documents for the given query."
 
     if event_callback:
         event_callback(
             "agent_completed",
-            agent="web_agent",
+            agent="retrieval_agent",
             answer=final_answer,
-            sources=final_sources,
+            chunks=final_chunks,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
 
     return {
-        "agent_name": "web_agent",
+        "agent_name": "retrieval_agent",
         "answer": final_answer,
-        "sources": final_sources,
+        "chunks": final_chunks,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
     }
-

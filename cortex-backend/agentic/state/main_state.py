@@ -13,7 +13,8 @@ class AnswerState(TypedDict):
     reasoning: str
     tool_calls: list[dict]
     sources: list[dict]
+    chunks: list[dict]
 
     input_tokens: int
     output_tokens: int
-    iterations: int
+    iterations: int

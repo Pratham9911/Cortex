@@ -507,27 +507,7 @@ def handle_project_knowledge(
     validate_response=True
 ):
 
-    # ----------------------------------------
-    # Rewrite Query
-    # ----------------------------------------
-    # yield {
-    #     "type": "status",
-    #     "step": "rewrite",
-    #     "message": "Preparing the search..."
-    # }
-
-    # rewrite_result = rewrite_query(query)
-
-    # rewritten_query = rewrite_result[
-    #     "rewritten_query"
-    # ]
-
-    # yield {
-    #     "type": "debug",
-    #     "step": "rewrite",
-    #     "original_query": query,
-    #     "rewritten_query": rewritten_query
-    # }
+ 
 
     # ----------------------------------------
     # Retrieval

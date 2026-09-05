@@ -7,8 +7,9 @@ import remarkGfm from "remark-gfm"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { downloadDocument } from "@/lib/ai-agent"
 import { cn } from "@/lib/utils"
-import type { Message, ThinkingEvent } from "./types"
+import type { Message, MessageSources, ThinkingEvent } from "./types"
 import { AgentThinkingIndicator } from "./agent-thinking-indicator"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 type AgentChatThreadProps = {
   messages: Message[]
@@ -80,7 +81,245 @@ function TableCellContent({ children }: { children: React.ReactNode }) {
   )
 }
 
-function AssistantMessageContent({ content, isDark }: { content: string; isDark: boolean }) {
+function extractDocCitationInfo(
+  href?: string,
+  children?: React.ReactNode
+): { docId: number; page?: number } | null {
+  const childStr = flattenMarkdownChildren(children)
+  const fullStr = `${href || ""} ${childStr}`
+  const lowerStr = fullStr.toLowerCase()
+
+  if (
+    !lowerStr.includes("cortex.cite") &&
+    !lowerStr.includes("cite") &&
+    !lowerStr.includes("/doc/")
+  ) {
+    return null
+  }
+
+  let docId: number | undefined
+  const docMatch =
+    fullStr.match(/\/doc\/(\d+)/i) ||
+    fullStr.match(/doc[_\-\s]*(\d+)/i) ||
+    fullStr.match(/cite[_\-\s]*(\d+)/i)
+
+  if (docMatch) {
+    docId = parseInt(docMatch[1], 10)
+  }
+
+  let page: number | undefined
+  const pageMatch =
+    fullStr.match(/[?&]page=(\d+)/i) ||
+    fullStr.match(/[:\s_]p(?:age)?\.?\s*(\d+)/i)
+
+  if (pageMatch) {
+    page = parseInt(pageMatch[1], 10)
+  }
+
+  if (docId !== undefined && !isNaN(docId)) {
+    return { docId, page }
+  }
+
+  return null
+}
+
+function preprocessCitationTokens(content: string): string {
+  if (!content) return ""
+
+  // Match `[cite: doc_34:p1]`, `【cite: doc_34:p1】`, [cite: doc_34:p1], etc. (with or without backticks `)
+  let processed = content.replace(
+    /`?\s*[\[【\(\{]cite[:：]\s*doc_?(\d+)(?:[:：]p?\.?\s*(\d+))?[\]】\)\}]\s*`?/gi,
+    (_, docId, page) => {
+      return page ? ` [cite:doc-${docId}-p${page}](https://cortex.cite/doc/${docId}?page=${page}) ` : ` [cite:doc-${docId}](https://cortex.cite/doc/${docId}) `
+    }
+  )
+
+  processed = processed.replace(
+    /`?\s*[\[【\(\{]cite[:：]\s*(\d+)(?:[:：]p?\.?\s*(\d+))?[\]】\)\}]\s*`?/gi,
+    (_, docId, page) => {
+      return page ? ` [cite:doc-${docId}-p${page}](https://cortex.cite/doc/${docId}?page=${page}) ` : ` [cite:doc-${docId}](https://cortex.cite/doc/${docId}) `
+    }
+  )
+
+  processed = processed.replace(
+    /`?\s*[\[【\(\{]doc[:：]?\s*(\d+)(?:,\s*page[:：]?\s*(\d+))?[\]】\)\}]\s*`?/gi,
+    (_, docId, page) => {
+      return page ? ` [cite:doc-${docId}-p${page}](https://cortex.cite/doc/${docId}?page=${page}) ` : ` [cite:doc-${docId}](https://cortex.cite/doc/${docId}) `
+    }
+  )
+
+  processed = processed.replace(/`?\s*\{pg\s*no\.?\s*(\d+)\s*of\s*doc\s*(\d+)\}\s*`?/gi, (_, page, docId) => {
+    return ` [cite:doc-${docId}-p${page}](https://cortex.cite/doc/${docId}?page=${page}) `
+  })
+  processed = processed.replace(/`?\s*\{from\s*doc\s*(\d+)\}\s*`?/gi, (_, docId) => {
+    return ` [cite:doc-${docId}](https://cortex.cite/doc/${docId}) `
+  })
+
+  return processed
+}
+
+function getSourceIcon(fileName?: string | null) {
+  if (!fileName) return <FileText className="size-4 text-indigo-500 shrink-0" />
+  const lower = fileName.toLowerCase()
+  if (lower.endsWith(".pdf")) {
+    return <img src="/icons/pdf.svg" className="size-4 object-contain shrink-0" alt="PDF" />
+  }
+  if (lower.endsWith(".txt")) {
+    return <img src="/icons/txt.svg" className="size-4 object-contain shrink-0" alt="TXT" />
+  }
+  if (lower.endsWith(".md")) {
+    return <img src="/icons/md.png" className="size-4 object-contain shrink-0" alt="MD" />
+  }
+  if (lower.endsWith(".docx") || lower.endsWith(".doc")) {
+    return <img src="/icons/docx.png" className="size-4 object-contain shrink-0" alt="DOCX" />
+  }
+  if (lower.endsWith(".pptx") || lower.endsWith(".ppt")) {
+    return <img src="/icons/pptx.png" className="size-4 object-contain shrink-0" alt="PPTX" />
+  }
+  return <FileText className="size-4 text-indigo-500 shrink-0" />
+}
+
+function InlineDocCitationBadge({
+  docId,
+  page,
+  sources,
+  isDark,
+  onSourceAccessChanged,
+}: {
+  docId: number
+  page?: number | null
+  sources?: MessageSources | null
+  isDark: boolean
+  onSourceAccessChanged?: () => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const docSource = (sources?.documents ?? []).find((d) => d.document_id === docId)
+
+  const fileName = docSource?.file_name
+  const rawTitle = docSource?.document_title || docSource?.file_name || `Doc #${docId}`
+  const pageText = page ? `pg ${page}` : ""
+
+  const displayTitle = rawTitle.length > 20 ? `${rawTitle.slice(0, 18)}...` : rawTitle
+
+  const handleDownload = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (docSource?.can_download !== false) {
+      void downloadDocument(docId).catch((error) => {
+        onSourceAccessChanged?.()
+        window.alert(
+          error instanceof Error
+            ? error.message
+            : "You no longer have permission to download this document."
+        )
+      })
+    }
+  }
+
+  return (
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <PopoverTrigger asChild>
+        <span
+          onMouseEnter={() => setIsOpen(true)}
+          onMouseLeave={() => setIsOpen(false)}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setIsOpen(!isOpen)
+          }}
+          className={cn(
+            "inline-flex items-center gap-1.5 px-2 py-0.5 mx-1 rounded-full text-[11px] font-semibold border transition-all duration-150 shadow-2xs align-middle select-none cursor-pointer hover:scale-[1.04] active:scale-[0.96]",
+            isDark
+              ? "bg-indigo-950/70 border-indigo-700/60 text-indigo-300 hover:bg-indigo-900/80 hover:border-indigo-500/80"
+              : "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300"
+          )}
+        >
+          {/* 1. Document Format Icon */}
+          <span className="shrink-0 flex items-center justify-center">
+            {getSourceIcon(fileName)}
+          </span>
+
+          {/* 2. Page Number */}
+          {pageText ? (
+            <span
+              className={cn(
+                "text-[9.5px] font-semibold px-1 py-0.2 rounded-xs shrink-0",
+                isDark ? "bg-indigo-900/80 text-indigo-200" : "bg-indigo-100 text-indigo-800"
+              )}
+            >
+              {pageText}
+            </span>
+          ) : null}
+
+          {/* 3. Document Title */}
+          <span className="truncate max-w-[140px] font-medium">{displayTitle}</span>
+        </span>
+      </PopoverTrigger>
+
+      <PopoverContent
+        onMouseEnter={() => setIsOpen(true)}
+        onMouseLeave={() => setIsOpen(false)}
+        className={cn(
+          "w-[320px] rounded-xl border p-3.5 shadow-2xl z-50 pointer-events-auto",
+          isDark
+            ? "bg-zinc-900 border-zinc-700/60 text-zinc-200"
+            : "bg-white border-slate-200 text-slate-800"
+        )}
+        align="start"
+        side="top"
+        sideOffset={6}
+      >
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "flex items-center justify-center size-9 rounded-lg shrink-0 overflow-hidden",
+            isDark ? "bg-zinc-800" : "bg-slate-100"
+          )}>
+            {getSourceIcon(fileName)}
+          </div>
+
+          <div className="min-w-0 flex-1 flex flex-col justify-center">
+            <div className="font-semibold text-xs leading-snug line-clamp-2">
+              {rawTitle}
+            </div>
+            <div className="flex items-center gap-2 text-[10px] mt-0.5 text-slate-400 dark:text-zinc-500">
+              {page ? <span className="font-medium text-indigo-400">Page {page}</span> : null}
+              {fileName && fileName !== rawTitle ? <span className="truncate">{fileName}</span> : null}
+            </div>
+          </div>
+
+          {docSource?.can_download !== false ? (
+            <button
+              type="button"
+              onClick={handleDownload}
+              className={cn(
+                "grid size-7 shrink-0 place-items-center rounded-md transition-colors cursor-pointer",
+                isDark ? "hover:bg-zinc-800 text-zinc-300" : "hover:bg-slate-100 text-slate-600"
+              )}
+              title="Download document"
+              aria-label="Download document"
+            >
+              <Download className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function AssistantMessageContent({
+  content,
+  isDark,
+  sources,
+  onSourceAccessChanged,
+}: {
+  content: string
+  isDark: boolean
+  sources?: MessageSources | null
+  onSourceAccessChanged?: () => void
+}) {
+  const processedContent = preprocessCitationTokens(content)
+
   return (
     <div className={cn(
       "prose prose-sm max-w-none text-[13.5px] leading-relaxed break-words",
@@ -88,6 +327,7 @@ function AssistantMessageContent({ content, isDark }: { content: string; isDark:
     )}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={(url) => url}
         components={{
           h1: ({ children }) => <h1 className="text-base font-bold mt-4 mb-2 first:mt-0 text-zinc-900 dark:text-white">{children}</h1>,
           h2: ({ children }) => <h2 className="text-[15px] font-semibold mt-3.5 mb-1.5 first:mt-0 text-zinc-900 dark:text-zinc-100">{children}</h2>,
@@ -97,6 +337,19 @@ function AssistantMessageContent({ content, isDark }: { content: string; isDark:
           ol: ({ children }) => <ol className="list-decimal pl-5 mb-2.5 space-y-1">{children}</ol>,
           li: ({ children }) => <li className="leading-relaxed">{children}</li>,
           a: ({ href, children }) => {
+            const citation = extractDocCitationInfo(href, children)
+            if (citation) {
+              return (
+                <InlineDocCitationBadge
+                  docId={citation.docId}
+                  page={citation.page}
+                  sources={sources}
+                  isDark={isDark}
+                  onSourceAccessChanged={onSourceAccessChanged}
+                />
+              )
+            }
+
             let faviconUrl = ""
             if (href && href.startsWith("http")) {
               try {
@@ -148,14 +401,29 @@ function AssistantMessageContent({ content, isDark }: { content: string; isDark:
           code: ({ className, children, ...props }) => {
             const match = /language-(\w+)/.exec(className || "");
             const inline = !match;
-            return inline ? (
-              <code className={cn(
-                "px-1.5 py-0.5 rounded-md font-mono text-[12px]",
-                isDark ? "bg-zinc-800 text-zinc-200" : "bg-slate-100 text-slate-800"
-              )} {...props}>
-                {children}
-              </code>
-            ) : (
+            if (inline) {
+              const citation = extractDocCitationInfo(undefined, children)
+              if (citation) {
+                return (
+                  <InlineDocCitationBadge
+                    docId={citation.docId}
+                    page={citation.page}
+                    sources={sources}
+                    isDark={isDark}
+                    onSourceAccessChanged={onSourceAccessChanged}
+                  />
+                )
+              }
+              return (
+                <code className={cn(
+                  "px-1.5 py-0.5 rounded-md font-mono text-[12px]",
+                  isDark ? "bg-zinc-800 text-zinc-200" : "bg-slate-100 text-slate-800"
+                )} {...props}>
+                  {children}
+                </code>
+              )
+            }
+            return (
               <code className={className} {...props}>
                 {children}
               </code>
@@ -263,13 +531,13 @@ function AssistantMessageContent({ content, isDark }: { content: string; isDark:
           ),
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   )
 }
 
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+
 
 type AggregatedDocumentSource = {
   document_id: number
@@ -278,27 +546,6 @@ type AggregatedDocumentSource = {
   version_number?: number | null
   can_download?: boolean
   pages: number[]
-}
-
-function getSourceIcon(fileName?: string | null) {
-  if (!fileName) return <FileText className="size-4.5 text-indigo-500" />
-  const lower = fileName.toLowerCase()
-  if (lower.endsWith(".pdf")) {
-    return <img src="/icons/pdf.svg" className="size-4.5 object-contain shrink-0" alt="PDF" />
-  }
-  if (lower.endsWith(".txt")) {
-    return <img src="/icons/txt.svg" className="size-4.5 object-contain shrink-0" alt="TXT" />
-  }
-  if (lower.endsWith(".md")) {
-    return <img src="/icons/md.png" className="size-4.5 object-contain shrink-0" alt="MD" />
-  }
-  if (lower.endsWith(".docx")) {
-    return <img src="/icons/docx.png" className="size-4.5 object-contain shrink-0" alt="DOCX" />
-  }
-  if (lower.endsWith(".pptx")) {
-    return <img src="/icons/pptx.png" className="size-4.5 object-contain shrink-0" alt="PPTX" />
-  }
-  return <FileText className="size-4.5 text-indigo-500" />
 }
 
 function formatPages(pages: number[], fileName?: string | null) {
@@ -358,7 +605,7 @@ function MessageSources({
 
   const documentGroups = Object.values(aggregatedDocs)
   documentGroups.forEach((group) => {
-    group.pages.sort((a, b) => a - b)
+    group.pages.sort((a: number, b: number) => a - b)
   })
 
   const allIconSources = [
@@ -736,7 +983,12 @@ export function AgentChatThread({
                 {isUser ? (
                   message.content
                 ) : (
-                  <AssistantMessageContent content={message.content} isDark={isDark} />
+                  <AssistantMessageContent
+                    content={message.content}
+                    isDark={isDark}
+                    sources={message.sources}
+                    onSourceAccessChanged={onSourceAccessChanged}
+                  />
                 )}
                 {!isUser ? (
                   <MessageSources

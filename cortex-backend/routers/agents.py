@@ -369,32 +369,321 @@ def evaluate_hybrid(
     }
 
 import json
-
+from uuid import uuid4
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
 from agentic.main_graph import workflow
+from agentic.checkpointer import delete_checkpoint
+
+from typing import Optional
+from agentic.tools import set_active_event_callback, set_active_project_context
 
 
 
 
+def emit(event_type: str, **data):
+    payload = {"type": event_type, **data}
+    return f"data: {json.dumps(payload)}\n\n"
 
-from agentic.tools import active_event_callback
 
+@router.get("/projects/{project_id}/agent")
+async def run_agent(
+    project_id: int,
+    question: str,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Validate project membership
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id,
+    ).first()
 
-@router.get("/agent")
-async def run_agent(question: str):
+    if not membership:
+        raise HTTPException(status_code=403, detail="Access denied to this project")
+
+    user_role = membership.role
+    thread_id = str(uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
 
     initial_state = {
-        "messages": [
-            HumanMessage(content=question)
-        ],
+        "messages": [HumanMessage(content=question)],
         "question": question,
         "answer": "",
         "reasoning": "",
         "tool_calls": [],
         "sources": [],
+        "chunks": [],
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "iterations": 0,
+    }
+
+    def event_generator():
+        # Open a dedicated db session that lives for the full stream
+        stream_db = SessionLocal()
+
+        final_answer = ""
+        final_sources = []
+        final_chunks = []
+        input_tokens = 0
+        output_tokens = 0
+        pending_events = []
+        is_interrupted = False
+
+        def sub_event_emitter(event_type: str, agent: str = "main", **data):
+            pending_events.append((event_type, {"agent": agent, **data}))
+
+        yield emit("agent_started", agent="main", thread_id=thread_id)
+
+        set_active_event_callback(sub_event_emitter)
+        set_active_project_context(
+            project_id=project_id,
+            user_id=user_id,
+            user_role=user_role,
+            db=stream_db,
+        )
+
+        try:
+            for update in workflow.stream(initial_state, config=config, stream_mode="updates"):
+
+                while pending_events:
+                    evt_type, evt_data = pending_events.pop(0)
+                    yield emit(evt_type, **evt_data)
+
+                for node_name, node_update in update.items():
+
+                    if node_name == "__interrupt__":
+                        is_interrupted = True
+                        interrupt_val = node_update[0].value if node_update else {}
+                        if isinstance(interrupt_val, dict):
+                            yield emit("interrupt", agent="main", thread_id=thread_id, **interrupt_val)
+                        else:
+                            yield emit("interrupt", agent="main", thread_id=thread_id, details=str(interrupt_val))
+                        break
+
+                    if node_name in ("chat_node", "force_synthesis_node"):
+                        reasoning = node_update.get("reasoning", "")
+                        answer = node_update.get("answer", "")
+                        tool_calls = node_update.get("tool_calls", [])
+                        iteration = node_update.get("iterations")
+
+                        if answer:
+                            final_answer = answer
+                        input_tokens = node_update.get("input_tokens", input_tokens)
+                        output_tokens = node_update.get("output_tokens", output_tokens)
+
+                        if reasoning:
+                            yield emit("reasoning", agent="main", iteration=iteration, content=reasoning)
+
+                        for tc in tool_calls:
+                            yield emit("tool_started", agent="main", iteration=iteration,
+                                       tool=tc["name"], args=tc["args"], call_id=tc.get("id"))
+
+                    elif node_name == "tool_node":
+                        yield emit("tool_completed", agent="main", tool="sub_agent")
+
+                    elif node_name == "collect_tool_results":
+                        sources = node_update.get("sources", [])
+                        chunks = node_update.get("chunks", [])
+                        if sources:
+                            final_sources = sources
+                        if chunks:
+                            final_chunks = chunks
+                        input_tokens = node_update.get("input_tokens", input_tokens)
+                        output_tokens = node_update.get("output_tokens", output_tokens)
+
+                if is_interrupted:
+                    return
+
+                while pending_events:
+                    evt_type, evt_data = pending_events.pop(0)
+                    yield emit(evt_type, **evt_data)
+
+            # Workflow completed without interruption -> cleanup checkpoint
+            delete_checkpoint(thread_id, stream_db)
+
+        finally:
+            set_active_event_callback(None)
+            set_active_project_context(None)
+            stream_db.close()
+
+        yield emit(
+            "agent_completed",
+            agent="main",
+            thread_id=thread_id,
+            answer=final_answer,
+            sources=final_sources,
+            chunks=final_chunks,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/projects/{project_id}/agent/{thread_id}/resume")
+async def resume_agent(
+    project_id: int,
+    thread_id: str,
+    decision: str,
+    feedback: Optional[str] = None,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Validate membership
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id,
+    ).first()
+
+    if not membership:
+        raise HTTPException(status_code=403, detail="Access denied to this project")
+
+    user_role = membership.role
+    config = {"configurable": {"thread_id": thread_id}}
+    resume_payload = {"action": decision, "feedback": feedback or ""}
+
+    def event_generator():
+        stream_db = SessionLocal()
+        final_answer = ""
+        final_sources = []
+        final_chunks = []
+        input_tokens = 0
+        output_tokens = 0
+        pending_events = []
+        is_interrupted = False
+
+        def sub_event_emitter(event_type: str, agent: str = "main", **data):
+            pending_events.append((event_type, {"agent": agent, **data}))
+
+        yield emit("agent_resumed", agent="main", thread_id=thread_id, decision=decision, feedback=feedback)
+
+        set_active_event_callback(sub_event_emitter)
+        set_active_project_context(
+            project_id=project_id,
+            user_id=user_id,
+            user_role=user_role,
+            db=stream_db,
+        )
+
+        try:
+            for update in workflow.stream(Command(resume=resume_payload), config=config, stream_mode="updates"):
+
+                while pending_events:
+                    evt_type, evt_data = pending_events.pop(0)
+                    yield emit(evt_type, **evt_data)
+
+                for node_name, node_update in update.items():
+
+                    if node_name == "__interrupt__":
+                        is_interrupted = True
+                        interrupt_val = node_update[0].value if node_update else {}
+                        if isinstance(interrupt_val, dict):
+                            yield emit("interrupt", agent="main", thread_id=thread_id, **interrupt_val)
+                        else:
+                            yield emit("interrupt", agent="main", thread_id=thread_id, details=str(interrupt_val))
+                        break
+
+                    if node_name in ("chat_node", "force_synthesis_node"):
+                        reasoning = node_update.get("reasoning", "")
+                        answer = node_update.get("answer", "")
+                        tool_calls = node_update.get("tool_calls", [])
+                        iteration = node_update.get("iterations")
+
+                        if answer:
+                            final_answer = answer
+                        input_tokens = node_update.get("input_tokens", input_tokens)
+                        output_tokens = node_update.get("output_tokens", output_tokens)
+
+                        if reasoning:
+                            yield emit("reasoning", agent="main", iteration=iteration, content=reasoning)
+
+                        for tc in tool_calls:
+                            yield emit("tool_started", agent="main", iteration=iteration,
+                                       tool=tc["name"], args=tc["args"], call_id=tc.get("id"))
+
+                    elif node_name == "tool_node":
+                        yield emit("tool_completed", agent="main", tool="sub_agent")
+
+                    elif node_name == "collect_tool_results":
+                        sources = node_update.get("sources", [])
+                        chunks = node_update.get("chunks", [])
+                        if sources:
+                            final_sources = sources
+                        if chunks:
+                            final_chunks = chunks
+                        input_tokens = node_update.get("input_tokens", input_tokens)
+                        output_tokens = node_update.get("output_tokens", output_tokens)
+
+                if is_interrupted:
+                    return
+
+                while pending_events:
+                    evt_type, evt_data = pending_events.pop(0)
+                    yield emit(evt_type, **evt_data)
+
+            # Workflow completed -> cleanup checkpointer
+            delete_checkpoint(thread_id, stream_db)
+
+        finally:
+            set_active_event_callback(None)
+            set_active_project_context(None)
+            stream_db.close()
+
+        yield emit(
+            "agent_completed",
+            agent="main",
+            thread_id=thread_id,
+            answer=final_answer,
+            sources=final_sources,
+            chunks=final_chunks,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+
+
+
+
+from typing import Optional
+from agentic.tools import set_active_event_callback, set_active_project_context
+
+
+@router.get("/projects/{project_id}/agent")
+async def run_agent(
+    project_id: int,
+    question: str,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Validate project membership
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id,
+    ).first()
+
+    if not membership:
+        raise HTTPException(status_code=403, detail="Access denied to this project")
+
+    user_role = membership.role
+
+    initial_state = {
+        "messages": [HumanMessage(content=question)],
+        "question": question,
+        "answer": "",
+        "reasoning": "",
+        "tool_calls": [],
+        "sources": [],
+        "chunks": [],
         "input_tokens": 0,
         "output_tokens": 0,
         "iterations": 0,
@@ -405,10 +694,12 @@ async def run_agent(question: str):
         return f"data: {json.dumps(payload)}\n\n"
 
     def event_generator():
+        # Open a dedicated db session that lives for the full stream
+        stream_db = SessionLocal()
 
-        # Final accumulated result
         final_answer = ""
         final_sources = []
+        final_chunks = []
         input_tokens = 0
         output_tokens = 0
         pending_events = []
@@ -416,27 +707,18 @@ async def run_agent(question: str):
         def sub_event_emitter(event_type: str, agent: str = "main", **data):
             pending_events.append((event_type, {"agent": agent, **data}))
 
-        # -------------------------
-        # AGENT STARTED
-        # -------------------------
+        yield emit("agent_started", agent="main")
 
-        yield emit(
-            "agent_started",
-            agent="main",
+        set_active_event_callback(sub_event_emitter)
+        set_active_project_context(
+            project_id=project_id,
+            user_id=user_id,
+            user_role=user_role,
+            db=stream_db,
         )
 
-        # -------------------------
-        # GRAPH STREAM
-        # -------------------------
-
-        from agentic.tools import set_active_event_callback
-        set_active_event_callback(sub_event_emitter)
-
         try:
-            for update in workflow.stream(
-                initial_state,
-                stream_mode="updates",
-            ):
+            for update in workflow.stream(initial_state, stream_mode="updates"):
 
                 while pending_events:
                     evt_type, evt_data = pending_events.pop(0)
@@ -444,108 +726,36 @@ async def run_agent(question: str):
 
                 for node_name, node_update in update.items():
 
-                    # =========================
-                    # CHAT NODE & FORCE SYNTHESIS NODE
-                    # =========================
-
                     if node_name in ("chat_node", "force_synthesis_node"):
+                        reasoning = node_update.get("reasoning", "")
+                        answer = node_update.get("answer", "")
+                        tool_calls = node_update.get("tool_calls", [])
+                        iteration = node_update.get("iterations")
 
-                        reasoning = node_update.get(
-                            "reasoning",
-                            ""
-                        )
-
-                        answer = node_update.get(
-                            "answer",
-                            ""
-                        )
-
-                        tool_calls = node_update.get(
-                            "tool_calls",
-                            []
-                        )
-
-                        iteration = node_update.get(
-                            "iterations"
-                        )
-
-                        # Keep final values
                         if answer:
                             final_answer = answer
-
-                        input_tokens = node_update.get(
-                            "input_tokens",
-                            input_tokens,
-                        )
-
-                        output_tokens = node_update.get(
-                            "output_tokens",
-                            output_tokens,
-                        )
-
-                        # -------------------------
-                        # REASONING
-                        # -------------------------
+                        input_tokens = node_update.get("input_tokens", input_tokens)
+                        output_tokens = node_update.get("output_tokens", output_tokens)
 
                         if reasoning:
+                            yield emit("reasoning", agent="main", iteration=iteration, content=reasoning)
 
-                            yield emit(
-                                "reasoning",
-                                agent="main",
-                                iteration=iteration,
-                                content=reasoning,
-                            )
-
-                        # -------------------------
-                        # TOOL STARTED
-                        # -------------------------
-
-                        for tool_call in tool_calls:
-
-                            yield emit(
-                                "tool_started",
-                                agent="main",
-                                iteration=iteration,
-                                tool=tool_call["name"],
-                                args=tool_call["args"],
-                                call_id=tool_call.get("id"),
-                            )
-
-                    # =========================
-                    # TOOL NODE
-                    # =========================
+                        for tc in tool_calls:
+                            yield emit("tool_started", agent="main", iteration=iteration,
+                                       tool=tc["name"], args=tc["args"], call_id=tc.get("id"))
 
                     elif node_name == "tool_node":
-
-                        yield emit(
-                            "tool_completed",
-                            agent="main",
-                            tool="web_agent",
-                        )
-
-                    # =========================
-                    # COLLECT SOURCES & TOKENS
-                    # =========================
+                        yield emit("tool_completed", agent="main", tool="sub_agent")
 
                     elif node_name == "collect_tool_results":
-
-                        sources = node_update.get(
-                            "sources",
-                            []
-                        )
-
+                        sources = node_update.get("sources", [])
+                        chunks = node_update.get("chunks", [])
                         if sources:
                             final_sources = sources
-
-                        input_tokens = node_update.get(
-                            "input_tokens",
-                            input_tokens,
-                        )
-
-                        output_tokens = node_update.get(
-                            "output_tokens",
-                            output_tokens,
-                        )
+                        if chunks:
+                            final_chunks = chunks
+                        input_tokens = node_update.get("input_tokens", input_tokens)
+                        output_tokens = node_update.get("output_tokens", output_tokens)
 
                 while pending_events:
                     evt_type, evt_data = pending_events.pop(0)
@@ -553,24 +763,19 @@ async def run_agent(question: str):
 
         finally:
             set_active_event_callback(None)
-
-
-
-        # -------------------------
-        # EVERYTHING AT THE END
-        # -------------------------
+            set_active_project_context(None)
+            stream_db.close()
 
         yield emit(
             "agent_completed",
             agent="main",
             answer=final_answer,
             sources=final_sources,
+            chunks=final_chunks,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
         )
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-    )
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+

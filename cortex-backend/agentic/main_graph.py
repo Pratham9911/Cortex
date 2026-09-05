@@ -33,5 +33,8 @@ graph.add_edge("tool_node", "collect_tool_results")
 graph.add_edge("collect_tool_results", "chat_node")
 graph.add_edge("force_synthesis_node", END)
 
-workflow = graph.compile()
+from agentic.checkpointer import postgres_checkpointer
+
+workflow = graph.compile(checkpointer=postgres_checkpointer)
+
 

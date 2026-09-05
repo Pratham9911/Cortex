@@ -1,36 +1,32 @@
 import os
 import json
-
 from dotenv import load_dotenv
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import ToolMessage, AIMessage, HumanMessage, SystemMessage
 from langchain_fireworks import ChatFireworks
 from langgraph.graph import END
-
 from langgraph.prebuilt import ToolNode
 
-
-from langchain_core.messages import ToolMessage, AIMessage, HumanMessage, SystemMessage
-
-from agentic.tools import calculator, web_agent_tool
+from agentic.tools import calculator, web_agent_tool, retrieval_agent_tool, send_email
 from agentic.state.main_state import AnswerState
 
 SYSTEM_PROMPT = SystemMessage(
     content=(
         "You are a helpful, accurate AI assistant.\n"
-        "When web research is required, invoke the `web_agent` tool ONCE with a full, comprehensive prompt "
-        "combining all related sub-questions and research goals at once (e.g. 'Find A, then B, and C'). "
-        "Do NOT make fragmented, separate calls to `web_agent` for each individual sub-question."
+        "You have specialized sub-agent tools and utility tools available:\n"
+        "1. `web_agent`: Use when web research is required for live, external, or current information. "
+        "Invoke `web_agent` ONCE with a comprehensive prompt combining all web sub-questions.\n"
+        "2. `retrieval_agent`: Use when project document research is required to answer questions from internal project files. "
+        "Invoke `retrieval_agent` ONCE with a comprehensive prompt combining all project sub-questions.\n"
+        "3. `send_email`: Call this tool immediately whenever user requests sending an email. "
+        "Do NOT ask the user for confirmation yourself in text; the `send_email` tool automatically handles human confirmation and draft approval.\n"
+        "For queries requiring both internal project data and external web information, you can invoke both sub-agents."
     )
 )
 
-
 load_dotenv()
 
-
-
 MAX_ITERATIONS = 10
-
 
 llm = ChatFireworks(
     model="accounts/fireworks/models/gpt-oss-120b",
@@ -38,32 +34,15 @@ llm = ChatFireworks(
     temperature=0,
 )
 
-
-
-
-
-tools = [calculator, web_agent_tool]
-
+tools = [calculator, web_agent_tool, retrieval_agent_tool, send_email]
 llm = llm.bind_tools(tools)
-
 tool_node = ToolNode(tools)
 
-#__________________NODES FOR GRAPH_____________________
 
 def sanitize_messages(messages: list) -> list:
     """
     Prepare message history for the LLM call by stripping unnecessary metadata,
     sources, reasoning content, and raw provider payloads.
-
-    AIMessage:
-        - keep content
-        - keep clean tool_calls (name, args, id)
-        - strip reasoning_content and extra provider kwargs
-    ToolMessage:
-        - if content is dict/json containing 'answer' and 'sources', extract ONLY 'answer'
-        - remove raw sources array and metadata
-    HumanMessage / SystemMessage:
-        - keep intact
     """
     sanitized_messages = []
 
@@ -146,15 +125,8 @@ def chat_node(state: AnswerState) -> dict:
     print("---------------------------------------------------\n")
 
     response = llm.invoke(messages_to_send)
-
-
-
     usage = response.usage_metadata or {}
-
-    reasoning = response.additional_kwargs.get(
-        "reasoning_content",
-        ""
-    )
+    reasoning = response.additional_kwargs.get("reasoning_content", "")
 
     tool_calls = [
         {
@@ -179,6 +151,13 @@ def chat_node(state: AnswerState) -> dict:
 def collect_tool_results(state: AnswerState) -> dict:
     sources = list(state.get("sources", []))
     existing_urls = {s.get("url") for s in sources if s.get("url")}
+
+    chunks = list(state.get("chunks", []))
+    existing_chunk_keys = {
+        (c.get("document", {}).get("document_id"), c.get("chunk", {}).get("page_number"))
+        for c in chunks
+        if isinstance(c, dict)
+    }
 
     additional_input_tokens = 0
     additional_output_tokens = 0
@@ -211,13 +190,24 @@ def collect_tool_results(state: AnswerState) -> dict:
                             if url:
                                 existing_urls.add(url)
 
+                new_chunks = parsed.get("chunks", [])
+                if isinstance(new_chunks, list):
+                    for chk in new_chunks:
+                        if isinstance(chk, dict):
+                            doc_id = chk.get("document", {}).get("document_id")
+                            page_no = chk.get("chunk", {}).get("page_number")
+                            key = (doc_id, page_no)
+                            if key in existing_chunk_keys:
+                                continue
+                            chunks.append(chk)
+                            existing_chunk_keys.add(key)
+
                 clean_answer = parsed.get("answer", "")
                 if isinstance(clean_answer, (dict, list)):
                     clean_answer = json.dumps(clean_answer)
                 else:
                     clean_answer = str(clean_answer)
 
-                # Strict Guard: Never leak sources array into ToolMessage content
                 if not clean_answer.strip():
                     clean_answer = "Tool execution completed."
 
@@ -234,6 +224,7 @@ def collect_tool_results(state: AnswerState) -> dict:
 
     res = {
         "sources": sources,
+        "chunks": chunks,
         "input_tokens": state.get("input_tokens", 0) + additional_input_tokens,
         "output_tokens": state.get("output_tokens", 0) + additional_output_tokens,
     }

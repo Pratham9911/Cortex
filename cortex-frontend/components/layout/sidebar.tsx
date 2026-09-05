@@ -26,6 +26,7 @@ const MENU_ITEMS = [
   { id: "Analytics", label: "Analytics", icon: BarChart3 },
   { id: "Reporting", label: "Reporting", icon: LineChart },
   { id: "Agent", label: "AI Agent", icon: Bot },
+  { id: "AgentInspector", label: "Agent Inspector", icon: Sparkles },
   { id: "Documents", label: "Documents", icon: FileText },
   { id: "Projects", label: "Projects", icon: Receipt },
   { id: "ProjectSettings", label: "Project settings", icon: Settings },
@@ -89,6 +90,7 @@ function SidebarContent({
       Analytics: "/analytics",
       Reporting: "/reports",
       Agent: "/ai-agent",
+      AgentInspector: "/agent-inspector",
       Documents: "/documents",
       Projects: "/projects",
       ProjectSettings: "/project-settings",
@@ -118,6 +120,10 @@ function SidebarContent({
     }
     if (pathname.startsWith("/reports")) {
       setActive("Reporting")
+      return
+    }
+    if (pathname.startsWith("/agent-inspector") || pathname.startsWith("/agent-test")) {
+      setActive("AgentInspector")
       return
     }
     if (pathname.startsWith("/ai-agent")) {
