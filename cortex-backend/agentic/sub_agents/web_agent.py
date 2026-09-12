@@ -25,6 +25,7 @@ SYSTEM_PROMPT = SystemMessage(
         "HOW TO ANSWER:\n"
         " - Only use the information gathered without adding any external knowledge.\n" \
         " - Only answer what is important to the user's query. Do not include irrelevant information.\n"
+        "Rejection Rules: If the context is insufficient to answer the question or Not Matching, respond with: The provided context does not contain enough information to answer the question."
     )
 )
 
@@ -38,7 +39,7 @@ web_llm_with_tools = ChatFireworks(
 
 # LLM without tools — used for forced synthesis (graph-level enforcement)
 web_llm_base = ChatFireworks(
-    model="accounts/fireworks/models/gpt-oss-120b",
+    model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
 )
@@ -116,9 +117,16 @@ def print_web_messages(node_name: str, messages: list, iteration: int):
     print("--------------------------------------------------------------------------------")
 
 
-def web_chat_node(state: WebSearchState) -> dict:
+async def web_chat_node(state: WebSearchState) -> dict:
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_web_messages(raw_messages)
+
+    # The last assistant message can contain a tool request that was not
+    # executed because the iteration limit was reached. Synthesis should use
+    # the results already collected, not a dangling tool call.
+    if clean_messages and isinstance(clean_messages[-1], AIMessage):
+        if getattr(clean_messages[-1], "tool_calls", None):
+            clean_messages = clean_messages[:-1]
     current_iteration = state.get("iterations", 0)
 
     if not clean_messages or not isinstance(clean_messages[0], SystemMessage):
@@ -128,7 +136,7 @@ def web_chat_node(state: WebSearchState) -> dict:
 
     print_web_messages("web_chat_node", messages_to_send, current_iteration + 1)
 
-    response = web_llm.invoke(messages_to_send)
+    response = await web_llm.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
@@ -158,9 +166,7 @@ def web_chat_node(state: WebSearchState) -> dict:
         "iterations": current_iteration + 1,
     }
 
-
-
-def collect_web_tool_results(state: WebSearchState) -> dict:
+async def collect_web_tool_results(state: WebSearchState) -> dict:
     sources = list(state.get("sources", []))
     existing_urls = {s.get("url") for s in sources if s.get("url")}
     updated_messages = []
@@ -216,7 +222,7 @@ def collect_web_tool_results(state: WebSearchState) -> dict:
     return res
 
 
-def force_synthesis_node(state: WebSearchState) -> dict:
+async def force_synthesis_node(state: WebSearchState) -> dict:
     """
     Graph-enforced synthesis node — called when MAX_ITERATIONS-1 is reached.
     Uses the base LLM (NO tools bound) so the model physically cannot call
@@ -237,7 +243,7 @@ def force_synthesis_node(state: WebSearchState) -> dict:
     print_web_messages("force_synthesis_node", messages_to_send, state.get("iterations", 0) + 1)
 
     # web_llm_base has NO tools bound — LLM cannot call tools even if it tries
-    response = web_llm_base.invoke(messages_to_send)
+    response = await web_llm_base.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
@@ -260,20 +266,19 @@ def force_synthesis_node(state: WebSearchState) -> dict:
 
 def web_route_after_chat(state: WebSearchState):
     iterations = state.get("iterations", 0)
+    last_message = state["messages"][-1]
+    has_tool_calls = bool(getattr(last_message, "tool_calls", None))
 
-    # Hard limit
-    if iterations >= MAX_ITERATIONS:
+    # A normal answer is complete, regardless of the iteration count.
+    if not has_tool_calls:
         return END
 
-    # At MAX_ITERATIONS-1, force synthesis via dedicated node (no tool calls possible)
-    if iterations >= MAX_ITERATIONS - 1:
+    # Let the current tool call run. If another tool is requested at the
+    # limit, synthesize from the results already collected.
+    if iterations >= MAX_ITERATIONS:
         return "force_synthesis_node"
 
-    last_message = state["messages"][-1]
-    if getattr(last_message, "tool_calls", None):
-        return "web_tool_node"
-
-    return END
+    return "web_tool_node"
 
 
 
@@ -300,7 +305,7 @@ builder.add_edge("force_synthesis_node", END)
 web_subgraph = builder.compile()
 
 
-def run_web_agent(query: str, event_callback: SubAgentEventCallback = None) -> SubAgentResult:
+async def run_web_agent(query: str, event_callback: SubAgentEventCallback = None) -> SubAgentResult:
     """
     Execute Web Agent Subgraph, stream events via callback tagged with agent="web_agent",
     and return final SubAgentResult.
@@ -325,7 +330,7 @@ def run_web_agent(query: str, event_callback: SubAgentEventCallback = None) -> S
     input_tokens = 0
     output_tokens = 0
 
-    for update in web_subgraph.stream(initial_state, stream_mode="updates"):
+    async for update in web_subgraph.astream(initial_state, stream_mode="updates"):
         for node_name, node_update in update.items():
             if node_name in ("web_chat_node", "force_synthesis_node"):
                 reasoning = node_update.get("reasoning", "")
@@ -395,4 +400,5 @@ def run_web_agent(query: str, event_callback: SubAgentEventCallback = None) -> S
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
     }
+
 

@@ -30,12 +30,14 @@ import { cn } from "@/lib/utils"
 export default function PrivateLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isAgentRoute = pathname.startsWith("/ai-agent")
+  const isSettingsRoute = pathname.startsWith("/settings")
+  const isFullPageRoute = isAgentRoute || isSettingsRoute
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isMobileOpen, setIsMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [projectName, setProjectName] = useState("Project")
   const [commandOpen, setCommandOpen] = useState(false)
-  const preAgentCollapsedRef = useRef<boolean | null>(null)
+  const preFullPageCollapsedRef = useRef<boolean | null>(null)
   const { theme } = useTheme()
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const inbox = useInboxController({ apiUrl })
@@ -53,21 +55,21 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
   }, [])
 
   useEffect(() => {
-    if (isAgentRoute) {
-      if (preAgentCollapsedRef.current === null) {
-        preAgentCollapsedRef.current = isCollapsed
+    if (isFullPageRoute) {
+      if (preFullPageCollapsedRef.current === null) {
+        preFullPageCollapsedRef.current = isCollapsed
       }
       if (!isCollapsed) {
         setIsCollapsed(true)
       }
       return
     }
-    if (preAgentCollapsedRef.current !== null) {
-      setIsCollapsed(preAgentCollapsedRef.current)
-      preAgentCollapsedRef.current = null
+    if (preFullPageCollapsedRef.current !== null) {
+      setIsCollapsed(preFullPageCollapsedRef.current)
+      preFullPageCollapsedRef.current = null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route changes
-  }, [isAgentRoute])
+  }, [isFullPageRoute])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -86,7 +88,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
   }
 
   const isDark = mounted && theme === "dark"
-  const sidebarOffset = isAgentRoute || isCollapsed ? 68 : 260
+  const sidebarOffset = isFullPageRoute || isCollapsed ? 68 : 260
 
   return (
     <ProtectedRoute>
@@ -98,11 +100,11 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
         style={{ fontWeight: 400 }}
       >
         <Sidebar
-          isCollapsed={isAgentRoute ? true : isCollapsed}
+          isCollapsed={isFullPageRoute ? true : isCollapsed}
           setIsCollapsed={handleSetCollapsed}
           isMobileOpen={isMobileOpen}
           setIsMobileOpen={setIsMobileOpen}
-          agentMode={isAgentRoute}
+          agentMode={isFullPageRoute}
         />
 
         <div
@@ -114,7 +116,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
             "--sidebar-offset": `${mounted ? sidebarOffset : 260}px`,
           } as React.CSSProperties}
         >
-          {!isAgentRoute && (
+          {!isFullPageRoute && (
           <header
             className={cn(
               "sticky top-0 z-30 border-b",
@@ -207,7 +209,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
           <main
             className={cn(
               "flex-1 min-h-0",
-              isAgentRoute ? "overflow-hidden p-0" : "px-6 py-8"
+              isFullPageRoute ? "overflow-hidden p-0" : "px-6 py-8"
             )}
           >
             {children}

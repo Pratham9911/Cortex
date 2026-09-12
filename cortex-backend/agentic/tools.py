@@ -28,13 +28,24 @@ _global_active_project_ctx = None
 active_project_context: contextvars.ContextVar = contextvars.ContextVar("active_project_context", default=None)
 
 
-def set_active_project_context(project_id=None, user_id=None, user_role=None, db=None):
+def set_active_project_context(
+    project_id=None,
+    user_id=None,
+    user_role=None,
+    db=None,
+    thread_id=None,
+    resume_action=None,
+    resume_feedback=None,
+):
     global _global_active_project_ctx
     ctx = {
         "project_id": project_id,
         "user_id": user_id,
         "user_role": user_role,
         "db": db,
+        "thread_id": thread_id,
+        "resume_action": resume_action,
+        "resume_feedback": resume_feedback,
     }
     with _global_project_lock:
         _global_active_project_ctx = ctx
@@ -50,7 +61,7 @@ def get_active_project_context():
 
 
 @tool("web_agent")
-def web_agent_tool(query: str) -> dict:
+async def web_agent_tool(query: str) -> dict:
     """
     Delegate ALL web research tasks to the specialized Web Agent in ONE call and command it what to do.
     The Web Agent can research multiple unrelated topics if you provide a clear query with what is needed and do not just put Keywords.
@@ -61,31 +72,92 @@ def web_agent_tool(query: str) -> dict:
     from agentic.sub_agents.web_agent import run_web_agent
 
     callback = get_active_event_callback()
-    result = run_web_agent(query=query, event_callback=callback)
+    result = await run_web_agent(query=query, event_callback=callback)
     return result
 
 
 @tool("retrieval_agent")
-def retrieval_agent_tool(query: str) -> dict:
+async def retrieval_agent_tool(query: str) -> dict:
     """
     Delegate internal project knowledge research to the specialized Retrieval Agent in ONE call and command it what to do.
     The Retrieval Agent searches project files, documents, and reports to answer questions about project data.
-    CRITICAL: Bundle all project-related sub-questions into a single call — e.g. 'find architecture decisions and deployment steps in project docs'.
+    CRITICAL: Bundle 3-4 project-related sub-questions into a single call — e.g. 'find architecture decisions and deployment steps in project docs'.
     Do NOT call retrieval_agent separately for each sub-question. One comprehensive call handles everything.
     Always provide a clear query with what is needed , do not just put keywords
     """
     from agentic.sub_agents.retrieval_agent import run_retrieval_agent
 
     callback = get_active_event_callback()
-    result = run_retrieval_agent(query=query, event_callback=callback)
+    result = await run_retrieval_agent(query=query, event_callback=callback)
     return result
 
 
-@tool
-def project_search(query: str) -> dict:
+@tool("github_agent")
+async def github_agent_tool(query: str) -> dict:
     """
-    Search internal project documents using hybrid search and reranking.
-    Returns a synthesized text answer and relevant retrieved document chunks.
+    Delegate ALL GitHub tasks (searching repos, reading files/commits/issues/PRs, creating issues, branches, PRs)
+    to the specialized GitHub Agent in ONE call and command it what to do.
+    Provide a clear, descriptive instruction of what needs to be done on GitHub.
+    The agent executes read operations automatically and requests user authorization for write/destructive operations.
+    """
+    from agentic.sub_agents.github_agent import run_github_agent
+
+    ctx = get_active_project_context()
+    user_id = ctx.get("user_id") or 1
+    db = ctx.get("db")
+    thread_id = ctx.get("thread_id")
+    resume_action = ctx.get("resume_action")
+    resume_feedback = ctx.get("resume_feedback")
+    callback = get_active_event_callback()
+
+    result = await run_github_agent(
+        query=query,
+        user_id=user_id,
+        db=db,
+        thread_id=thread_id,
+        resume_action=resume_action,
+        resume_feedback=resume_feedback,
+        event_callback=callback,
+    )
+    return result
+
+
+@tool("gmail_agent")
+async def gmail_agent_tool(query: str) -> dict:
+    """
+    Delegate ALL Gmail/email tasks (searching emails, reading threads, listing drafts, creating drafts, sending emails, replying)
+    to the specialized Gmail Agent in ONE call and command it what to do.
+    Provide a clear, descriptive instruction of what email action is needed.
+    The agent executes read operations automatically and requests user authorization for write operations (sending, creating drafts, replying).
+    """
+    from agentic.sub_agents.gmail_agent import run_gmail_agent
+
+    ctx = get_active_project_context()
+    user_id = ctx.get("user_id") or 1
+    db = ctx.get("db")
+    thread_id = ctx.get("thread_id")
+    resume_action = ctx.get("resume_action")
+    resume_feedback = ctx.get("resume_feedback")
+    callback = get_active_event_callback()
+
+    result = await run_gmail_agent(
+        query=query,
+        user_id=user_id,
+        db=db,
+        thread_id=thread_id,
+        resume_action=resume_action,
+        resume_feedback=resume_feedback,
+        event_callback=callback,
+    )
+    return result
+
+
+
+@tool
+async def project_search(query: str) -> dict:
+    """
+    Use this tool to search project documents and files for relevant information to answer the query.
+    Prove it a clear task and not just Keyword , it expects one similar Topic at a time "
     """
     from rag.retriever import hybrid_search_with_rerank
     from rag.generator import generate_answer
@@ -124,6 +196,7 @@ def project_search(query: str) -> dict:
             }
 
         answer = generate_answer(query=query, chunks=chunks)
+        print(f"\n\n\n\n[project_search] Generated answer: {answer[:500]}\n\n\\n")
         formatted_chunks = format_chunks_for_debug(chunks)
         return {
             "answer": answer,
@@ -145,10 +218,8 @@ def project_search(query: str) -> dict:
 
 
 
-
-
 @tool
-def calculator(num1: float, num2: float, operator: str) -> float:
+async def calculator(num1: float, num2: float, operator: str) -> float:
     """Perform a basic arithmetic operation on two numbers.
          operator:  "+", "-", "*", "/"."""
     
@@ -167,7 +238,7 @@ def calculator(num1: float, num2: float, operator: str) -> float:
 
 
 @tool
-def send_email(to: str, subject: str, body: str) -> dict:
+async def send_email(to: str, subject: str, body: str) -> dict:
     """
     Call this tool immediately when user requests to send an email.
     Drafts an email to recipient ('to') with 'subject' and 'body' and requests human confirmation automatically.
@@ -189,17 +260,33 @@ def send_email(to: str, subject: str, body: str) -> dict:
     approved = action in ["yes", "approve", "approved", "true"]
 
     if approved:
-        msg = f"Email approved and sent to {to}."
-        if feedback:
-            msg += f" Additional user note: '{feedback}'"
-        return {
-            "status": "sent",
-            "to": to,
-            "subject": subject,
-            "body": body,
-            "feedback": feedback,
-            "message": msg,
-        }
+        ctx = get_active_project_context()
+        user_id = ctx.get("user_id") or 1
+        db = ctx.get("db")
+
+        try:
+            from agentic.email.gmail_service import send_email_via_gmail
+            gmail_res = send_email_via_gmail(user_id=user_id, to=to, subject=subject, body=body, db=db)
+            if feedback:
+                gmail_res["feedback"] = feedback
+                gmail_res["message"] += f" (Note: User included comment: '{feedback}')"
+            return gmail_res
+        except ValueError as ve:
+            return {
+                "status": "not_connected",
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "message": str(ve),
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "message": f"Failed to send email via Gmail API: {str(e)}",
+            }
     else:
         msg = f"Email sending rejected by user."
         if feedback:
@@ -215,13 +302,13 @@ def send_email(to: str, subject: str, body: str) -> dict:
             "message": msg,
         }
 
-    
+
 
 
 LARGE_OUTPUT_THRESHOLD = 1200  # Only summarize if raw web answer exceeds 1200 characters (~200-250 words)
 
 
-def summarize_tool_output(query: str, answer: str, threshold: int = LARGE_OUTPUT_THRESHOLD) -> str:
+async def summarize_tool_output(query: str, answer: str, threshold: int = LARGE_OUTPUT_THRESHOLD) -> str:
     """
     If the returned web answer length exceeds `threshold` (considered large),
     use Fireworks LLM to synthesize a concise summary addressing the query.
@@ -244,13 +331,10 @@ def summarize_tool_output(query: str, answer: str, threshold: int = LARGE_OUTPUT
         from langchain_core.messages import HumanMessage
 
         llm = ChatFireworks(
-            model="accounts/fireworks/models/gpt-oss-120b",
+            model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
             api_key=os.getenv("FIREWORKS_API_KEY"),
             temperature=0,
         )
-
-
-
 
         prompt = (
             f"Synthesize and summarize the following web search text "
@@ -260,7 +344,7 @@ def summarize_tool_output(query: str, answer: str, threshold: int = LARGE_OUTPUT
             f"Provide ONLY a concise, facts-only summary answering the query."
         )
 
-        response = llm.invoke([HumanMessage(content=prompt)])
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
         summary = response.content.strip() if response.content else answer
         return summary if summary else answer
     except Exception as e:
@@ -270,10 +354,10 @@ def summarize_tool_output(query: str, answer: str, threshold: int = LARGE_OUTPUT
 
 
 @tool
-def web_search(query: str) -> dict:
+async def web_search(query: str) -> dict:
     """
     Search the web for the given query 
-    ask it want you need , each thing mention clearly , instruct it in short what to find exactly 
+    ask it what you need , each thing mention clearly , instruct it in short what to find exactly like Search for A and B and C ,
     don't assume it will understand your query if you just put keywords , be clear and specific in your query
     """
 
@@ -312,8 +396,9 @@ def web_search(query: str) -> dict:
             })
 
         if answer:
+            sum_ans = await summarize_tool_output(query, answer)
             return {
-                "answer": summarize_tool_output(query, answer),
+                "answer": sum_ans,
                 "sources": sources,
             }
         else:
@@ -404,8 +489,9 @@ def web_search(query: str) -> dict:
                 f"Manual web search failed: {e}"
             ) from e
 
+        sum_ans = await summarize_tool_output(query, final_answer)
         return {
-            "answer": summarize_tool_output(query, final_answer),
+            "answer": sum_ans,
             "sources": final_sources,
         }
 
@@ -413,9 +499,8 @@ def web_search(query: str) -> dict:
     # 3. Should never normally reach here
     # ==============================================================
 
+    sum_ans = await summarize_tool_output(query, answer)
     return {
-        "answer": summarize_tool_output(query, answer),
+        "answer": sum_ans,
         "sources": sources,
     }
-
-

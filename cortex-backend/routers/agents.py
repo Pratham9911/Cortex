@@ -375,7 +375,7 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
-from agentic.main_graph import workflow
+import agentic.main_graph as main_graph
 from agentic.checkpointer import delete_checkpoint
 
 from typing import Optional
@@ -387,6 +387,16 @@ from agentic.tools import set_active_event_callback, set_active_project_context
 def emit(event_type: str, **data):
     payload = {"type": event_type, **data}
     return f"data: {json.dumps(payload)}\n\n"
+
+
+def emit_interrupt(thread_id: str, interrupt_value):
+    """Merge interrupt data without duplicate agent/thread_id keywords."""
+    payload = dict(interrupt_value) if isinstance(interrupt_value, dict) else {
+        "details": str(interrupt_value)
+    }
+    payload.pop("thread_id", None)
+    payload.setdefault("agent", "main")
+    return emit("interrupt", thread_id=thread_id, **payload)
 
 
 @router.get("/projects/{project_id}/agent")
@@ -422,7 +432,7 @@ async def run_agent(
         "iterations": 0,
     }
 
-    def event_generator():
+    async def event_generator():
         # Open a dedicated db session that lives for the full stream
         stream_db = SessionLocal()
 
@@ -434,8 +444,9 @@ async def run_agent(
         pending_events = []
         is_interrupted = False
 
-        def sub_event_emitter(event_type: str, agent: str = "main", **data):
-            pending_events.append((event_type, {"agent": agent, **data}))
+        def sub_event_emitter(event_type: str, *args, **data):
+            agent_val = data.pop("agent", None) or (args[0] if args else "main")
+            pending_events.append((event_type, {"agent": agent_val, **data}))
 
         yield emit("agent_started", agent="main", thread_id=thread_id)
 
@@ -448,7 +459,8 @@ async def run_agent(
         )
 
         try:
-            for update in workflow.stream(initial_state, config=config, stream_mode="updates"):
+            workflow = main_graph.workflow or main_graph.build_workflow()
+            async for update in workflow.astream(initial_state, config=config, stream_mode="updates"):
 
                 while pending_events:
                     evt_type, evt_data = pending_events.pop(0)
@@ -459,10 +471,7 @@ async def run_agent(
                     if node_name == "__interrupt__":
                         is_interrupted = True
                         interrupt_val = node_update[0].value if node_update else {}
-                        if isinstance(interrupt_val, dict):
-                            yield emit("interrupt", agent="main", thread_id=thread_id, **interrupt_val)
-                        else:
-                            yield emit("interrupt", agent="main", thread_id=thread_id, details=str(interrupt_val))
+                        yield emit_interrupt(thread_id, interrupt_val)
                         break
 
                     if node_name in ("chat_node", "force_synthesis_node"):
@@ -548,7 +557,7 @@ async def resume_agent(
     config = {"configurable": {"thread_id": thread_id}}
     resume_payload = {"action": decision, "feedback": feedback or ""}
 
-    def event_generator():
+    async def event_generator():
         stream_db = SessionLocal()
         final_answer = ""
         final_sources = []
@@ -558,8 +567,9 @@ async def resume_agent(
         pending_events = []
         is_interrupted = False
 
-        def sub_event_emitter(event_type: str, agent: str = "main", **data):
-            pending_events.append((event_type, {"agent": agent, **data}))
+        def sub_event_emitter(event_type: str, *args, **data):
+            agent_val = data.pop("agent", None) or (args[0] if args else "main")
+            pending_events.append((event_type, {"agent": agent_val, **data}))
 
         yield emit("agent_resumed", agent="main", thread_id=thread_id, decision=decision, feedback=feedback)
 
@@ -572,7 +582,8 @@ async def resume_agent(
         )
 
         try:
-            for update in workflow.stream(Command(resume=resume_payload), config=config, stream_mode="updates"):
+            workflow = main_graph.workflow or main_graph.build_workflow()
+            async for update in workflow.astream(Command(resume=resume_payload), config=config, stream_mode="updates"):
 
                 while pending_events:
                     evt_type, evt_data = pending_events.pop(0)
@@ -583,10 +594,7 @@ async def resume_agent(
                     if node_name == "__interrupt__":
                         is_interrupted = True
                         interrupt_val = node_update[0].value if node_update else {}
-                        if isinstance(interrupt_val, dict):
-                            yield emit("interrupt", agent="main", thread_id=thread_id, **interrupt_val)
-                        else:
-                            yield emit("interrupt", agent="main", thread_id=thread_id, details=str(interrupt_val))
+                        yield emit_interrupt(thread_id, interrupt_val)
                         break
 
                     if node_name in ("chat_node", "force_synthesis_node"):
@@ -693,7 +701,7 @@ async def run_agent(
         payload = {"type": event_type, **data}
         return f"data: {json.dumps(payload)}\n\n"
 
-    def event_generator():
+    async def event_generator():
         # Open a dedicated db session that lives for the full stream
         stream_db = SessionLocal()
 
@@ -704,8 +712,9 @@ async def run_agent(
         output_tokens = 0
         pending_events = []
 
-        def sub_event_emitter(event_type: str, agent: str = "main", **data):
-            pending_events.append((event_type, {"agent": agent, **data}))
+        def sub_event_emitter(event_type: str, *args, **data):
+            agent_val = data.pop("agent", None) or (args[0] if args else "main")
+            pending_events.append((event_type, {"agent": agent_val, **data}))
 
         yield emit("agent_started", agent="main")
 
@@ -718,7 +727,8 @@ async def run_agent(
         )
 
         try:
-            for update in workflow.stream(initial_state, stream_mode="updates"):
+            workflow = main_graph.workflow or main_graph.build_workflow()
+            async for update in workflow.astream(initial_state, stream_mode="updates"):
 
                 while pending_events:
                     evt_type, evt_data = pending_events.pop(0)

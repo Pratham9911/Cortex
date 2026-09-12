@@ -1,3 +1,6 @@
 cd cortex-backend
 venv\Scripts\activate
 uvicorn main:app --reload    
+
+cd cortex-frontend
+npm run dev

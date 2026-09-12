@@ -49,7 +49,7 @@ User Query:
 {query}
 """
     response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
+        model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
         messages=[
             {
                 "role": "user",

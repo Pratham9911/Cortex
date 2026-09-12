@@ -7,34 +7,33 @@ from langchain_fireworks import ChatFireworks
 from langgraph.graph import END
 from langgraph.prebuilt import ToolNode
 
-from agentic.tools import calculator, web_agent_tool, retrieval_agent_tool, send_email
+from agentic.tools import calculator, web_agent_tool, retrieval_agent_tool, github_agent_tool, gmail_agent_tool
 from agentic.state.main_state import AnswerState
 
 SYSTEM_PROMPT = SystemMessage(
     content=(
-        "You are a helpful, accurate AI assistant.\n"
+        "You are a helpful, accurate Cortex AI assistant.\n"
         "You have specialized sub-agent tools and utility tools available:\n"
-        "1. `web_agent`: Use when web research is required for live, external, or current information. "
-        "Invoke `web_agent` ONCE with a comprehensive prompt combining all web sub-questions.\n"
-        "2. `retrieval_agent`: Use when project document research is required to answer questions from internal project files. "
-        "Invoke `retrieval_agent` ONCE with a comprehensive prompt combining all project sub-questions.\n"
-        "3. `send_email`: Call this tool immediately whenever user requests sending an email. "
-        "Do NOT ask the user for confirmation yourself in text; the `send_email` tool automatically handles human confirmation and draft approval.\n"
-        "For queries requiring both internal project data and external web information, you can invoke both sub-agents."
+        "Do not Use subagents if not Necessary , if something is not clear tell the user\n"
+        "If Something Fails to get information from subagents , don't make up information , tell the user you don't have that\n"
+        "If User says get info from Knowledge Base , don't Web Search for Project Knowledge , use Project base only \n"
+        "For any email or Gmail tasks (searching emails, reading messages/threads, drafting, sending emails, replying), ALWAYS delegate to the gmail_agent sub-agent tool.\n"
+        "DO NOT make up information. If you don't know the answer, say 'I don't know'.\n"
+        "DO NOT Assume anything and provide wrong information"
     )
 )
 
 load_dotenv()
 
-MAX_ITERATIONS = 10
+MAX_ITERATIONS = 2
 
 llm = ChatFireworks(
-    model="accounts/fireworks/models/gpt-oss-120b",
+    model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
 )
 
-tools = [calculator, web_agent_tool, retrieval_agent_tool, send_email]
+tools = [web_agent_tool, retrieval_agent_tool, github_agent_tool, gmail_agent_tool]
 llm = llm.bind_tools(tools)
 tool_node = ToolNode(tools)
 
@@ -98,7 +97,7 @@ def sanitize_messages(messages: list) -> list:
     return sanitized_messages
 
 
-def chat_node(state: AnswerState) -> dict:
+async def chat_node(state: AnswerState) -> dict:
     print("\n========== CHAT NODE ==========")
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_messages(raw_messages)
@@ -124,7 +123,7 @@ def chat_node(state: AnswerState) -> dict:
             print(line_str.encode("ascii", errors="backslashreplace").decode("ascii"))
     print("---------------------------------------------------\n")
 
-    response = llm.invoke(messages_to_send)
+    response = await llm.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
@@ -137,6 +136,17 @@ def chat_node(state: AnswerState) -> dict:
         for call in getattr(response, "tool_calls", [])
     ]
 
+    if not reasoning and tool_calls:
+        desc_list = []
+        for tc in tool_calls:
+            t_name = tc["name"]
+            t_args = tc["args"]
+            q_val = t_args.get("query") or t_args.get("prompt") or (json.dumps(t_args) if t_args else "")
+            desc_list.append(f"Analyzing request. Delegating task to {t_name}: '{q_val}'")
+        reasoning = "\n".join(desc_list)
+    elif not reasoning and response.content:
+        reasoning = response.content
+
     return {
         "messages": [response],
         "answer": response.content or "",
@@ -148,7 +158,7 @@ def chat_node(state: AnswerState) -> dict:
     }
 
 
-def collect_tool_results(state: AnswerState) -> dict:
+async def collect_tool_results(state: AnswerState) -> dict:
     sources = list(state.get("sources", []))
     existing_urls = {s.get("url") for s in sources if s.get("url")}
 
@@ -234,13 +244,21 @@ def collect_tool_results(state: AnswerState) -> dict:
     return res
 
 
-def force_synthesis_node(state: AnswerState) -> dict:
+async def force_synthesis_node(state: AnswerState) -> dict:
     """
     Graph-enforced synthesis node for Main Agent.
     Uses base LLM with NO tools bound to force final answer synthesis.
     """
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_messages(raw_messages)
+
+    # If the iteration limit is reached immediately after the model asks for
+    # another tool, that tool call has not been executed. Do not send a
+    # dangling assistant tool-call message to the synthesis model; it should
+    # answer from the tool results already collected in the conversation.
+    if clean_messages and isinstance(clean_messages[-1], AIMessage):
+        if getattr(clean_messages[-1], "tool_calls", None):
+            clean_messages = clean_messages[:-1]
 
     synthesis_prompt = SystemMessage(
         content=(
@@ -251,11 +269,11 @@ def force_synthesis_node(state: AnswerState) -> dict:
 
     messages_to_send = [synthesis_prompt] + clean_messages
     llm_base = ChatFireworks(
-        model="accounts/fireworks/models/gpt-oss-120b",
+        model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
         api_key=os.getenv("FIREWORKS_API_KEY"),
         temperature=0,
     )
-    response = llm_base.invoke(messages_to_send)
+    response = await llm_base.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
@@ -272,15 +290,17 @@ def force_synthesis_node(state: AnswerState) -> dict:
 
 def route_after_chat(state: AnswerState):
     iterations = state.get("iterations", 0)
+    last_message = state["messages"][-1]
+    has_tool_calls = bool(getattr(last_message, "tool_calls", None))
 
-    if iterations >= MAX_ITERATIONS:
+    # A normal assistant response is already complete, regardless of the
+    # iteration count.
+    if not has_tool_calls:
         return END
 
-    if iterations >= MAX_ITERATIONS - 1:
+    # Allow the current tool call to run. Synthesis is only forced when the
+    # model asks for another tool after the configured limit is reached.
+    if iterations >= MAX_ITERATIONS:
         return "force_synthesis_node"
 
-    last_message = state["messages"][-1]
-    if getattr(last_message, "tool_calls", None):
-        return "tool_node"
-
-    return END
+    return "tool_node"

@@ -294,4 +294,75 @@
   .dark .agent-composer-scroll::-webkit-scrollbar-thumb {
     background: rgb(82 82 91 / 0.85);
   }
+
+  .dark-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #1a1a1d #0d0f14;
+  }
+
+  .dark-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .dark-scroll::-webkit-scrollbar-track {
+    background: #0d0f14;
+  }
+
+  .dark-scroll::-webkit-scrollbar-thumb {
+    background: #1a1a1d;
+    border-radius: 4px;
+  }
+
+  .dark-scroll::-webkit-scrollbar-thumb:hover {
+    background: #26262b;
+  }
+}
+
+/* Sidebar scrollbar — unlayered for reliable cross-browser styling */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #d4d4d8 transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 0;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 0;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+
+.dark .sidebar-scroll {
+  scrollbar-color: #1e1e21 transparent;
+}
+
+.dark .sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #1e1e21;
+}
+
+.dark .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2e;
+}
+
+/* Collapsed: hide scrollbar so it doesn't overlap icons; scroll still works */
+.sidebar-scroll-collapsed {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  margin-right: 0;
+}
+
+.sidebar-scroll-collapsed::-webkit-scrollbar {
+  display: none;
+  width: 0;
 }

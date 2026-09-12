@@ -20,22 +20,23 @@ SYSTEM_PROMPT = SystemMessage(
         "You are a specialized Retrieval Sub-Agent. Your task is to search internal project documents "
         "using the project_search tool to answer all parts of the user's project research query efficiently.\n\n"
         "RULES:\n"
-        "1. Execute project_search tool calls to gather necessary facts from internal project files.\n"
-        "2. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately.\n"
-        "3. Synthesize your final answer directly as a clear, facts-only text response without making any further tool calls."
+        "1. You will get a sentence which may contains seperate Topics like find A and B , Identify them and use Search for Individual Topics don't mix.\n"
+        "2. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and answer in clear and facts only text.\n"
+        "3. The Information you will get must be send as it is without any modification or interpretation. Don't add any extra information or make any assumptions.\n"
+        "4. if Searching Fails to retreive more then once for a Query, STOP calling tools and answer the query with the information you have gathered so far as Info may not be present in Project.\n"
     )
 )
 
 # LLM with tools — used for iterative project document retrieval
 retrieval_llm_with_tools = ChatFireworks(
-    model="accounts/fireworks/models/gpt-oss-120b",
+    model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
 )
 
 # LLM without tools — used for forced synthesis (graph-level enforcement)
 retrieval_llm_base = ChatFireworks(
-    model="accounts/fireworks/models/gpt-oss-120b",
+    model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
 )
@@ -113,9 +114,14 @@ def print_retrieval_messages(node_name: str, messages: list, iteration: int):
     print("--------------------------------------------------------------------------------")
 
 
-def retrieval_chat_node(state: RetrievalState) -> dict:
+async def retrieval_chat_node(state: RetrievalState) -> dict:
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_retrieval_messages(raw_messages)
+
+    # Do not pass an unexecuted tool request into the final synthesis call.
+    if clean_messages and isinstance(clean_messages[-1], AIMessage):
+        if getattr(clean_messages[-1], "tool_calls", None):
+            clean_messages = clean_messages[:-1]
     current_iteration = state.get("iterations", 0)
 
     if not clean_messages or not isinstance(clean_messages[0], SystemMessage):
@@ -125,7 +131,7 @@ def retrieval_chat_node(state: RetrievalState) -> dict:
 
     print_retrieval_messages("retrieval_chat_node", messages_to_send, current_iteration + 1)
 
-    response = retrieval_llm.invoke(messages_to_send)
+    response = await retrieval_llm.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
@@ -156,7 +162,7 @@ def retrieval_chat_node(state: RetrievalState) -> dict:
     }
 
 
-def collect_retrieval_tool_results(state: RetrievalState) -> dict:
+async def collect_retrieval_tool_results(state: RetrievalState) -> dict:
     chunks = list(state.get("chunks", []))
     existing_chunk_ids = {
         (c.get("document", {}).get("document_id"), c.get("chunk", {}).get("page_number"))
@@ -216,7 +222,7 @@ def collect_retrieval_tool_results(state: RetrievalState) -> dict:
     return res
 
 
-def force_synthesis_node(state: RetrievalState) -> dict:
+async def force_synthesis_node(state: RetrievalState) -> dict:
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_retrieval_messages(raw_messages)
 
@@ -231,7 +237,7 @@ def force_synthesis_node(state: RetrievalState) -> dict:
     messages_to_send = [synthesis_prompt] + clean_messages
     print_retrieval_messages("force_synthesis_node", messages_to_send, state.get("iterations", 0) + 1)
 
-    response = retrieval_llm_base.invoke(messages_to_send)
+    response = await retrieval_llm_base.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
@@ -253,18 +259,16 @@ def force_synthesis_node(state: RetrievalState) -> dict:
 
 def retrieval_route_after_chat(state: RetrievalState):
     iterations = state.get("iterations", 0)
+    last_message = state["messages"][-1]
+    has_tool_calls = bool(getattr(last_message, "tool_calls", None))
 
-    if iterations >= MAX_ITERATIONS:
+    if not has_tool_calls:
         return END
 
-    if iterations >= MAX_ITERATIONS - 1:
+    if iterations >= MAX_ITERATIONS:
         return "force_synthesis_node"
 
-    last_message = state["messages"][-1]
-    if getattr(last_message, "tool_calls", None):
-        return "retrieval_tool_node"
-
-    return END
+    return "retrieval_tool_node"
 
 
 builder = StateGraph(RetrievalState)
@@ -290,7 +294,7 @@ builder.add_edge("force_synthesis_node", END)
 retrieval_subgraph = builder.compile()
 
 
-def run_retrieval_agent(query: str, event_callback: SubAgentEventCallback = None) -> SubAgentResult:
+async def run_retrieval_agent(query: str, event_callback: SubAgentEventCallback = None) -> SubAgentResult:
     """
     Execute Retrieval Agent Subgraph, stream events via callback tagged with agent="retrieval_agent",
     and return final SubAgentResult.
@@ -315,7 +319,7 @@ def run_retrieval_agent(query: str, event_callback: SubAgentEventCallback = None
     input_tokens = 0
     output_tokens = 0
 
-    for update in retrieval_subgraph.stream(initial_state, stream_mode="updates"):
+    async for update in retrieval_subgraph.astream(initial_state, stream_mode="updates"):
         for node_name, node_update in update.items():
             if node_name in ("retrieval_chat_node", "force_synthesis_node"):
                 reasoning = node_update.get("reasoning", "")

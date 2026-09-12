@@ -31,7 +31,7 @@ def _enhance_query(query: str) -> str:
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
         response = groq_client.chat.completions.create(
-            model="openai/gpt-oss-120b",
+            model="nemotron-lightning-3p5-30b-a3b",
             messages=[
                 {
                     "role": "user",

@@ -1,25 +1,51 @@
 import os
+import asyncio
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from sqlalchemy import text
-from psycopg_pool import ConnectionPool
+from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
-from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 load_dotenv()
 
 raw_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/cortex")
 conn_string = raw_url.replace("postgresql+psycopg2://", "postgresql://").replace("postgresql+psycopg://", "postgresql://")
 
-# Initialize connection pool and PostgresSaver checkpointer
-pool = ConnectionPool(conn_string, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
-postgres_checkpointer = PostgresSaver(pool)
+# Async pool — created once when the event loop starts
+async_pool: AsyncConnectionPool | None = None
+postgres_checkpointer: AsyncPostgresSaver | None = None
 
-# Create checkpoint tables if not existing
-try:
-    postgres_checkpointer.setup()
-    print("[Checkpointer] PostgresSaver tables setup successfully.")
-except Exception as e:
-    print(f"[Checkpointer] Warning during setup(): {e}")
+
+async def init_checkpointer():
+    """
+    Must be called once at app startup (inside an async context).
+    Creates the async connection pool, sets up the LangGraph tables,
+    and sets the module-level checkpointer that main_graph.py imports.
+    """
+    global async_pool, postgres_checkpointer
+
+    async_pool = AsyncConnectionPool(
+        conn_string,
+        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        open=False,
+    )
+    await async_pool.open()
+
+    postgres_checkpointer = AsyncPostgresSaver(async_pool)
+    try:
+        await postgres_checkpointer.setup()
+        print("[Checkpointer] AsyncPostgresSaver tables verified.")
+    except Exception as e:
+        print(f"[Checkpointer] Warning during setup(): {e}")
+
+
+async def close_checkpointer():
+    """Call at app shutdown to gracefully close the async pool."""
+    global async_pool
+    if async_pool:
+        await async_pool.close()
+        print("[Checkpointer] Async connection pool closed.")
 
 
 def delete_checkpoint(thread_id: str, db_session):

@@ -29,7 +29,7 @@ const MENU_ITEMS = [
   { id: "AgentInspector", label: "Agent Inspector", icon: Sparkles },
   { id: "Documents", label: "Documents", icon: FileText },
   { id: "Projects", label: "Projects", icon: Receipt },
-  { id: "ProjectSettings", label: "Project settings", icon: Settings },
+  { id: "Settings", label: "Settings", icon: Settings },
   { id: "Teams", label: "Teams", icon: Building2 },
   { id: "AuditLogs", label: "Audit logs", icon: ClipboardList },
   { id: "Trash", label: "Trash", icon: Trash2 },
@@ -93,7 +93,7 @@ function SidebarContent({
       AgentInspector: "/agent-inspector",
       Documents: "/documents",
       Projects: "/projects",
-      ProjectSettings: "/project-settings",
+      Settings: "/settings",
       Teams: "/teams",
       AuditLogs: "/audit-logs",
       Trash: "/trash",
@@ -138,8 +138,8 @@ function SidebarContent({
       setActive("Projects")
       return
     }
-    if (pathname.startsWith("/project-settings")) {
-      setActive("ProjectSettings")
+    if (pathname.startsWith("/settings") || pathname.startsWith("/project-settings")) {
+      setActive("Settings")
       return
     }
     if (pathname.startsWith("/trash")) {
@@ -196,14 +196,13 @@ function SidebarContent({
   }
 
   return (
-    <div className="h-full flex flex-col justify-between">
+    <div className="h-full flex flex-col min-h-0">
 
-      {/* ── TOP ── */}
-      <div className="flex flex-col gap-3">
+      {/* ── FIXED TOP: logo, search, inbox ── */}
+      <div className="shrink-0 flex flex-col gap-3">
 
         {/* Logo + collapse toggle */}
         <div className="flex items-center h-8 overflow-hidden">
-          {/* Left cluster: logo + brand name */}
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
@@ -231,7 +230,6 @@ function SidebarContent({
               Cortex
             </button>
           </div>
-          {/* Right: collapse/expand icon */}
           {!isCollapsed && (
             <button
               onClick={() => {
@@ -274,15 +272,22 @@ function SidebarContent({
             isCollapsed && "opacity-0"
           )}>Menu</p>
         </div>
+      </div>
 
-        {/* Main nav */}
-        <div className="flex flex-col gap-0.5">
+      {/* ── SCROLLABLE: menu items only ── */}
+      <div
+        className={cn(
+          "flex-1 min-h-0 overflow-y-auto overflow-x-hidden sidebar-scroll mt-1 -mr-3",
+          isCollapsed && "sidebar-scroll-collapsed"
+        )}
+      >
+        <div className={cn("flex flex-col gap-0.5 pb-1", !isCollapsed && "pr-2")}>
           {MENU_ITEMS.map(item => <NavRow key={item.id} {...item} />)}
         </div>
       </div>
 
-      {/* ── BOTTOM — only profile row shown by default ── */}
-      <div className="flex flex-col gap-2">
+      {/* ── FIXED BOTTOM: profile ── */}
+      <div className="flex flex-col gap-2 shrink-0 pt-2">
 
         <div className={cn("h-px w-full", divider)} />
 
@@ -440,7 +445,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
   }, [isMobileOpen])
 
   const panelClass = cn(
-    "h-full flex flex-col overflow-hidden p-3 font-quicksand",
+    "h-full flex flex-col overflow-hidden min-h-0 p-3 font-quicksand",
     isDark ? "bg-[#121215] border-zinc-800" : "bg-[#f7f7f8] border-zinc-200"
   )
 
@@ -457,7 +462,10 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
           isDark ? "border-zinc-800" : "border-zinc-200"
         )}
       >
-        <div className={panelClass} style={{ height: "100vh", fontWeight: 400 }}>
+        <div
+          className={panelClass}
+          style={{ height: "100vh", fontWeight: 400, colorScheme: isDark ? "dark" : "light" }}
+        >
           <SidebarContent
             isCollapsed={effectiveCollapsed}
             setIsCollapsed={setIsCollapsed}
@@ -471,7 +479,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
         <div className="md:hidden fixed inset-0 z-50 flex overscroll-none">
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setIsMobileOpen(false)} />
           <aside className={cn(
-            "relative z-10 w-[260px] h-full overflow-y-scroll overscroll-contain touch-pan-y animate-in slide-in-from-left duration-200",
+            "relative z-10 w-[260px] h-full overflow-hidden animate-in slide-in-from-left duration-200",
             isDark ? "bg-[#121215]" : "bg-[#f7f7f8]"
           )}>
             <button
@@ -483,7 +491,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
             >
               <X className="w-4 h-4" />
             </button>
-            <div className="h-full p-3 overflow-y-scroll overscroll-contain touch-pan-y" style={{ fontWeight: 400 }}>
+            <div className="h-full p-3 overflow-hidden min-h-0" style={{ fontWeight: 400 }}>
               <SidebarContent isCollapsed={false} setIsCollapsed={() => { }} setIsMobileOpen={setIsMobileOpen} />
             </div>
           </aside>

@@ -232,7 +232,7 @@ Instructions:
 
     payload = {
         "model":
-            "accounts/fireworks/models/gpt-oss-20b",
+            "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
 
         "temperature": 0.2,
 

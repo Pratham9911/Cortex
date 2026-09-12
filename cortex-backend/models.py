@@ -512,3 +512,27 @@ class InboxMessage(Base):
         server_default=func.now()
     )
 
+
+class UserIntegration(Base):
+    __tablename__ = "user_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String, nullable=False, index=True)          # e.g. 'google', 'microsoft', 'slack'
+    integration_type = Column(String, nullable=False, index=True)  # e.g. 'gmail', 'calendar', 'drive'
+    provider_account_id = Column(String, nullable=True)           # e.g. Google sub / user ID
+    account_email = Column(String, nullable=True)                 # e.g. user@gmail.com
+    access_token = Column(String, nullable=False)                 # encrypted
+    refresh_token = Column(String, nullable=True)                 # encrypted
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    scopes = Column(ARRAY(String), nullable=True)
+    metadata_ = Column("metadata", JSONB, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", "integration_type", name="uq_user_provider_integration"),
+    )
+
+

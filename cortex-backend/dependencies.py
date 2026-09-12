@@ -1,22 +1,38 @@
-from fastapi import Depends, HTTPException
+from typing import Optional
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from supabase_client import supabase
 from models import User
 from database import SessionLocal
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
+def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    # Backward-compatible query-token fallback. Header auth remains the
+    # documented/default mechanism for API clients.
+    token: Optional[str] = Query(None, include_in_schema=False),
+):
+    token_str = None
+    if credentials and credentials.credentials:
+        token_str = credentials.credentials
+    elif token:
+        token_str = token
+
+    if not token_str:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
         # Verify token with Supabase Auth
-        res = supabase.auth.get_user(token)
+        res = supabase.auth.get_user(token_str)
         if not res or not res.user:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
         
         sb_user = res.user
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=401,
