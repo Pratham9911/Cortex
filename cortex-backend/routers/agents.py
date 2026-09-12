@@ -399,6 +399,51 @@ def emit_interrupt(thread_id: str, interrupt_value):
     return emit("interrupt", thread_id=thread_id, **payload)
 
 
+async def _stream_workflow(workflow, input_data, config=None):
+    """Forward workflow updates and sub-agent callbacks as they happen."""
+    event_queue = asyncio.Queue()
+
+    def forward_event(event_type: str, *args, **data):
+        agent_val = data.pop("agent", None) or (args[0] if args else "main")
+        event_type = {
+            "gmail_agent_started": "agent_started",
+            "gmail_tool_started": "tool_started",
+            "gmail_tool_completed": "tool_completed",
+            "gmail_agent_completed": "agent_completed",
+        }.get(event_type, event_type)
+        event_queue.put_nowait(("event", event_type, {"agent": agent_val, **data}))
+
+    async def produce():
+        set_active_event_callback(forward_event)
+        try:
+            async for update in workflow.astream(
+                input_data,
+                config=config,
+                stream_mode="updates",
+            ):
+                await event_queue.put(("update", update, None))
+        except asyncio.CancelledError:
+            raise
+        finally:
+            set_active_event_callback(None)
+        await event_queue.put(("done", None, None))
+
+    task = asyncio.create_task(produce())
+    try:
+        while True:
+            item = await event_queue.get()
+            if item[0] == "done":
+                break
+            yield item
+    finally:
+        if not task.done():
+            task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 @router.get("/projects/{project_id}/agent")
 async def run_agent(
     project_id: int,
@@ -460,11 +505,14 @@ async def run_agent(
 
         try:
             workflow = main_graph.workflow or main_graph.build_workflow()
-            async for update in workflow.astream(initial_state, config=config, stream_mode="updates"):
+            async for stream_kind, stream_value, stream_data in _stream_workflow(
+                workflow, initial_state, config=config
+            ):
+                if stream_kind == "event":
+                    yield emit(stream_value, **stream_data)
+                    continue
 
-                while pending_events:
-                    evt_type, evt_data = pending_events.pop(0)
-                    yield emit(evt_type, **evt_data)
+                update = stream_value
 
                 for node_name, node_update in update.items():
 
@@ -508,10 +556,6 @@ async def run_agent(
                 if is_interrupted:
                     return
 
-                while pending_events:
-                    evt_type, evt_data = pending_events.pop(0)
-                    yield emit(evt_type, **evt_data)
-
             # Workflow completed without interruption -> cleanup checkpoint
             delete_checkpoint(thread_id, stream_db)
 
@@ -532,7 +576,15 @@ async def run_agent(
             total_tokens=input_tokens + output_tokens,
         )
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/projects/{project_id}/agent/{thread_id}/resume")
@@ -583,11 +635,14 @@ async def resume_agent(
 
         try:
             workflow = main_graph.workflow or main_graph.build_workflow()
-            async for update in workflow.astream(Command(resume=resume_payload), config=config, stream_mode="updates"):
+            async for stream_kind, stream_value, stream_data in _stream_workflow(
+                workflow, Command(resume=resume_payload), config=config
+            ):
+                if stream_kind == "event":
+                    yield emit(stream_value, **stream_data)
+                    continue
 
-                while pending_events:
-                    evt_type, evt_data = pending_events.pop(0)
-                    yield emit(evt_type, **evt_data)
+                update = stream_value
 
                 for node_name, node_update in update.items():
 
@@ -631,10 +686,6 @@ async def resume_agent(
                 if is_interrupted:
                     return
 
-                while pending_events:
-                    evt_type, evt_data = pending_events.pop(0)
-                    yield emit(evt_type, **evt_data)
-
             # Workflow completed -> cleanup checkpointer
             delete_checkpoint(thread_id, stream_db)
 
@@ -655,7 +706,15 @@ async def resume_agent(
             total_tokens=input_tokens + output_tokens,
         )
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 

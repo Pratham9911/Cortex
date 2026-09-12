@@ -37,20 +37,25 @@ Instructions:
 - You will be evaluated on correctness, groundedness, and relevance, so answer only what is supported by the context.
 
 Citation Rules:
-- Use inline citations SPARINGLY: Include at most 1 or 2 citations per  major section, or table.
+
+- Use inline citations SPARINGLY: Include at most 1 or 2 citations per major section, or table.
 - Do NOT cite every single row, date, metric, or sentence. Over-citing cluttering the response must be avoided.
 - MUST format inline citations as plain text without any code backticks, quotes, or formatting: [cite: doc_<document_id>:p<page_number>] (or [cite: doc_<document_id>] if page number is unavailable).
   Example: The project submission deadline is October 15, 2023 [cite: doc_12:p4].
 - CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4].
 - NEVER use full-width or non-standard brackets (e.g. do NOT output `【` or `】`).
 - NEVER invent document IDs or page numbers outside of the provided Project Context headers.
+- Place every citation at the end of a paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line. Never place a citation mid-paragraph or between sentences.
 
-Rejection Rules if it is not a general Chat or project knowledge question:
+Rejection Rules:
 - If the context is insufficient to answer the question or Not Matching, OR"
-- "if User asks for A and you can't see A , exact match of A in the context, you must say 'The provided context does not have any information in Project base' . As You don't have to answer everytime"
+- "if User asks anythin related to A and you can't see exact match for A in the context which explains A , you must say 'The provided context does not have any information about A in Project base' . As You don't have to answer everytime"
 
 Project Context:
 {context}
+
+Remember Rejection Rules:
+- "if User asks anythin related to A and you can't see exact match for A in the context which explains A , you must say 'The provided context does not have any information about A in Project base' . As You don't have to answer everytime"
 
 """
 )
