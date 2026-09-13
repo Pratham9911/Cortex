@@ -402,6 +402,7 @@ def emit_interrupt(thread_id: str, interrupt_value):
 async def _stream_workflow(workflow, input_data, config=None):
     """Forward workflow updates and sub-agent callbacks as they happen."""
     event_queue = asyncio.Queue()
+    stream_completed = False
 
     def forward_event(event_type: str, *args, **data):
         agent_val = data.pop("agent", None) or (args[0] if args else "main")
@@ -415,6 +416,7 @@ async def _stream_workflow(workflow, input_data, config=None):
 
     async def produce():
         set_active_event_callback(forward_event)
+        completed_normally = False
         try:
             async for update in workflow.astream(
                 input_data,
@@ -422,22 +424,33 @@ async def _stream_workflow(workflow, input_data, config=None):
                 stream_mode="updates",
             ):
                 await event_queue.put(("update", update, None))
+            completed_normally = True
         except asyncio.CancelledError:
             raise
+        except Exception as exc:
+            await event_queue.put(("error", exc, None))
         finally:
             set_active_event_callback(None)
-        await event_queue.put(("done", None, None))
+        if completed_normally:
+            await event_queue.put(("done", None, None))
 
     task = asyncio.create_task(produce())
     try:
         while True:
             item = await event_queue.get()
             if item[0] == "done":
+                stream_completed = True
                 break
+            if item[0] == "error":
+                raise item[1]
             yield item
     finally:
         if not task.done():
-            task.cancel()
+            if stream_completed:
+                await task
+            else:
+                task.cancel()
+
         try:
             await task
         except asyncio.CancelledError:
@@ -501,6 +514,7 @@ async def run_agent(
             user_id=user_id,
             user_role=user_role,
             db=stream_db,
+            thread_id=thread_id,
         )
 
         try:
@@ -631,6 +645,9 @@ async def resume_agent(
             user_id=user_id,
             user_role=user_role,
             db=stream_db,
+            thread_id=thread_id,
+            resume_action=decision,
+            resume_feedback=feedback or "",
         )
 
         try:

@@ -17,6 +17,7 @@ async def search_emails(
     gmail_service: Any,
     query: str,
     max_results: int = 10,
+    **kwargs: Any,
 ) -> list[dict]:
     """
     Search Gmail using Gmail's standard search query syntax.

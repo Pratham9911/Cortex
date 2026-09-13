@@ -307,7 +307,7 @@ function InlineDocCitationBadge({
   )
 }
 
-function AssistantMessageContent({
+export function AssistantMessageContent({
   content,
   isDark,
   sources,
@@ -557,7 +557,7 @@ function formatPages(pages: number[], fileName?: string | null) {
   return `pages ${pages.join(", ")}`
 }
 
-function MessageSources({
+export function MessageSources({
   message,
   isDark,
   onSourceAccessChanged,

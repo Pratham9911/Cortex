@@ -12,7 +12,8 @@ FIREWORKS_DECOMPOSER_MODEL = "accounts/fireworks/models/nemotron-lightning-3p5-3
 
 def decompose_query(query: str) -> dict:
     """
-    Decomposes the query into 2-5 subqueries of type 'project_knowledge' or 'web_search'.
+    Decomposes the query into at most 3 natural-language subqueries of type
+    'project_knowledge' or 'web_search'.
     If the query does not require decomposition, returns a single query.
     """
     prompt = f"""
@@ -31,7 +32,11 @@ Rules:
 - Keep important qualifiers and context.
 - Do not invent new concepts.
 - Return ONLY valid JSON.
-- only split into 2 subquries .
+- Return at most 3 subqueries, and use 2 only when the question genuinely
+  requires two independent searches.
+- Each search_query must be a clear natural-language sentence that preserves
+  the subject, comparison dimension, and important qualifiers. Do not return
+  keyword fragments.
 
 Example:
 

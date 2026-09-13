@@ -16,16 +16,18 @@ SYSTEM_PROMPT = SystemMessage(
         "You have specialized sub-agent tools and utility tools available:\n"
         "Do not Use subagents if not Necessary , if something is not clear tell the user\n"
         "If Something Fails to get information from subagents , don't make up information , tell the user you don't have that\n"
-        "If User says get info from Knowledge Base , don't Web Search for Project Knowledge , use Project base only \n"
-        "For any email or Gmail tasks (searching emails, reading messages/threads, drafting, sending emails, replying), ALWAYS delegate to the gmail_agent sub-agent tool.\n"
-        "DO NOT make up information. If you don't know the answer, say 'I don't know'.\n"
-        "DO NOT Assume anything and provide wrong information"
+        "Project Knowledge Instructions only (for info from retrieval_agent) :\n"
+        "Treat KB info as Hightest valid information and output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it\n"
+        "Citation Rule: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
+        "- CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine \n."
+        "Place every citation at the end of it's relevent paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line character ."
+      
     )
 )
 
 load_dotenv()
 
-MAX_ITERATIONS = 2
+MAX_ITERATIONS = 8
 
 llm = ChatFireworks(
     model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",

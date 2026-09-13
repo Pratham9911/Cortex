@@ -186,7 +186,8 @@ async def collect_web_tool_results(state: WebSearchState) -> dict:
             if isinstance(parsed, dict):
                 new_sources = parsed.get("sources", [])
                 if isinstance(new_sources, list):
-                    for src in new_sources:
+                    # Keep a bounded, useful set for each web-search call.
+                    for src in new_sources[:5]:
                         if isinstance(src, dict):
                             url = src.get("url")
                             if url and url in existing_urls:

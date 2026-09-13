@@ -85,17 +85,22 @@ Return ONLY valid JSON.
             f"Bearer {FIREWORKS_API_KEY}"
     }
     print("Entering analyze_search_results with payload:")
-    
-    response = requests.post(
-        "https://api.fireworks.ai/inference/v1/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=30
-    )
+    if not FIREWORKS_API_KEY:
+        print("Skipping web result analysis: FIREWORKS_API_KEY is not configured")
+        return {"selected_indices": []}
 
-    response.raise_for_status()
-
-    data = response.json()
+    try:
+        response = requests.post(
+            "https://api.fireworks.ai/inference/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        print(f"Web result analysis failed; using top search results: {exc}")
+        return {"selected_indices": []}
 
     # print(json.dumps(data, indent=2))
     
@@ -360,10 +365,17 @@ def fetch(
             "message": top_title
         }
 
-    answer = generate_web_answer(
-        query=query,
-        fetched_pages=fetched_pages
-    )
+    try:
+        answer = generate_web_answer(
+            query=query,
+            fetched_pages=fetched_pages
+        )
+    except Exception as exc:
+        print(f"Web answer generation failed: {exc}")
+        answer = (
+            "I found relevant web sources, but could not synthesize a full "
+            "answer right now. Please review the sources below."
+        )
 
     yield {
         "type": "final",

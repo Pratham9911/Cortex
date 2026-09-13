@@ -26,23 +26,70 @@ async def reply_to_email(
     message_id: str,
     body: str,
     thread_id: Optional[str] = None,
+    need_approval: bool = True,
+    sender_email: str = "me",
+    event_callback: Any = None,
 ) -> dict:
     """
     Reply to an existing Gmail message in-thread.
 
+    If need_approval is True, this tool handles HITL pause via interrupt()
+    directly. Upon approval ('yes'), it sends the reply immediately.
+    If declined ('no'), it returns status='cancelled'. If user provides instructions,
+    it returns status='instruction_provided'.
+
     Fetches the original message headers to build a proper RFC 2822 reply
     with In-Reply-To / References / Re: subject prefix.
-    This function is only called AFTER the user explicitly approves.
 
     Args:
         gmail_service: Authenticated Gmail API client.
         message_id:    ID of the message to reply to.
         body:          Plain-text reply body.
         thread_id:     Optional thread ID override (auto-detected from original if not provided).
+        need_approval: Whether to trigger HITL approval.
+        sender_email:  Sender email address for HITL payload.
+        event_callback: Optional callback for HITL events.
 
     Returns:
         Dict with sent message_id, thread_id, recipient, subject, and status.
     """
+    if need_approval:
+        from langgraph.types import interrupt
+        from agentic.gmail.gmail_service import build_hitl_payload, decode_decision
+
+        hitl_payload = build_hitl_payload(
+            "reply_to_email",
+            {"message_id": message_id, "body": body, "thread_id": thread_id},
+            sender_email=sender_email,
+        )
+
+        if event_callback:
+            safe_hitl = {k: v for k, v in hitl_payload.items() if k != "user_id"}
+            event_callback("gmail_hitl_required", **safe_hitl)
+
+        raw_decision = interrupt(hitl_payload)
+        decision, feedback = decode_decision(raw_decision)
+
+        if decision in {"yes", "approve", "approved", "accept", "true"}:
+            if event_callback:
+                event_callback("gmail_approval_received", agent="gmail_agent", tool="reply_to_email", approval_id=hitl_payload.get("approval_id"))
+        elif decision in {"no", "reject", "rejected", "false"}:
+            if event_callback:
+                event_callback("gmail_approval_rejected", agent="gmail_agent", tool="reply_to_email", approval_id=hitl_payload.get("approval_id"))
+            return {
+                "status": "cancelled",
+                "message_id": message_id,
+                "message": f"Replying to message {message_id} was declined by user.",
+                "feedback": feedback,
+            }
+        else:
+            return {
+                "status": "instruction_provided",
+                "message_id": message_id,
+                "user_instruction": feedback or decision,
+                "message": f"User instructed modification for 'reply_to_email': '{feedback or decision}'",
+            }
+
     # ── Fetch original message headers for threading ──────────────────────────
     try:
         original = (

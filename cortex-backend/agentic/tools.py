@@ -64,10 +64,10 @@ def get_active_project_context():
 async def web_agent_tool(query: str) -> dict:
     """
     Delegate ALL web research tasks to the specialized Web Agent in ONE call and command it what to do.
-    The Web Agent can research multiple unrelated topics if you provide a clear query with what is needed and do not just put Keywords.
-    CRITICAL: Bundle 3-4 web sub-questions into a single call — e.g. 'find population of india and china and compare with us'.
+    The Web Agent can research multiple unrelated topics , Provide it a set of instuction of what to do.
+    CRITICAL: Bundle 3-4 web sub-questions into a single call.
     Do NOT call web_agent separately for each sub-question. One comprehensive call handles everything.
-    The agent returns a single structured result with the full answer and sources.
+
     """
     from agentic.sub_agents.web_agent import run_web_agent
 
@@ -80,10 +80,10 @@ async def web_agent_tool(query: str) -> dict:
 async def retrieval_agent_tool(query: str) -> dict:
     """
     Delegate internal project knowledge research to the specialized Retrieval Agent in ONE call and command it what to do.
-    The Retrieval Agent searches project files, documents, and reports to answer questions about project data.
-    CRITICAL: Bundle 3-4 project-related sub-questions into a single call — e.g. 'find architecture decisions and deployment steps in project docs'.
-    Do NOT call retrieval_agent separately for each sub-question. One comprehensive call handles everything.
-    Always provide a clear query with what is needed , do not just put keywords
+
+    CRITICAL: Bundle 3-4 project-related sub-questions into a single call and Do not call it separately for each sub-question.
+
+    Provide it a clear task of what user needed , and not just Keywords.
     """
     from agentic.sub_agents.retrieval_agent import run_retrieval_agent
 
@@ -98,7 +98,7 @@ async def github_agent_tool(query: str) -> dict:
     Delegate ALL GitHub tasks (searching repos, reading files/commits/issues/PRs, creating issues, branches, PRs)
     to the specialized GitHub Agent in ONE call and command it what to do.
     Provide a clear, descriptive instruction of what needs to be done on GitHub.
-    The agent executes read operations automatically and requests user authorization for write/destructive operations.
+
     """
     from agentic.sub_agents.github_agent import run_github_agent
 
@@ -125,10 +125,9 @@ async def github_agent_tool(query: str) -> dict:
 @tool("gmail_agent")
 async def gmail_agent_tool(query: str) -> dict:
     """
-    Delegate ALL Gmail/email tasks (searching emails, reading threads, listing drafts, creating drafts, sending emails, replying)
+    Delegate One at a time Gmail/email task (searching emails, reading threads, listing drafts, creating drafts, sending emails, replying to emails)
     to the specialized Gmail Agent in ONE call and command it what to do.
-    Provide a clear, descriptive instruction of what email action is needed.
-    The agent executes read operations automatically and requests user authorization for write operations (sending, creating drafts, replying).
+    Mention everything about what to send , read and reply , each thing properly of what user has asked. As it can just perform operation on gmail and do not have any knowledge about project or web search. So be clear and specific in your query.
     """
     from agentic.sub_agents.gmail_agent import run_gmail_agent
 
@@ -157,7 +156,7 @@ async def gmail_agent_tool(query: str) -> dict:
 async def project_search(query: str) -> dict:
     """
     Use this tool to search project documents and files for relevant information to answer the query.
-    Prove it a clear task and not just Keyword , it expects one similar Topic at a time "
+    Provide it a clear task of what user needed , and not just Keyword , it expects one similar Topic at a time "
     """
     from rag.retriever import hybrid_search_with_rerank
     from rag.generator import generate_answer

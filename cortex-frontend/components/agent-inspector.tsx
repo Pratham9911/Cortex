@@ -18,6 +18,8 @@ import {
   Wrench,
   XCircle,
 } from "lucide-react"
+import { AssistantMessageContent, MessageSources } from "@/components/agent-chat/agent-chat-thread"
+import type { MessageSources as MessageSourcesData } from "@/components/agent-chat/types"
 
 interface StreamEvent {
   type: string
@@ -43,6 +45,8 @@ interface StreamEvent {
   feedback?: string
   message?: string
   answer?: string
+  sources?: Array<Record<string, any>>
+  chunks?: Array<Record<string, any>>
   input_tokens?: number
   output_tokens?: number
   total_tokens?: number
@@ -115,6 +119,8 @@ export function AgentInspector() {
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false)
   const [approvalConfirmOpen, setApprovalConfirmOpen] = useState(false)
   const [finalResult, setFinalResult] = useState<StreamEvent | null>(null)
+  const [webSources, setWebSources] = useState<Array<Record<string, any>>>([])
+  const [projectSources, setProjectSources] = useState<Array<Record<string, any>>>([])
   const activityPanelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -138,6 +144,30 @@ export function AgentInspector() {
   const addActivity = (item: Omit<ActivityItem, "id">) => {
     if (!item.content.trim()) return
     setActivities((prev) => [...prev, { ...item, id: activityId() }])
+  }
+
+  const addSources = (agent: string, items: Array<Record<string, any>> = []) => {
+    if (!items.length) return
+    const setter = agent === "web_agent" ? setWebSources : setProjectSources
+    setter((previous) => {
+      const seen = new Set(previous.map((item) => JSON.stringify([
+        item.url,
+        item.document?.document_id,
+        item.chunk?.page_number,
+        item.chunk?.chunk_id,
+      ])))
+      return [...previous, ...items.slice(0, 5).filter((item) => {
+        const key = JSON.stringify([
+          item.url,
+          item.document?.document_id,
+          item.chunk?.page_number,
+          item.chunk?.chunk_id,
+        ])
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })]
+    })
   }
 
   const handleEvent = (evt: StreamEvent) => {
@@ -197,10 +227,14 @@ export function AgentInspector() {
       // synthesizing. Only the main workflow completion owns the final answer.
       if (evt.agent !== "main") {
         const finishedAgent = evt.agent || "main"
+        if (finishedAgent === "web_agent") addSources(finishedAgent, evt.sources)
+        if (finishedAgent === "retrieval_agent") addSources(finishedAgent, evt.chunks)
         addActivity({ agent: finishedAgent, kind: "status", content: `${agentName(finishedAgent)} agent finished` })
         return
       }
       setStatusText("Completed")
+      addSources("web_agent", evt.sources)
+      addSources("retrieval_agent", evt.chunks)
       setFinalResult(evt)
       setActivityCollapsed(true)
     }
@@ -243,6 +277,8 @@ export function AgentInspector() {
     setIsSubmittingDecision(false)
     setApprovalConfirmOpen(false)
     setFinalResult(null)
+    setWebSources([])
+    setProjectSources([])
 
     const token = localStorage.getItem("access_token")
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -302,6 +338,42 @@ export function AgentInspector() {
 
   const formatSeconds = (seconds: number) => seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 
+  const formattedSources: MessageSourcesData = {
+    web: webSources
+      .filter((source) => source.url)
+      .map((source) => ({
+        title: String(source.title || source.name || source.url),
+        url: String(source.url),
+        favicon: source.favicon || null,
+        snippet: source.snippet || source.description || null,
+        score: typeof source.score === "number" ? source.score : null,
+      })),
+    documents: projectSources
+      .map((source) => {
+        const document = source.document || source
+        const chunk = source.chunk || source
+        const documentId = Number(document.document_id)
+        const page = Number(chunk.page_number)
+        if (!Number.isFinite(documentId)) return null
+        return {
+          document_id: documentId,
+          document_title: document.title || document.document_title || null,
+          file_name: document.file_name || null,
+          version_number: document.version || document.version_number || null,
+          page_number: Number.isFinite(page) ? page : null,
+          can_download: true,
+        }
+      })
+      .filter((source): source is NonNullable<typeof source> => source !== null),
+  }
+
+  const formattedMessage = {
+    id: "agent-inspector-result",
+    role: "assistant" as const,
+    content: finalResult?.answer || "Task completed.",
+    sources: formattedSources,
+  }
+
   return (
     <div className="min-h-screen bg-[#0b0c10] pb-48 font-sans text-slate-100">
       <style jsx global>{`
@@ -333,7 +405,12 @@ export function AgentInspector() {
         </section>}
 
         {finalResult && <div className="space-y-4 border-t border-slate-800/60 pt-4 text-sm leading-relaxed">
-          <div className="whitespace-pre-wrap">{finalResult.answer || "Task completed."}</div>
+          <AssistantMessageContent
+            content={finalResult.answer || "Task completed."}
+            isDark={true}
+            sources={formattedSources}
+          />
+          <MessageSources message={formattedMessage} isDark={true} />
           <div className="flex flex-wrap gap-4 border-t border-slate-800/50 pt-3 font-mono text-xs text-slate-400">
             <span>Input Tokens: <b className="text-slate-200">{finalResult.input_tokens || 0}</b></span><span>Output Tokens: <b className="text-slate-200">{finalResult.output_tokens || 0}</b></span><span>Total Tokens: <b className="text-indigo-400">{finalResult.total_tokens || ((finalResult.input_tokens || 0) + (finalResult.output_tokens || 0))}</b></span>
           </div>

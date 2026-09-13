@@ -29,6 +29,7 @@ def _decode_body(payload: dict) -> str:
 async def get_thread(
     gmail_service: Any,
     thread_id: str,
+    **kwargs: Any,
 ) -> dict:
     """
     Retrieve a Gmail thread (conversation) by thread ID.

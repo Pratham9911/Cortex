@@ -47,25 +47,56 @@ async def create_draft(
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
     thread_id: Optional[str] = None,
+    need_approval: bool = True,
+    sender_email: str = "me",
+    event_callback: Any = None,
 ) -> dict:
     """
     Create a Gmail draft.
 
-    This function is only called AFTER the user approves the HITL prompt.
-    Never call this automatically.
-
-    Args:
-        gmail_service: Authenticated Gmail API client.
-        to:            Recipient email address.
-        subject:       Email subject.
-        body:          Email body (plain text).
-        cc:            Optional CC recipients (comma-separated).
-        bcc:           Optional BCC recipients (comma-separated).
-        thread_id:     Optional Gmail thread ID (for drafting a reply in a thread).
-
-    Returns:
-        Dict with draft_id, recipients, subject, and status.
+    If need_approval is True, this tool handles HITL pause via interrupt()
+    directly. Upon approval ('yes'), it creates the draft immediately.
+    If declined ('no'), it returns status='cancelled'. If user provides instructions,
+    it returns status='instruction_provided'.
     """
+    if need_approval:
+        from langgraph.types import interrupt
+        from agentic.gmail.gmail_service import build_hitl_payload, decode_decision
+
+        hitl_payload = build_hitl_payload(
+            "create_draft",
+            {"to": to, "subject": subject, "body": body, "cc": cc, "bcc": bcc, "thread_id": thread_id},
+            sender_email=sender_email,
+        )
+
+        if event_callback:
+            safe_hitl = {k: v for k, v in hitl_payload.items() if k != "user_id"}
+            event_callback("gmail_hitl_required", **safe_hitl)
+
+        raw_decision = interrupt(hitl_payload)
+        decision, feedback = decode_decision(raw_decision)
+
+        if decision in {"yes", "approve", "approved", "accept", "true"}:
+            if event_callback:
+                event_callback("gmail_approval_received", agent="gmail_agent", tool="create_draft", approval_id=hitl_payload.get("approval_id"))
+        elif decision in {"no", "reject", "rejected", "false"}:
+            if event_callback:
+                event_callback("gmail_approval_rejected", agent="gmail_agent", tool="create_draft", approval_id=hitl_payload.get("approval_id"))
+            return {
+                "status": "cancelled",
+                "to": to,
+                "subject": subject,
+                "message": f"Creating draft for {to} was declined by user.",
+                "feedback": feedback,
+            }
+        else:
+            return {
+                "status": "instruction_provided",
+                "to": to,
+                "subject": subject,
+                "user_instruction": feedback or decision,
+                "message": f"User instructed modification for 'create_draft': '{feedback or decision}'",
+            }
     raw = _build_raw_message(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
 
     message_body: dict = {"raw": raw}

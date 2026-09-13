@@ -12,6 +12,7 @@ from typing import Any
 async def list_drafts(
     gmail_service: Any,
     max_results: int = 10,
+    **kwargs: Any,
 ) -> list[dict]:
     """
     List Gmail drafts. Returns compact metadata for each draft.
@@ -50,7 +51,6 @@ async def list_drafts(
                     userId="me",
                     id=draft_id,
                     format="metadata",
-                    metadataHeaders=["To", "Cc", "Subject", "Date"],
                 )
                 .execute()
             )

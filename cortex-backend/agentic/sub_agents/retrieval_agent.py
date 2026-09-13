@@ -20,10 +20,13 @@ SYSTEM_PROMPT = SystemMessage(
         "You are a specialized Retrieval Sub-Agent. Your task is to search internal project documents "
         "using the project_search tool to answer all parts of the user's project research query efficiently.\n\n"
         "RULES:\n"
-        "1. You will get a sentence which may contains seperate Topics like find A and B , Identify them and use Search for Individual Topics don't mix.\n"
-        "2. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and answer in clear and facts only text.\n"
-        "3. The Information you will get must be send as it is without any modification or interpretation. Don't add any extra information or make any assumptions.\n"
-        "4. if Searching Fails to retreive more then once for a Query, STOP calling tools and answer the query with the information you have gathered so far as Info may not be present in Project.\n"
+        "You will get a sentence which may contains seperate Topics like find A and B , Identify them and use Search for Individual Topics don't mix.\n"
+        "As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and answer in clear and facts only text.\n"
+        "if Searching Fails to retreive more then once for a Query, STOP calling tools and answer the query with the information you have gathered so far as Info may not be present in Project.\n"
+        "Output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it\n"
+        "Citation Rule: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
+        "CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine "
+
     )
 )
 
@@ -186,7 +189,8 @@ async def collect_retrieval_tool_results(state: RetrievalState) -> dict:
             if isinstance(parsed, dict):
                 new_chunks = parsed.get("chunks", [])
                 if isinstance(new_chunks, list):
-                    for chk in new_chunks:
+                    # Keep the top five project passages from each search call.
+                    for chk in new_chunks[:5]:
                         if isinstance(chk, dict):
                             doc_id = chk.get("document", {}).get("document_id")
                             page_no = chk.get("chunk", {}).get("page_number")

@@ -42,20 +42,20 @@ Citation Rules:
 - Do NOT cite every single row, date, metric, or sentence. Over-citing cluttering the response must be avoided.
 - MUST format inline citations as plain text without any code backticks, quotes, or formatting: [cite: doc_<document_id>:p<page_number>] (or [cite: doc_<document_id>] if page number is unavailable).
   Example: The project submission deadline is October 15, 2023 [cite: doc_12:p4].
-- CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4].
+- CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine \n.
 - NEVER use full-width or non-standard brackets (e.g. do NOT output `【` or `】`).
 - NEVER invent document IDs or page numbers outside of the provided Project Context headers.
-- Place every citation at the end of a paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line. Never place a citation mid-paragraph or between sentences.
+- Place every citation at the end of it's relevent paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line character \n. Never place a citation mid-paragraph or between sentences.
 
 Rejection Rules:
 - If the context is insufficient to answer the question or Not Matching, OR"
-- "if User asks anythin related to A and you can't see exact match for A in the context which explains A , you must say 'The provided context does not have any information about A in Project base' . As You don't have to answer everytime"
+- "if User asks anything related to A and you can't see exact match for A in the context which explains A , you must say 'The provided context does not have any information about A in Project base' . As You don't have to answer everytime"
 
 Project Context:
 {context}
 
 Remember Rejection Rules:
-- "if User asks anythin related to A and you can't see exact match for A in the context which explains A , you must say 'The provided context does not have any information about A in Project base' . As You don't have to answer everytime"
+- "if User asks anything related to A and you can't see exact match for A in the context which explains A , you must say 'The provided context does not have any information about A in Project base' . As You don't have to answer everytime"
 
 """
 )
@@ -67,7 +67,7 @@ generation_chain = (
 )
 
 
-def generate_answer(query: str, chunks):
+def generate_answer_with_usage(query: str, chunks):
     formatted_context_blocks = []
 
     for chunk in chunks:
@@ -89,9 +89,25 @@ def generate_answer(query: str, chunks):
 
     context = "\n\n".join(formatted_context_blocks)
     print(f"\n\n\n\n[Answer is Getting Generated from Generator.py]\n\n\\n")
-    return generation_chain.invoke(
+    prompt_value = prompt.invoke(
         {
             "query": query,
             "context": context,
         }
     )
+    response = generator_llm.invoke(prompt_value)
+
+    usage = getattr(response, "usage_metadata", {}) or {}
+    input_tokens = usage.get("input_tokens", 0) or 0
+    output_tokens = usage.get("output_tokens", 0) or 0
+    return response.content, {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+
+
+def generate_answer(query: str, chunks):
+    """Backward-compatible answer-only wrapper."""
+    answer, _ = generate_answer_with_usage(query, chunks)
+    return answer

@@ -37,6 +37,7 @@ def _decode_body(payload: dict) -> str:
 async def get_email(
     gmail_service: Any,
     message_id: str,
+    **kwargs: Any,
 ) -> dict:
     """
     Retrieve a single Gmail message by ID.

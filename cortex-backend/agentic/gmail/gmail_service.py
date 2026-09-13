@@ -12,7 +12,7 @@ Also provides load_gmail_tool_config() to read agentic/gmail/allowed_tools.json.
 
 import os
 import json
-from typing import Optional
+from typing import Any, Optional
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Re-export canonical Gmail service (single source of truth).
@@ -24,10 +24,14 @@ from agentic.email.gmail_service import (   # noqa: F401  (re-exported)
     send_email_via_gmail,
 )
 
+import uuid
+
 __all__ = [
     "get_gmail_service",
     "send_email_via_gmail",
     "load_gmail_tool_config",
+    "build_hitl_payload",
+    "decode_decision",
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -85,3 +89,133 @@ def load_gmail_tool_config(filepath: Optional[str] = None) -> dict:
 
     _tool_config_cache = data
     return _tool_config_cache
+
+
+def build_hitl_payload(
+    tool_name: str,
+    tool_args: dict,
+    sender_email: str = "me",
+    user_id: int = 1,
+    thread_id: Optional[str] = None,
+) -> dict:
+    """Build a rich, human-readable HITL payload for a Gmail write tool."""
+    approval_id = str(uuid.uuid4())
+    divider = "─" * 48
+
+    base = {
+        "approval_id": approval_id,
+        "action": tool_name,
+        "agent": "gmail_agent",
+        "tool": tool_name,
+        "args": tool_args,
+        "user_id": user_id,
+        "thread_id": thread_id or "",
+        "from": sender_email,
+    }
+
+    if tool_name == "send_email":
+        to = tool_args.get("to", "")
+        cc = tool_args.get("cc") or ""
+        bcc = tool_args.get("bcc") or ""
+        subject = tool_args.get("subject", "")
+        body = tool_args.get("body", "")
+
+        preview_lines = [
+            "📧  Email Approval Required",
+            divider,
+            f"From:    {sender_email}",
+            f"To:      {to}",
+        ]
+        if cc:
+            preview_lines.append(f"Cc:      {cc}")
+        if bcc:
+            preview_lines.append(f"Bcc:     {bcc}")
+        preview_lines += [f"Subject: {subject}", divider, body]
+
+        base.update(
+            {
+                "preview_title": "Email Approval Required",
+                "to": to,
+                "cc": cc,
+                "bcc": bcc,
+                "subject": subject,
+                "body": body,
+                "draft": {"to": to, "subject": subject, "body": body},
+                "preview": "\n".join(preview_lines),
+            }
+        )
+
+    elif tool_name == "reply_to_email":
+        message_id = tool_args.get("message_id", "")
+        body = tool_args.get("body", "")
+
+        preview_lines = [
+            "💬  Reply Approval Required",
+            divider,
+            f"From:           {sender_email}",
+            f"Replying to:    message ID {message_id}",
+            divider,
+            "Your reply:",
+            body,
+        ]
+
+        base.update(
+            {
+                "preview_title": "Reply Approval Required",
+                "message_id": message_id,
+                "body": body,
+                "draft": {"to": f"Reply to {message_id}", "subject": "Reply", "body": body},
+                "preview": "\n".join(preview_lines),
+            }
+        )
+
+    elif tool_name == "create_draft":
+        to = tool_args.get("to", "")
+        cc = tool_args.get("cc") or ""
+        bcc = tool_args.get("bcc") or ""
+        subject = tool_args.get("subject", "")
+        body = tool_args.get("body", "")
+
+        preview_lines = [
+            "📝  Draft Approval Required",
+            divider,
+            f"To:      {to}",
+        ]
+        if cc:
+            preview_lines.append(f"Cc:      {cc}")
+        if bcc:
+            preview_lines.append(f"Bcc:     {bcc}")
+        preview_lines += [f"Subject: {subject}", divider, body]
+
+        base.update(
+            {
+                "preview_title": "Draft Approval Required",
+                "to": to,
+                "cc": cc,
+                "bcc": bcc,
+                "subject": subject,
+                "body": body,
+                "draft": {"to": to, "subject": subject, "body": body},
+                "preview": "\n".join(preview_lines),
+            }
+        )
+
+    return base
+
+
+def decode_decision(approval_res: Any) -> tuple[str, str]:
+    """Decode decision string and feedback string from interrupt() result."""
+    decision = ""
+    feedback = ""
+    if isinstance(approval_res, dict):
+        decision = str(
+            approval_res.get("action")
+            or approval_res.get("decision")
+            or approval_res.get("approval")
+            or ""
+        ).lower()
+        feedback = str(approval_res.get("feedback", "")).strip()
+    elif isinstance(approval_res, str):
+        decision = approval_res.strip().lower()
+    return decision, feedback
+

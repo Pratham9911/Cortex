@@ -309,10 +309,13 @@ async def run_github_agent(
                             if mcp_tool:
                                 res = await mcp_tool.ainvoke(tool_args)
                                 res_text = f"Tool executed successfully. Result:\n{str(res)}"
+                                final_answer = f"GitHub action '{tool_name}' executed successfully:\n{str(res)}"
                             else:
                                 res_text = f"Error: Tool '{tool_name}' not found."
+                                final_answer = res_text
                         except Exception as ex:
                             res_text = f"Error executing tool '{tool_name}': {str(ex)}"
+                            final_answer = res_text
                     elif is_rejection:
                         res_text = (
                             f"Execution of tool '{tool_name}' was REJECTED by the user. "
