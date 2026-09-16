@@ -534,5 +534,3 @@ class UserIntegration(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "provider", "integration_type", name="uq_user_provider_integration"),
     )
-
-

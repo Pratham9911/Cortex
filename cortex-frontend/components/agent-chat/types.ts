@@ -1,3 +1,31 @@
+export type ActivityItem = {
+  id: string
+  agent: string
+  kind: "thought" | "tool" | "status"
+  label?: string
+  content: string
+}
+
+export type HITLPermissionState = {
+  thread_id: string
+  agent: string
+  action: string
+  tool?: string
+  args?: any
+  risk?: string
+  description?: string
+  preview_title?: string
+  preview?: string
+  from?: string
+  to?: string
+  cc?: string
+  bcc?: string
+  subject?: string
+  body?: string
+  message_id?: string
+  draft?: { to?: string; subject?: string; body?: string }
+}
+
 export type Message = {
   id: string
   messageId?: number
@@ -5,6 +33,11 @@ export type Message = {
   content: string
   sources?: MessageSources | null
   latencyMs?: number
+  mode?: "normal" | "agent"
+  reasoning?: ActivityItem[]
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
 }
 
 export type ChatGroup = "saved" | "today" | "yesterday"
@@ -42,6 +75,12 @@ export type DocumentSource = {
 
 export type MessageSources = {
   intent?: string | null
+  mode?: "normal" | "agent"
+  latency_ms?: number | null
+  reasoning?: ActivityItem[] | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  total_tokens?: number | null
   web?: WebSource[]
   documents?: DocumentSource[]
 }
@@ -63,3 +102,4 @@ export const THINKING_STEPS = [
   "Reading retrieved context...",
   "Generating answer...",
 ] as const
+

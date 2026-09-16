@@ -7,7 +7,6 @@ from routers.audit import create_audit_log
 from models import Project, ProjectMember, User , Team, TeamMember
 from dependencies import get_current_user
 
-from app.services.redis_service import RedisService
 
 router = APIRouter()
 
@@ -58,8 +57,6 @@ def create_project(
     general_team = Team(
         project_id=new_project.project_id,
         name="general",
-        description="Default general team for all project members.",
-        tags=["general"],
         created_by=user_id
     )
 
@@ -102,22 +99,11 @@ def create_project(
         "message": "Project created successfully",
         "project_id": new_project.project_id
     }
-
 @router.get("/getprojects")
 def list_projects(
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    cache_key = f"user:{user_id}:projects"
-
-    # Try Redis first
-    cached_projects = RedisService.get_json(cache_key)
-
-    if cached_projects:
-        
-        return cached_projects
-
-    
 
     membership_alias = aliased(ProjectMember)
 
@@ -180,7 +166,7 @@ def list_projects(
         .all()
     )
 
-    response = [
+    return [
         {
             "project_id": project.project_id,
 
@@ -201,16 +187,6 @@ def list_projects(
         }
         for project in projects
     ]
-
-    # Store in Redis (30 min)
-    RedisService.set_json(
-        cache_key,
-        response,
-        ttl=1800
-    )
-
-    return response
-
 
 class UpdateProjectRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
@@ -264,9 +240,7 @@ def delete_project(
         ProjectAuditLog,
         InboxMessage,
         TeamMember,
-        Team,
-        Chat,
-        Message
+        Team
     )
 
     from supabase_client import supabase
@@ -390,25 +364,6 @@ def delete_project(
     # ----------------------------------------
     db.query(InboxMessage).filter(
         InboxMessage.related_project_id == project_id
-    ).delete(synchronize_session=False)
-
-    # ----------------------------------------
-    # Delete chats
-    # ----------------------------------------
-    chat_ids = [
-        chat.chat_id
-        for chat in db.query(Chat).filter(
-            Chat.project_id == project_id
-        ).all()
-    ]
-
-    if chat_ids:
-        db.query(Message).filter(
-            Message.chat_id.in_(chat_ids)
-        ).delete(synchronize_session=False)
-
-    db.query(Chat).filter(
-        Chat.project_id == project_id
     ).delete(synchronize_session=False)
 
     # ----------------------------------------

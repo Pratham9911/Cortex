@@ -95,7 +95,7 @@ async def retrieval_agent_tool(query: str) -> dict:
 @tool("github_agent")
 async def github_agent_tool(query: str) -> dict:
     """
-    Delegate ALL GitHub tasks (searching repos, reading files/commits/issues/PRs, creating issues, branches, PRs)
+    Delegate ALL GitHub tasks (searching repos, reading files/commits/issues/PRs,)
     to the specialized GitHub Agent in ONE call and command it what to do.
     Provide a clear, descriptive instruction of what needs to be done on GitHub.
 
@@ -125,9 +125,9 @@ async def github_agent_tool(query: str) -> dict:
 @tool("gmail_agent")
 async def gmail_agent_tool(query: str) -> dict:
     """
-    Delegate One at a time Gmail/email task (searching emails, reading threads, listing drafts, creating drafts, sending emails, replying to emails)
+    Delegate One at a time Gmail/email task (searching emails, reading threads, listing drafts)
     to the specialized Gmail Agent in ONE call and command it what to do.
-    Mention everything about what to send , read and reply , each thing properly of what user has asked. As it can just perform operation on gmail and do not have any knowledge about project or web search. So be clear and specific in your query.
+    Mention everything about what to read , each thing properly of what user has asked. As it can just perform operation on gmail and do not have any knowledge about project or web search. So be clear and specific in your query.
     """
     from agentic.sub_agents.gmail_agent import run_gmail_agent
 

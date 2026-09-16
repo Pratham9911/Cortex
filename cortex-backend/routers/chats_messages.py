@@ -1,3 +1,6 @@
+import time
+import asyncio
+from uuid import uuid4
 from typing import Optional
 
 import json
@@ -6,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from langchain_core.messages import HumanMessage
 
 from database import SessionLocal
 from document_acl import can_download_document, can_search_document
@@ -20,6 +24,10 @@ from models import (
     TeamMember
 )
 from rag.orchestrator import run_pipeline
+
+import agentic.main_graph as main_graph
+from agentic.checkpointer import delete_checkpoint
+from agentic.tools import set_active_event_callback, set_active_project_context
 
 
 router = APIRouter()
@@ -43,6 +51,7 @@ class UpdateChatRequest(BaseModel):
 
 class AskChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=4000)
+    is_agent: Optional[bool] = False
 
 
 def _require_project_membership(
@@ -336,8 +345,10 @@ def _serialize_sources(
     if not sources:
         return None
 
-    return {
+    res = {
         "intent": sources.get("intent"),
+        "mode": sources.get("mode", "normal"),
+        "latency_ms": sources.get("latency_ms"),
         "web": _normalize_web_sources(sources.get("web", [])),
         "documents": _filter_document_sources(
             db=db,
@@ -346,6 +357,15 @@ def _serialize_sources(
             raw_sources=sources.get("documents", [])
         )
     }
+    if "reasoning" in sources:
+        res["reasoning"] = sources["reasoning"]
+    if "input_tokens" in sources:
+        res["input_tokens"] = sources["input_tokens"]
+    if "output_tokens" in sources:
+        res["output_tokens"] = sources["output_tokens"]
+    if "total_tokens" in sources:
+        res["total_tokens"] = sources["total_tokens"]
+    return res
 
 
 def _serialize_message(
@@ -525,8 +545,79 @@ def list_messages(
     ]
 
 
+def _emit_sse(event_type: str, **data):
+    payload = {"type": event_type, **data}
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _emit_interrupt(thread_id: str, interrupt_value):
+    payload = dict(interrupt_value) if isinstance(interrupt_value, dict) else {
+        "details": str(interrupt_value)
+    }
+    payload.pop("thread_id", None)
+    payload.setdefault("agent", "main")
+    return _emit_sse("interrupt", thread_id=thread_id, **payload)
+
+
+async def _stream_workflow_helper(workflow, input_data, config=None):
+    event_queue = asyncio.Queue()
+    stream_completed = False
+
+    def forward_event(event_type: str, *args, **data):
+        agent_val = data.pop("agent", None) or (args[0] if args else "main")
+        event_type = {
+            "gmail_agent_started": "agent_started",
+            "gmail_tool_started": "tool_started",
+            "gmail_tool_completed": "tool_completed",
+            "gmail_agent_completed": "agent_completed",
+        }.get(event_type, event_type)
+        event_queue.put_nowait(("event", event_type, {"agent": agent_val, **data}))
+
+    async def produce():
+        set_active_event_callback(forward_event)
+        completed_normally = False
+        try:
+            async for update in workflow.astream(
+                input_data,
+                config=config,
+                stream_mode="updates",
+            ):
+                await event_queue.put(("update", update, None))
+            completed_normally = True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await event_queue.put(("error", exc, None))
+        finally:
+            set_active_event_callback(None)
+        if completed_normally:
+            await event_queue.put(("done", None, None))
+
+    task = asyncio.create_task(produce())
+    try:
+        while True:
+            item = await event_queue.get()
+            if item[0] == "done":
+                stream_completed = True
+                break
+            if item[0] == "error":
+                raise item[1]
+            yield item
+    finally:
+        if not task.done():
+            if stream_completed:
+                await task
+            else:
+                task.cancel()
+
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 @router.post("/chats/{chat_id}/ask")
-def ask_chat(
+async def ask_chat(
     chat_id: int,
     request: AskChatRequest,
     user_id: int = Depends(get_current_user),
@@ -569,61 +660,238 @@ def ask_chat(
     chat.updated_at = func.now()
     db.commit()
 
-    def event_generator():
+    is_agent = bool(request.is_agent)
+    start_time = time.time()
+
+    async def event_generator():
         final_answer = None
         final_intent = None
         web_sources = []
         document_chunks = []
+        activities = []
 
         try:
-            for event in run_pipeline(
-                query=query,
-                project_id=chat.project_id,
-                user_id=user_id,
-                user_role=membership.role,
-                db=db
-            ):
-                if event.get("type") == "debug" and event.get("step") == "intent":
-                    final_intent = event.get("intent")
+            if not is_agent:
+                for event in run_pipeline(
+                    query=query,
+                    project_id=chat.project_id,
+                    user_id=user_id,
+                    user_role=membership.role,
+                    db=db
+                ):
+                    if event.get("type") == "debug" and event.get("step") == "intent":
+                        final_intent = event.get("intent")
 
-                if event.get("type") == "sources":
-                    web_sources.extend(event.get("sources", []))
+                    if event.get("type") == "sources":
+                        web_sources.extend(event.get("sources", []))
 
-                if event.get("type") == "final":
-                    final_answer = event.get("answer")
-                    final_intent = event.get("intent") or final_intent
-                    web_sources.extend(event.get("sources", []))
-                    document_chunks.extend(event.get("chunks", []))
+                    if event.get("type") == "final":
+                        final_answer = event.get("answer")
+                        final_intent = event.get("intent") or final_intent
+                        web_sources.extend(event.get("sources", []))
+                        document_chunks.extend(event.get("chunks", []))
 
-                yield (
-                    f"data: "
-                    f"{json.dumps(event)}"
-                    f"\n\n"
+                    yield f"data: {json.dumps(event)}\n\n"
+
+                if final_answer is None:
+                    final_answer = "I could not generate a final answer for this request."
+
+                latency_ms = int((time.time() - start_time) * 1000)
+
+                assistant_message = Message(
+                    chat_id=chat.chat_id,
+                    role="assistant",
+                    content=final_answer,
+                    sources={
+                        "intent": final_intent or "unknown",
+                        "mode": "normal",
+                        "latency_ms": latency_ms,
+                        "web": _normalize_web_sources(web_sources),
+                        "documents": _normalize_document_sources(document_chunks)
+                    }
                 )
+                db.add(assistant_message)
+                chat.updated_at = func.now()
+                db.commit()
 
-            if final_answer is None:
-                final_answer = (
-                    "I could not generate a final answer for this request."
-                )
+                yield "event: done\ndata: complete\n\n"
 
-            assistant_message = Message(
-                chat_id=chat.chat_id,
-                role="assistant",
-                content=final_answer,
-                sources={
-                    "intent": final_intent or "unknown",
-                    "web": _normalize_web_sources(web_sources),
-                    "documents": _normalize_document_sources(document_chunks)
+            else:
+                stream_db = SessionLocal()
+                thread_id = str(uuid4())
+                config = {"configurable": {"thread_id": thread_id}}
+
+                initial_state = {
+                    "messages": [HumanMessage(content=query)],
+                    "question": query,
+                    "answer": "",
+                    "reasoning": "",
+                    "tool_calls": [],
+                    "sources": [],
+                    "chunks": [],
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "iterations": 0,
                 }
-            )
-            db.add(assistant_message)
-            chat.updated_at = func.now()
-            db.commit()
 
-            yield (
-                "event: done\n"
-                "data: complete\n\n"
-            )
+                pending_events = []
+                def sub_event_emitter(event_type: str, *args, **data):
+                    agent_val = data.pop("agent", None) or (args[0] if args else "main")
+                    pending_events.append((event_type, {"agent": agent_val, **data}))
+
+                yield _emit_sse("agent_started", agent="main", thread_id=thread_id)
+
+                set_active_event_callback(sub_event_emitter)
+                set_active_project_context(
+                    project_id=chat.project_id,
+                    user_id=user_id,
+                    user_role=membership.role,
+                    db=stream_db,
+                    thread_id=thread_id,
+                )
+
+                is_interrupted = False
+                input_tokens = 0
+                output_tokens = 0
+
+                try:
+                    workflow = main_graph.workflow or main_graph.build_workflow()
+                    async for stream_kind, stream_value, stream_data in _stream_workflow_helper(
+                        workflow, initial_state, config=config
+                    ):
+                        if stream_kind == "event":
+                            sub_type = stream_value
+                            agent_name = stream_data.get("agent", "main")
+                            AGENT_TOOLS = {"web_agent", "retrieval_agent", "github_agent", "gmail_agent"}
+                            def _get_agent_display(name_str: str) -> str:
+                                if name_str == "web_agent": return "Web"
+                                if name_str == "retrieval_agent": return "Project"
+                                if name_str == "github_agent": return "GitHub"
+                                if name_str == "gmail_agent": return "Gmail"
+                                return "Main"
+
+                            if sub_type == "agent_started":
+                                display_name = _get_agent_display(agent_name)
+                                activities.append({
+                                    "agent": agent_name,
+                                    "kind": "status",
+                                    "content": "Planning the request..." if agent_name == "main" else f"{display_name} agent started"
+                                })
+                            elif sub_type == "reasoning":
+                                content_val = stream_data.get("content") or ""
+                                if content_val:
+                                    activities.append({"agent": agent_name, "kind": "thought", "content": content_val})
+                            elif sub_type == "tool_started":
+                                tool = stream_data.get("tool") or "unknown"
+                                tool_agent = tool if tool in AGENT_TOOLS else agent_name
+                                label = "Searching web" if tool == "web_agent" else "Searching project" if tool == "retrieval_agent" else "Searching GitHub" if tool == "github_agent" else f"Using {tool}"
+                                args = stream_data.get("args")
+                                args_str = f" {json.dumps(args)}" if args else ""
+                                content = label if tool in AGENT_TOOLS else f"{label}{args_str}"
+                                activities.append({"agent": tool_agent, "kind": "tool", "label": label, "content": content})
+                            elif sub_type == "tool_completed":
+                                tool = stream_data.get("tool") or ""
+                                if tool in AGENT_TOOLS:
+                                    display_name = _get_agent_display(tool)
+                                    activities.append({"agent": tool, "kind": "status", "content": f"{display_name} search complete"})
+                            elif sub_type == "agent_completed" and agent_name != "main":
+                                display_name = _get_agent_display(agent_name)
+                                activities.append({"agent": agent_name, "kind": "status", "content": f"{display_name} agent finished"})
+
+                            yield _emit_sse(sub_type, **stream_data)
+                            continue
+
+                        update = stream_value
+                        for node_name, node_update in update.items():
+                            if node_name == "__interrupt__":
+                                is_interrupted = True
+                                interrupt_val = node_update[0].value if node_update else {}
+                                yield _emit_interrupt(thread_id, interrupt_val)
+                                break
+
+                            if node_name in ("chat_node", "force_synthesis_node"):
+                                reasoning = node_update.get("reasoning", "")
+                                answer = node_update.get("answer", "")
+                                tool_calls = node_update.get("tool_calls", [])
+                                iteration = node_update.get("iterations")
+
+                                if answer:
+                                    final_answer = answer
+                                input_tokens = node_update.get("input_tokens", input_tokens)
+                                output_tokens = node_update.get("output_tokens", output_tokens)
+
+                                if reasoning:
+                                    activities.append({"agent": "main", "kind": "thought", "content": reasoning})
+                                    yield _emit_sse("reasoning", agent="main", iteration=iteration, content=reasoning)
+
+                                for tc in tool_calls:
+                                    t_name = tc.get("name", "tool")
+                                    t_args = tc.get("args")
+                                    t_agent = t_name if t_name in {"web_agent", "retrieval_agent", "github_agent", "gmail_agent"} else "main"
+                                    t_label = "Searching web" if t_name == "web_agent" else "Searching project" if t_name == "retrieval_agent" else "Searching GitHub" if t_name == "github_agent" else f"Using {t_name}"
+                                    t_content = t_label if t_name in {"web_agent", "retrieval_agent"} else f"{t_label}{f' {json.dumps(t_args)}' if t_args else ''}"
+                                    activities.append({"agent": t_agent, "kind": "tool", "label": t_label, "content": t_content})
+                                    yield _emit_sse("tool_started", agent="main", iteration=iteration, tool=t_name, args=tc.get("args"), call_id=tc.get("id"))
+
+                            elif node_name == "tool_node":
+                                activities.append({"agent": "main", "kind": "status", "content": "Sub-agent complete"})
+                                yield _emit_sse("tool_completed", agent="main", tool="sub_agent")
+
+                            elif node_name == "collect_tool_results":
+                                sources = node_update.get("sources", [])
+                                chunks = node_update.get("chunks", [])
+                                if sources:
+                                    web_sources = sources
+                                if chunks:
+                                    document_chunks = chunks
+
+                        if is_interrupted:
+                            return
+
+                    delete_checkpoint(thread_id, stream_db)
+
+                finally:
+                    set_active_event_callback(None)
+                    set_active_project_context(None)
+                    stream_db.close()
+
+                if not final_answer:
+                    final_answer = "Agent workflow completed."
+
+                latency_ms = int((time.time() - start_time) * 1000)
+
+                assistant_message = Message(
+                    chat_id=chat.chat_id,
+                    role="assistant",
+                    content=final_answer,
+                    sources={
+                        "intent": "cortex-agent",
+                        "mode": "agent",
+                        "latency_ms": latency_ms,
+                        "reasoning": activities,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": input_tokens + output_tokens,
+                        "web": _normalize_web_sources(web_sources),
+                        "documents": _normalize_document_sources(document_chunks)
+                    }
+                )
+                db.add(assistant_message)
+                chat.updated_at = func.now()
+                db.commit()
+
+                yield _emit_sse(
+                    "agent_completed",
+                    agent="main",
+                    thread_id=thread_id,
+                    answer=final_answer,
+                    sources=_normalize_web_sources(web_sources),
+                    chunks=_normalize_document_sources(document_chunks),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=input_tokens + output_tokens,
+                )
+                yield "event: done\ndata: complete\n\n"
 
         except Exception as e:
             db.rollback()
@@ -640,6 +908,8 @@ def ask_chat(
                     content=fallback_answer,
                     sources={
                         "intent": final_intent or "unknown",
+                        "mode": "agent" if is_agent else "normal",
+                        "latency_ms": int((time.time() - start_time) * 1000),
                         "web": [],
                         "documents": []
                     }
@@ -655,11 +925,7 @@ def ask_chat(
                 "message": str(e)
             }
 
-            yield (
-                f"data: "
-                f"{json.dumps(error_event)}"
-                f"\n\n"
-            )
+            yield f"data: {json.dumps(error_event)}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -669,3 +935,4 @@ def ask_chat(
             "Connection": "keep-alive"
         }
     )
+

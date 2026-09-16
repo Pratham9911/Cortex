@@ -2,7 +2,7 @@
 
 import { Settings, Share2, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Message, PromptCard, ThinkingEvent } from "./types"
+import type { ActivityItem, HITLPermissionState, Message, PromptCard, ThinkingEvent } from "./types"
 import { AgentChatComposer } from "./agent-chat-composer"
 import { AgentChatThread } from "./agent-chat-thread"
 import { AgentWelcomeView } from "./agent-welcome"
@@ -13,13 +13,19 @@ type AgentChatMainProps = {
   thinkingEvents: ThinkingEvent[]
   input: string
   onInputChange: (value: string) => void
-  onSend: (text?: string) => void
+  onSend: (text?: string, isAgentMode?: boolean) => void
   onNewChat: () => void
   isThinking: boolean
   isDark: boolean
   userInitials: string
   activeChatTitle?: string
   onSourceAccessChanged?: () => void
+  isAgentMode?: boolean
+  setIsAgentMode?: (active: boolean) => void
+  agentActivities?: ActivityItem[]
+  elapsedSeconds?: number
+  hitlPermission?: HITLPermissionState | null
+  onHITLResponse?: (decision: "yes" | "no" | "tell_agent", feedback?: string) => void
 }
 
 export function AgentChatMain({
@@ -35,6 +41,12 @@ export function AgentChatMain({
   userInitials,
   activeChatTitle,
   onSourceAccessChanged,
+  isAgentMode = false,
+  setIsAgentMode,
+  agentActivities = [],
+  elapsedSeconds = 0,
+  hitlPermission = null,
+  onHITLResponse,
 }: AgentChatMainProps) {
   return (
     <div
@@ -108,7 +120,7 @@ export function AgentChatMain({
       {messages.length === 0 ? (
         <AgentWelcomeView
           prompts={prompts}
-          onSend={onSend}
+          onSend={(text) => onSend(text, isAgentMode)}
           disabled={isThinking}
           isDark={isDark}
         />
@@ -120,16 +132,24 @@ export function AgentChatMain({
           isDark={isDark}
           userInitials={userInitials}
           onSourceAccessChanged={onSourceAccessChanged}
+          agentActivities={agentActivities}
+          elapsedSeconds={elapsedSeconds}
+          isAgentMode={isAgentMode}
+          hitlPermission={hitlPermission}
+          onHITLResponse={onHITLResponse}
         />
       )}
 
       <AgentChatComposer
         value={input}
         onChange={onInputChange}
-        onSend={() => onSend()}
+        onSend={(isAgent) => onSend(undefined, isAgent ?? isAgentMode)}
         disabled={isThinking}
         isDark={isDark}
+        isAgentMode={isAgentMode}
+        setIsAgentMode={setIsAgentMode}
       />
     </div>
   )
 }
+

@@ -56,7 +56,7 @@ from database import SessionLocal
 
 load_dotenv()
 
-MAX_ITERATIONS = 12
+MAX_ITERATIONS = 8
 
 # Keyed by thread_id — stores in-flight agent state while waiting for HITL approval.
 # Cleared immediately after approval/rejection resumes the agent.
@@ -74,14 +74,21 @@ GMAIL_SYSTEM_PROMPT = SystemMessage(
        
         "OPERATIONAL RULES:\n"
         "1. Use search_emails or list_drafts first to discover relevant emails/drafts.\n"
-        "2. For write operations (send_email, create_draft, reply_to_email) you MUST\n"
-        "   provide full details (to, subject, body) so the user can review and approve them.\n"
-        "3. When the user provides instructions ('tell_agent') to modify an action (e.g., 'send email directly instead of drafting' or change recipient/subject/body), follow the user's latest instruction precisely.\n"
-        "If the user replaces a pending write with a read task, cancel the write and do the read task.\n"
-        "4. Always state the EXACT operation completed in your final response. If send_email was executed, state that the email was SENT. Do NOT claim an email was drafted if send_email was executed.\n"
-        "5. If a write action is REJECTED, respect that — do NOT retry.\n"
-        "6. If a tool call fails or returns an error, DO NOT repeat the exact same tool call with identical parameters. Report the error clearly or adjust your strategy. Never retry in a loop.\n"
-        "7. When Finishing , report what actually happend in interaction with user , so Main Agent can decide next steps"
+        "2. Try to search for emails according to the user query and read them to understand the context \n"
+        "3. if you didn't find any relevent information in the emails or drafts , you can ask user to provide more information about what they want to do with gmail.\n"
+        "4. When Finishing , report what actually happend in interaction with user , so Main Agent can decide next steps"
+        # "OPERATIONAL RULES:\n"
+        # "1. Use search_emails or list_drafts first to discover relevant emails/drafts.\n"
+        # "2. For write operations (send_email, create_draft, reply_to_email) you MUST\n"
+        # "   provide full details (to, subject, body) so the user can review and approve them.\n"
+        # "3. When the user provides instructions ('tell_agent') to modify an action (e.g., 'send email directly instead of drafting' or change recipient/subject/body), follow the user's latest instruction precisely.\n"
+        # "If the user replaces a pending write with a read task, cancel the write and do the read task.\n"
+        # "4. Always state the EXACT operation completed in your final response. If send_email was executed, state that the email was SENT. Do NOT claim an email was drafted if send_email was executed.\n"
+        # "5. If a write action is REJECTED, respect that — do NOT retry.\n"
+        # "6. If a tool call fails or returns an error, DO NOT repeat the exact same tool call with identical parameters. Report the error clearly or adjust your strategy. Never retry in a loop.\n"
+        # "7. When Finishing , report what actually happend in interaction with user , so Main Agent can decide next steps"
+
+
     )
 )
 

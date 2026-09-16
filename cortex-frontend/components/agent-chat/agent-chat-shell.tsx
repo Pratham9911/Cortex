@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import { useAuth } from "@/components/auth/protected-route"
 import {
@@ -9,13 +9,14 @@ import {
   listChats,
   listMessages,
   streamChatAsk,
+  streamResumeAgent,
   updateChatTitle,
 } from "@/lib/ai-agent"
 import { cn } from "@/lib/utils"
 import { AgentChatMain } from "./agent-chat-main"
 import { AgentChatSidebar } from "./agent-chat-sidebar"
 import { PROMPT_POOLS } from "./mock-data"
-import type { ChatSession, Message, MessageSources, ThinkingEvent } from "./types"
+import type { ActivityItem, ChatSession, HITLPermissionState, Message, MessageSources, ThinkingEvent } from "./types"
 
 function selectedProjectId() {
   const rawProjectId = localStorage.getItem("selected_project_id")
@@ -55,9 +56,26 @@ export function AgentChatShell() {
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([])
   const [promptPoolIndex] = useState(0)
 
+  // Agent Mode States
+  const [isAgentMode, setIsAgentMode] = useState(false)
+  const [agentActivities, setAgentActivities] = useState<ActivityItem[]>([])
+  // Ref to always have latest agentActivities in event callbacks (avoids stale closure)
+  const agentActivitiesRef = useRef<ActivityItem[]>([])
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [startedAt, setStartedAt] = useState<number>(Date.now())
+  const [hitlPermission, setHitlPermission] = useState<HITLPermissionState | null>(null)
+
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => {
+    if (!isThinking) return
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.max(1, Math.floor((Date.now() - startedAt) / 1000)))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [isThinking, startedAt])
 
   const isDark = mounted && theme === "dark"
   const userInitials = user?.name ? user.name.slice(0, 2).toUpperCase() : "U"
@@ -133,10 +151,18 @@ export function AgentChatShell() {
     return () => window.clearInterval(interval)
   }, [activeChatId, isThinking, refreshActiveMessages])
 
+  useEffect(() => {
+    setAgentActivities([])
+    agentActivitiesRef.current = []
+    setThinkingEvents([])
+  }, [activeChatId])
+
   const handleNewChat = useCallback(() => {
     setActiveChatId(null)
     setInput("")
     setThinkingEvents([])
+    setAgentActivities([])
+    setHitlPermission(null)
   }, [])
 
   const handleSelectChat = useCallback(
@@ -147,6 +173,8 @@ export function AgentChatShell() {
       setActiveChatId(id)
       setInput("")
       setThinkingEvents([])
+      setAgentActivities([])
+      setHitlPermission(null)
 
       void listMessages(chat.chatId).then((messages) => {
         replaceChatMessages(chat.chatId, messages)
@@ -188,22 +216,31 @@ export function AgentChatShell() {
         setActiveChatId(null)
         setInput("")
         setThinkingEvents([])
+        setAgentActivities([])
+        setHitlPermission(null)
       }
     },
     [activeChatId, chats]
   )
 
   const handleSend = useCallback(
-    async (text?: string) => {
+    async (text?: string, forceIsAgent?: boolean) => {
       const trimmed = (text ?? input).trim()
       if (!trimmed || isThinking) return
 
       const projectId = selectedProjectId()
       if (!projectId) return
 
+      const isAgent = forceIsAgent ?? isAgentMode
+
       setInput("")
       setIsThinking(true)
       setThinkingEvents([])
+      agentActivitiesRef.current = []
+      setAgentActivities([])
+      setHitlPermission(null)
+      setStartedAt(Date.now())
+      setElapsedSeconds(1)
 
       let targetChat = activeChat
       if (!targetChat) {
@@ -218,21 +255,105 @@ export function AgentChatShell() {
         userMessage,
       ])
 
-      const startedAt = performance.now()
+      const startTime = performance.now()
       let finalAnswer = ""
+      let lastStreamedMessage: any = null
 
       try {
         await streamChatAsk(targetChat.chatId, trimmed, {
+          isAgent,
           onEvent: (event) => {
+            const agentName = event.agent || "main"
+
             if (event.type === "status" && event.message) {
               setThinkingEvents((prev) => [
                 ...prev,
                 {
                   id: `${Date.now()}-${prev.length}`,
                   step: event.step,
-                  message: String(event.message),
+                  message: event.message,
                 },
               ])
+            }
+
+            if (event.type === "activity" && event.content) {
+              const newItem: ActivityItem = {
+                id: `act-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                agent: agentName,
+                kind: event.kind || "thought",
+                label: event.label,
+                content: event.content,
+              }
+              agentActivitiesRef.current = [...agentActivitiesRef.current, newItem]
+              setAgentActivities([...agentActivitiesRef.current])
+            }
+
+            const AGENT_TOOLS = new Set(["web_agent", "retrieval_agent", "github_agent", "gmail_agent"])
+            const getAgentDisplayName = (agent: string) => {
+              if (agent === "web_agent") return "Web"
+              if (agent === "retrieval_agent") return "Project"
+              if (agent === "github_agent") return "GitHub"
+              if (agent === "gmail_agent") return "Gmail"
+              return "Main"
+            }
+
+            const addActivity = (item: Omit<ActivityItem, "id">) => {
+              if (!item.content.trim()) return
+              const newItem: ActivityItem = { ...item, id: `act-${Date.now()}-${Math.random().toString(36).slice(2)}` }
+              agentActivitiesRef.current = [...agentActivitiesRef.current, newItem]
+              setAgentActivities([...agentActivitiesRef.current])
+            }
+
+            if (event.type === "agent_started") {
+              addActivity({
+                agent: agentName,
+                kind: "status",
+                content: agentName === "main" ? "Planning the request..." : `${getAgentDisplayName(agentName)} agent started`,
+              })
+            } else if (event.type === "reasoning") {
+              addActivity({
+                agent: agentName,
+                kind: "thought",
+                content: event.content || "",
+              })
+            } else if (event.type === "tool_started") {
+              const tool = event.tool || "unknown"
+              const toolAgent = AGENT_TOOLS.has(tool) ? tool : agentName
+              const label = tool === "web_agent" ? "Searching web" : tool === "retrieval_agent" ? "Searching project" : tool === "github_agent" ? "Searching GitHub" : `Using ${tool}`
+              addActivity({
+                agent: toolAgent,
+                kind: "tool",
+                label,
+                content: AGENT_TOOLS.has(tool) ? label : `${label}${event.args ? ` ${JSON.stringify(event.args)}` : ""}`,
+              })
+            } else if (event.type === "tool_completed") {
+              const tool = event.tool || ""
+              if (AGENT_TOOLS.has(tool)) {
+                addActivity({
+                  agent: tool,
+                  kind: "status",
+                  content: `${getAgentDisplayName(tool)} search complete`,
+                })
+              }
+            } else if (event.type === "agent_completed" && agentName !== "main") {
+              addActivity({
+                agent: agentName,
+                kind: "status",
+                content: `${getAgentDisplayName(agentName)} agent finished`,
+              })
+            } else if (event.type === "interrupt") {
+              setHitlPermission({
+                thread_id: event.thread_id,
+                agent: event.agent || "main",
+                action: event.action || "tool_approval",
+                tool: event.tool,
+                args: event.args,
+                risk: event.risk,
+                description: event.description,
+                to: event.to,
+                subject: event.subject,
+                body: event.body,
+              })
             }
 
             if (event.type === "sources" && Array.isArray(event.sources)) {
@@ -249,51 +370,57 @@ export function AgentChatShell() {
               }
             }
 
-            if (event.type !== "final") return
+            if ((event.type === "final" || event.type === "agent_completed") && (agentName === "main" || event.type === "final")) {
+              finalAnswer = event.answer || ""
+              const latencyMs = performance.now() - startTime
 
-            finalAnswer = event.answer || ""
+              const webSources = Array.isArray(event.sources) ? event.sources : (event.sources?.web || [])
+              const docSources = Array.isArray(event.chunks) ? event.chunks : (event.sources?.documents || [])
 
-            const latencyMs = performance.now() - startedAt
-            
-            // Map the flat sources array from the event into the MessageSources shape expected by the UI
-            const sourcesData = Array.isArray(event.sources) && event.sources.length > 0 
-              ? { web: event.sources } 
-              : null;
+              const sourcesData: MessageSources = {
+                web: webSources,
+                documents: docSources,
+                mode: isAgent ? "agent" : "normal",
+                latency_ms: Math.round(latencyMs),
+                reasoning: [...agentActivitiesRef.current],
+                input_tokens: event.input_tokens,
+                output_tokens: event.output_tokens,
+                total_tokens: event.total_tokens,
+              }
 
-            const assistantMessage = optimisticAssistantMessage(
-              finalAnswer,
-              sourcesData,
-              latencyMs
-            )
+              const assistantMessage = optimisticAssistantMessage(
+                finalAnswer || "Task complete.",
+                sourcesData,
+                Math.round(latencyMs)
+              )
+              if (isAgent) {
+                assistantMessage.mode = "agent"
+                assistantMessage.reasoning = [...agentActivitiesRef.current]
+              }
+              if (event.input_tokens != null) assistantMessage.inputTokens = Number(event.input_tokens)
+              if (event.output_tokens != null) assistantMessage.outputTokens = Number(event.output_tokens)
+              if (event.total_tokens != null) assistantMessage.totalTokens = Number(event.total_tokens)
 
-            replaceChatMessages(targetChat!.chatId, [
-              ...(targetChat!.messages ?? []),
-              userMessage,
-              assistantMessage,
-            ])
+              replaceChatMessages(targetChat!.chatId, [
+                ...(targetChat!.messages ?? []),
+                userMessage,
+                assistantMessage,
+              ])
+              setIsThinking(false)
+              setThinkingEvents([])
+              setAgentActivities([])
+              agentActivitiesRef.current = []
+            }
           },
         })
 
-        const persistedMessages = await listMessages(targetChat.chatId)
-        if (persistedMessages.length > 0) {
-          const latencyMs = performance.now() - startedAt
-          const lastIndex = persistedMessages.length - 1
-          persistedMessages[lastIndex] = {
-            ...persistedMessages[lastIndex],
-            latencyMs:
-              persistedMessages[lastIndex].role === "assistant"
-                ? latencyMs
-                : undefined,
-          }
-          replaceChatMessages(targetChat.chatId, persistedMessages)
-        }
-
         await refreshChats()
+
       } catch (error) {
         const fallbackMessage = optimisticAssistantMessage(
           error instanceof Error ? error.message : "Unable to generate an answer.",
           null,
-          performance.now() - startedAt
+          performance.now() - startTime
         )
 
         replaceChatMessages(targetChat.chatId, [
@@ -304,9 +431,164 @@ export function AgentChatShell() {
       } finally {
         setIsThinking(false)
         setThinkingEvents([])
+        setAgentActivities([])
+        agentActivitiesRef.current = []
       }
     },
-    [activeChat, input, isThinking, refreshChats, replaceChatMessages]
+    [activeChat, input, isAgentMode, isThinking, refreshChats, replaceChatMessages]
+  )
+
+  const handleHITLResponse = useCallback(
+    async (decision: "yes" | "no" | "tell_agent", feedbackText?: string) => {
+      if (!hitlPermission || !activeChat) return
+      const projectId = selectedProjectId()
+      if (!projectId) return
+
+      const perm = hitlPermission
+      const targetChat = activeChat
+      setHitlPermission(null)
+      setIsThinking(true)
+      const startTime = performance.now()
+      let hitlAssistantMsg: Message | null = null
+
+      const resumeLabel = decision === "yes" ? "Approval granted" : decision === "no" ? "Action rejected" : "User instruction sent"
+      const newItem: ActivityItem = {
+        id: `act-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        agent: "main",
+        kind: "status",
+        content: `Resuming after ${resumeLabel}${feedbackText?.trim() ? `: "${feedbackText.trim()}"` : ""}`,
+      }
+      agentActivitiesRef.current = [...agentActivitiesRef.current, newItem]
+      setAgentActivities([...agentActivitiesRef.current])
+
+      try {
+        let finalAnswer = ""
+        await streamResumeAgent(projectId, perm.thread_id, decision, feedbackText, {
+          onEvent: (event) => {
+            const agentName = event.agent || "main"
+
+            const AGENT_TOOLS = new Set(["web_agent", "retrieval_agent", "github_agent", "gmail_agent"])
+            const getAgentDisplayName = (agent: string) => {
+              if (agent === "web_agent") return "Web"
+              if (agent === "retrieval_agent") return "Project"
+              if (agent === "github_agent") return "GitHub"
+              if (agent === "gmail_agent") return "Gmail"
+              return "Main"
+            }
+
+            const addActivity = (item: Omit<ActivityItem, "id">) => {
+              if (!item.content.trim()) return
+              const act: ActivityItem = { ...item, id: `act-${Date.now()}-${Math.random().toString(36).slice(2)}` }
+              agentActivitiesRef.current = [...agentActivitiesRef.current, act]
+              setAgentActivities([...agentActivitiesRef.current])
+            }
+
+            if (event.type === "agent_started") {
+              addActivity({
+                agent: agentName,
+                kind: "status",
+                content: agentName === "main" ? "Planning..." : `${getAgentDisplayName(agentName)} agent started`,
+              })
+            } else if (event.type === "reasoning") {
+              addActivity({
+                agent: agentName,
+                kind: "thought",
+                content: event.content || "",
+              })
+            } else if (event.type === "tool_started") {
+              const tool = event.tool || "unknown"
+              const toolAgent = AGENT_TOOLS.has(tool) ? tool : agentName
+              const label = tool === "web_agent" ? "Searching web" : tool === "retrieval_agent" ? "Searching project" : tool === "github_agent" ? "Searching GitHub" : `Using ${tool}`
+              addActivity({
+                agent: toolAgent,
+                kind: "tool",
+                label,
+                content: AGENT_TOOLS.has(tool) ? label : `${label}${event.args ? ` ${JSON.stringify(event.args)}` : ""}`,
+              })
+            } else if (event.type === "tool_completed") {
+              const tool = event.tool || ""
+              if (AGENT_TOOLS.has(tool)) {
+                addActivity({
+                  agent: tool,
+                  kind: "status",
+                  content: `${getAgentDisplayName(tool)} search complete`,
+                })
+              }
+            } else if (event.type === "agent_completed" && agentName !== "main") {
+              addActivity({
+                agent: agentName,
+                kind: "status",
+                content: `${getAgentDisplayName(agentName)} agent finished`,
+              })
+            } else if (event.type === "interrupt") {
+              setHitlPermission({
+                thread_id: event.thread_id || perm.thread_id,
+                agent: event.agent || "main",
+                action: event.action || "tool_approval",
+                tool: event.tool,
+                args: event.args,
+                risk: event.risk,
+                description: event.description,
+                to: event.to,
+                subject: event.subject,
+                body: event.body,
+              })
+            }
+
+            if ((event.type === "final" || event.type === "agent_completed") && (agentName === "main" || event.type === "final")) {
+              finalAnswer = event.answer || ""
+              const latencyMs = performance.now() - startTime
+
+              const webSources = Array.isArray(event.sources) ? event.sources : (event.sources?.web || [])
+              const docSources = Array.isArray(event.chunks) ? event.chunks : (event.sources?.documents || [])
+
+              const sourcesData: MessageSources = {
+                web: webSources,
+                documents: docSources,
+                mode: "agent",
+                latency_ms: Math.round(latencyMs),
+                reasoning: [...agentActivitiesRef.current],
+                input_tokens: event.input_tokens,
+                output_tokens: event.output_tokens,
+                total_tokens: event.total_tokens,
+              }
+
+              const assistantMessage = optimisticAssistantMessage(
+                finalAnswer || "Task complete.",
+                sourcesData,
+                Math.round(latencyMs)
+              )
+              assistantMessage.mode = "agent"
+              assistantMessage.reasoning = [...agentActivitiesRef.current]
+
+              if (event.input_tokens != null) assistantMessage.inputTokens = Number(event.input_tokens)
+              if (event.output_tokens != null) assistantMessage.outputTokens = Number(event.output_tokens)
+              if (event.total_tokens != null) assistantMessage.totalTokens = Number(event.total_tokens)
+
+              replaceChatMessages(targetChat.chatId, [
+                ...(targetChat.messages ?? []),
+                assistantMessage,
+              ])
+              setIsThinking(false)
+              setThinkingEvents([])
+              setAgentActivities([])
+              agentActivitiesRef.current = []
+            }
+          },
+        })
+
+        await refreshChats()
+
+      } catch (e) {
+        console.error("HITL resume error", e)
+      } finally {
+        setIsThinking(false)
+        setThinkingEvents([])
+        setAgentActivities([])
+        agentActivitiesRef.current = []
+      }
+    },
+    [activeChat, hitlPermission, refreshChats, replaceChatMessages]
   )
 
   return (
@@ -332,14 +614,21 @@ export function AgentChatShell() {
         thinkingEvents={thinkingEvents}
         input={input}
         onInputChange={setInput}
-        onSend={(text) => void handleSend(text)}
+        onSend={(text, forceIsAgent) => void handleSend(text, forceIsAgent)}
         onNewChat={handleNewChat}
         isThinking={isThinking}
         isDark={isDark}
         userInitials={userInitials}
         activeChatTitle={activeChat?.title}
         onSourceAccessChanged={() => void refreshActiveMessages()}
+        isAgentMode={isAgentMode}
+        setIsAgentMode={setIsAgentMode}
+        agentActivities={agentActivities}
+        elapsedSeconds={elapsedSeconds}
+        hitlPermission={hitlPermission}
+        onHITLResponse={(decision, feedback) => void handleHITLResponse(decision, feedback)}
       />
     </div>
   )
 }
+

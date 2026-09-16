@@ -33,7 +33,7 @@ SYSTEM_PROMPT = SystemMessage(
         "1. Always use get_me() to know User's account if you can't find user ask him back and don't proceed\n"
         "2. Stop calling tools immediately once you have gathered sufficient information or completed the task.\n"
         "3. Provide a clear, structured final answer without repeating raw API outputs unnecessarily."
-        "4. If something is failling again and again , stop and tell user to be more specific and provide more information about the request\n"
+        "4. If you are not finding any relevent information , stop tool calling and tell user about there is no info regarding the query \n"
     )
 )
 

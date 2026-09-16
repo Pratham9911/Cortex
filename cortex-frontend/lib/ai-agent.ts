@@ -74,12 +74,21 @@ export function toChatSession(chat: ApiChat, messages: Message[] = []): ChatSess
 }
 
 export function toMessage(message: ApiMessage): Message {
+  const sources = message.sources ?? null
+  const reasoning = sources?.reasoning ? (sources.reasoning as any[]) : undefined
+  const srcObj = sources as any
   return {
     id: String(message.message_id),
     messageId: message.message_id,
     role: message.role,
     content: message.content,
-    sources: message.sources ?? null,
+    sources: sources,
+    mode: sources?.mode as any,
+    latencyMs: sources?.latency_ms ?? undefined,
+    reasoning: reasoning,
+    inputTokens: srcObj?.input_tokens ?? undefined,
+    outputTokens: srcObj?.output_tokens ?? undefined,
+    totalTokens: srcObj?.total_tokens ?? undefined,
   }
 }
 
@@ -150,15 +159,16 @@ export async function downloadDocument(documentId: number): Promise<void> {
 export async function streamChatAsk(
   chatId: number,
   query: string,
-  callbacks: StreamCallbacks = {}
+  options: { isAgent?: boolean } & StreamCallbacks = {}
 ): Promise<void> {
+  const { isAgent = false, onEvent } = options
   const response = await fetch(`${apiUrl}/chats/${chatId}/ask`, {
     method: "POST",
     headers: {
       ...authHeaders(),
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, is_agent: isAgent }),
   })
 
   if (!response.ok || !response.body) {
@@ -189,10 +199,69 @@ export async function streamChatAsk(
       if (payload === "complete") continue
 
       try {
-        callbacks.onEvent?.(JSON.parse(payload))
+        onEvent?.(JSON.parse(payload))
       } catch {
         // Ignore malformed SSE frames.
       }
     }
   }
 }
+
+export async function streamResumeAgent(
+  projectId: number,
+  threadId: string,
+  decision: "yes" | "no" | "tell_agent",
+  feedbackText?: string,
+  options: StreamCallbacks = {}
+): Promise<void> {
+  const { onEvent } = options
+  const token = localStorage.getItem("access_token")
+  let url = `${apiUrl}/projects/${projectId}/agent/${threadId}/resume?decision=${decision}`
+  if (feedbackText?.trim()) {
+    url += `&feedback=${encodeURIComponent(feedbackText.trim())}`
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Content-Type": "application/json",
+    },
+  })
+
+  if (!response.ok || !response.body) {
+    const data = await response.json().catch(() => null)
+    throw new Error(data?.detail || response.statusText)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split("\n\n")
+    buffer = frames.pop() || ""
+
+    for (const frame of frames) {
+      const dataLine = frame
+        .split("\n")
+        .find((line) => line.startsWith("data: "))
+
+      if (!dataLine) continue
+
+      const payload = dataLine.slice("data: ".length)
+      if (payload === "complete") continue
+
+      try {
+        onEvent?.(JSON.parse(payload))
+      } catch {
+        // Ignore malformed SSE frames.
+      }
+    }
+  }
+}
+

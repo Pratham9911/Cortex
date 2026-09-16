@@ -1,13 +1,34 @@
 "use client"
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { Download, ExternalLink, FileText, Globe, Copy, Check, RotateCw, MoreHorizontal } from "lucide-react"
+import {
+  Download,
+  ExternalLink,
+  FileText,
+  Globe,
+  Copy,
+  Check,
+  RotateCw,
+  MoreHorizontal,
+  Clock,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  Github,
+  Mail,
+  Wrench,
+  ShieldAlert,
+  CheckCircle2,
+  XCircle,
+  MessageSquare,
+} from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import remarkBreaks from "remark-breaks"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { downloadDocument } from "@/lib/ai-agent"
 import { cn } from "@/lib/utils"
-import type { Message, MessageSources, ThinkingEvent } from "./types"
+import type { ActivityItem, HITLPermissionState, Message, MessageSources, ThinkingEvent } from "./types"
 import { AgentThinkingIndicator } from "./agent-thinking-indicator"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -18,7 +39,13 @@ type AgentChatThreadProps = {
   isDark: boolean
   userInitials: string
   onSourceAccessChanged?: () => void
+  agentActivities?: ActivityItem[]
+  elapsedSeconds?: number
+  isAgentMode?: boolean
+  hitlPermission?: HITLPermissionState | null
+  onHITLResponse?: (decision: "yes" | "no" | "tell_agent", feedback?: string) => void
 }
+
 
 const CopyButton = ({ text, isDark }: { text: string; isDark: boolean }) => {
   const [copied, setCopied] = useState(false)
@@ -126,37 +153,61 @@ function extractDocCitationInfo(
 function preprocessCitationTokens(content: string): string {
   if (!content) return ""
 
-  // Match `[cite: doc_34:p1]`, `【cite: doc_34:p1】`, [cite: doc_34:p1], etc. (with or without backticks `)
-  let processed = content.replace(
-    /`?\s*[\[【\(\{]cite[:：]\s*doc_?(\d+)(?:[:：]p?\.?\s*(\d+))?[\]】\)\}]\s*`?/gi,
+  let processed = content
+
+  // 1. Remove trailing backslashes at line endings (e.g. `meeting.\` -> `meeting.`)
+  processed = processed.replace(/\\\s*\n/g, "\n")
+
+  // 2. Normalize citation tokens into markdown links without eating newlines (\s* -> [ \t]*)
+  processed = processed.replace(
+    /`?[ \t]*[\[【\(\{]cite[:：][ \t]*doc_?(\d+)(?:[:：]p?\.?[ \t]*(\d+))?[\]】\)\}][ \t]*`?/gi,
     (_, docId, page) => {
       return page ? ` [cite:doc-${docId}-p${page}](https://cortex.cite/doc/${docId}?page=${page}) ` : ` [cite:doc-${docId}](https://cortex.cite/doc/${docId}) `
     }
   )
 
   processed = processed.replace(
-    /`?\s*[\[【\(\{]cite[:：]\s*(\d+)(?:[:：]p?\.?\s*(\d+))?[\]】\)\}]\s*`?/gi,
+    /`?[ \t]*[\[【\(\{]cite[:：][ \t]*(\d+)(?:[:：]p?\.?[ \t]*(\d+))?[\]】\)\}][ \t]*`?/gi,
     (_, docId, page) => {
       return page ? ` [cite:doc-${docId}-p${page}](https://cortex.cite/doc/${docId}?page=${page}) ` : ` [cite:doc-${docId}](https://cortex.cite/doc/${docId}) `
     }
   )
 
   processed = processed.replace(
-    /`?\s*[\[【\(\{]doc[:：]?\s*(\d+)(?:,\s*page[:：]?\s*(\d+))?[\]】\)\}]\s*`?/gi,
+    /`?[ \t]*[\[【\(\{]doc[:：]?[ \t]*(\d+)(?:,[ \t]*page[:：]?[ \t]*(\d+))?[\]】\)\}][ \t]*`?/gi,
     (_, docId, page) => {
       return page ? ` [cite:doc-${docId}-p${page}](https://cortex.cite/doc/${docId}?page=${page}) ` : ` [cite:doc-${docId}](https://cortex.cite/doc/${docId}) `
     }
   )
 
-  processed = processed.replace(/`?\s*\{pg\s*no\.?\s*(\d+)\s*of\s*doc\s*(\d+)\}\s*`?/gi, (_, page, docId) => {
+  processed = processed.replace(/`?[ \t]*\{pg[ \t]*no\.?[ \t]*(\d+)[ \t]*of[ \t]*doc[ \t]*(\d+)\}[ \t]*`?/gi, (_, page, docId) => {
     return ` [cite:doc-${docId}-p${page}](https://cortex.cite/doc/${docId}?page=${page}) `
   })
-  processed = processed.replace(/`?\s*\{from\s*doc\s*(\d+)\}\s*`?/gi, (_, docId) => {
+  processed = processed.replace(/`?[ \t]*\{from[ \t]*doc[ \t]*(\d+)\}[ \t]*`?/gi, (_, docId) => {
     return ` [cite:doc-${docId}](https://cortex.cite/doc/${docId}) `
   })
 
+  // 3. Normalize whitespace leading into headings (e.g. "   ### Heading" -> "### Heading")
+  processed = processed.replace(/^[ \t]+(#{1,6}\s+)/gm, "$1")
+
+  // 4. Ensure headings are separated from preceding text by a double newline
+  processed = processed.replace(/([^\n])\n+(#{1,6}\s+)/g, "$1\n\n$2")
+  processed = processed.replace(/([^\n#])\s+(#{1,6}\s+)/g, "$1\n\n$2")
+
+  // 5. Unpack inline table rows concatenated on a single line (e.g. "| col1 | col2 | |---|---| | val1 | val2 |")
+  processed = processed.replace(/\|[ \t]*\|/g, "|\n|")
+  processed = processed.replace(/\|[ \t]*\r?\n[ \t]*\|/g, "|\n|")
+
+  // 6. Ensure double newlines before table header row and after table end
+  processed = processed.replace(/([^\n|])\n+(\|[^\n]+\|)/g, "$1\n\n$2")
+  processed = processed.replace(/(\|[^\n]+\|)\n([^\n|#\s])/g, "$1\n\n$2")
+
+  // 7. Ensure bullet/numbered lists starting after non-list text have a preceding blank line
+  processed = processed.replace(/([^\n\-\*\d\s])\n([*\-] |\d+\. )/g, "$1\n\n$2")
+
   return processed
 }
+
 
 function getSourceIcon(fileName?: string | null) {
   if (!fileName) return <FileText className="size-4 text-indigo-500 shrink-0" />
@@ -326,7 +377,7 @@ export function AssistantMessageContent({
       isDark ? "prose-invert text-zinc-200" : "text-slate-800"
     )}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         urlTransform={(url) => url}
         components={{
           h1: ({ children }) => <h1 className="text-base font-bold mt-4 mb-2 first:mt-0 text-zinc-900 dark:text-white">{children}</h1>,
@@ -572,7 +623,11 @@ export function MessageSources({
     (source) => typeof source.can_download === "boolean" || source.document_id !== undefined
   )
 
-  if (webSources.length === 0 && documentSources.length === 0) {
+  const hasSources = webSources.length > 0 || documentSources.length > 0
+  const hasTokens = message.inputTokens != null || message.outputTokens != null || message.totalTokens != null
+  const hasLatency = message.latencyMs != null
+
+  if (!hasSources && !hasTokens && !hasLatency) {
     return null
   }
 
@@ -897,18 +952,409 @@ export function MessageSources({
         </span>
       </button>
 
-      {/* Thin divider */}
-      <div className={cn("w-px h-4 shrink-0", isDark ? "bg-zinc-700" : "bg-slate-200")} />
+      {hasSources && (
+        <>
+          <div className={cn("w-px h-4 shrink-0", isDark ? "bg-zinc-700" : "bg-slate-200")} />
+          {sourcesPopover}
+        </>
+      )}
 
-      {/* Grouped sources button trigger popover */}
-      {sourcesPopover}
+      {(hasLatency || hasTokens) && (
+        <div className={cn("flex flex-wrap items-center gap-2 text-[11px] ml-1.5", isDark ? "text-zinc-500" : "text-slate-500")}>
+          {hasLatency && (
+            <span>Answered in {(message.latencyMs! / 1000).toFixed(1)}s</span>
+          )}
 
-      {message.latencyMs ? (
-        <div className={cn("text-[11px] ml-1.5", isDark ? "text-zinc-500" : "text-slate-550")}>
-          Answered in {(message.latencyMs / 1000).toFixed(1)}s
+          {hasTokens && (
+            <div className={cn("flex items-center gap-2 font-mono text-[10.5px]", isDark ? "text-slate-400" : "text-slate-600")}>
+              {hasLatency && <span className={isDark ? "text-zinc-700" : "text-slate-300"}>•</span>}
+              {message.inputTokens != null && (
+                <span>in: <b className={isDark ? "text-slate-300" : "text-slate-700"}>{message.inputTokens.toLocaleString()}</b></span>
+              )}
+              {message.outputTokens != null && (
+                <span>out: <b className={isDark ? "text-slate-300" : "text-slate-700"}>{message.outputTokens.toLocaleString()}</b></span>
+              )}
+              {message.totalTokens != null && (
+                <span>total: <b className={isDark ? "text-indigo-400" : "text-indigo-600"}>{message.totalTokens.toLocaleString()}</b></span>
+              )}
+            </div>
+          )}
         </div>
-      ) : null}
+      )}
     </div>
+  )
+}
+
+function agentName(agent: string) {
+  if (agent === "web_agent") return "Web"
+  if (agent === "retrieval_agent") return "Project"
+  if (agent === "github_agent") return "GitHub"
+  if (agent === "gmail_agent") return "Gmail"
+  return "Main"
+}
+
+function AgentIcon({ agent, className = "h-3.5 w-3.5" }: { agent: string; className?: string }) {
+  if (agent === "web_agent") return <Globe className={`${className} text-sky-300`} />
+  if (agent === "retrieval_agent") return <Database className={`${className} text-emerald-300`} />
+  if (agent === "github_agent") return <Github className={`${className} text-violet-300`} />
+  if (agent === "gmail_agent") return <Mail className={`${className} text-rose-300`} />
+  return <Wrench className={`${className} text-slate-400`} />
+}
+
+function formatSeconds(seconds: number) {
+  if (seconds < 60) return `${seconds.toFixed(seconds % 1 === 0 ? 0 : 1)}s`
+  const mins = Math.floor(seconds / 60)
+  const secs = (seconds % 60).toFixed(0)
+  return `${mins}m ${secs}s`
+}
+
+export function AgentReasoningPanel({
+  activities,
+  elapsedSeconds,
+  isStreaming,
+  isDark,
+}: {
+  activities: ActivityItem[]
+  elapsedSeconds?: number
+  isStreaming?: boolean
+  isDark: boolean
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+}) {
+  const [collapsed, setCollapsed] = useState(!isStreaming)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!isStreaming) {
+      setCollapsed(true)
+    } else {
+      setCollapsed(false)
+    }
+  }, [isStreaming])
+
+  useEffect(() => {
+    if (isStreaming && !collapsed && panelRef.current) {
+      panelRef.current.scrollTop = panelRef.current.scrollHeight
+    }
+  }, [activities, collapsed, isStreaming])
+
+  if (!activities || activities.length === 0) return null
+
+  const displayTime = elapsedSeconds != null ? formatSeconds(elapsedSeconds) : ""
+
+  return (
+    <div className="mb-3 space-y-2">
+      {/* Inject narrow dark-matching scrollbar styles once */}
+      <style>{`
+        .reasoning-scroll::-webkit-scrollbar { width: 5px; }
+        .reasoning-scroll::-webkit-scrollbar-track { background: transparent; }
+        .reasoning-scroll::-webkit-scrollbar-thumb { background: #252a3d; border-radius: 3px; }
+        .reasoning-scroll-light::-webkit-scrollbar { width: 5px; }
+        .reasoning-scroll-light::-webkit-scrollbar-track { background: transparent; }
+        .reasoning-scroll-light::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        @keyframes shimmerGlow { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        .animate-glitter { background: linear-gradient(90deg, #94a3b8 0%, #ffffff 50%, #94a3b8 100%); background-size: 200% 100%; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shimmerGlow 2s infinite linear; }
+      `}</style>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setCollapsed((prev) => !prev)}
+          className={cn(
+            "flex items-center gap-2 text-xs font-medium transition-colors cursor-pointer select-none py-1",
+            isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-600 hover:text-slate-900"
+          )}
+        >
+          <Clock className="h-3.5 w-3.5 opacity-70" />
+          <span className={isStreaming ? "animate-glitter font-semibold" : ""}>
+            {isStreaming
+              ? `Working... (${displayTime || "1s"})`
+              : `Worked for ${displayTime || "1s"}`}
+          </span>
+          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+
+
+      {!collapsed && (
+        <div
+          ref={panelRef}
+          className={cn(
+            "max-h-72 space-y-2 overflow-y-auto border-l pl-4 pr-2 py-1 scroll-smooth text-xs",
+            isDark
+              ? "border-slate-800/80 text-slate-300 reasoning-scroll"
+              : "border-slate-200 text-slate-700 reasoning-scroll-light"
+          )}
+          aria-live="polite"
+        >
+          {activities.map((act, idx) => (
+            <div key={act.id || idx} className="flex items-start gap-2.5 leading-relaxed">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                <AgentIcon agent={act.agent} />
+              </span>
+              <div className={act.kind === "tool" ? "font-medium text-slate-200" : "text-slate-400"}>
+                {act.label && (
+                  <span className="mr-2 text-[10px] uppercase tracking-wider text-slate-500">
+                    {act.label}
+                  </span>
+                )}
+                <span>{act.content}</span>
+              </div>
+            </div>
+          ))}
+          {isStreaming && (
+            <div className="ml-6 h-1.5 w-1.5 animate-pulse rounded-full bg-slate-400" />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ApprovalConfirmModal({
+  open,
+  onClose,
+  onConfirm,
+  hitlPermission,
+}: {
+  open: boolean
+  onClose: () => void
+  onConfirm: () => void
+  hitlPermission: HITLPermissionState
+}) {
+  if (!open) return null
+
+  const isGithub = hitlPermission.agent === "github_agent" || hitlPermission.tool?.includes("github")
+  const isGmail = hitlPermission.agent === "gmail_agent" || hitlPermission.draft || hitlPermission.tool?.includes("gmail")
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-5"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="approval-confirm-title"
+    >
+      <div className="w-full max-w-md space-y-5 rounded-2xl border border-black bg-white p-6 text-black shadow-2xl">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-black/45">
+            Final confirmation
+          </p>
+          <h2 id="approval-confirm-title" className="mt-1 text-lg font-semibold">
+            Approve this action?
+          </h2>
+          <p className="mt-2 text-xs leading-relaxed text-black/60">
+            The agent will execute the action shown below. This cannot be undone automatically.
+          </p>
+        </div>
+
+        <div className="max-h-56 overflow-y-auto rounded-xl border border-black/10 bg-black/[0.04] p-3 text-xs">
+          <p className="font-semibold text-black/50">
+            {hitlPermission.preview_title || hitlPermission.tool || hitlPermission.action}
+          </p>
+          {hitlPermission.to || hitlPermission.subject || hitlPermission.body ? (
+            <div className="mt-3 space-y-1.5">
+              <p><b>To:</b> {hitlPermission.to || "Not specified"}</p>
+              {hitlPermission.cc && <p><b>Cc:</b> {hitlPermission.cc}</p>}
+              <p><b>Subject:</b> {hitlPermission.subject || "Not specified"}</p>
+              <p className="whitespace-pre-wrap border-t border-black/10 pt-2">
+                {hitlPermission.body || "No message body"}
+              </p>
+            </div>
+          ) : (
+            <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-[11px]">
+              {JSON.stringify(hitlPermission.args || hitlPermission.preview || {}, null, 2)}
+            </pre>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-black/20 bg-white px-4 py-2 text-xs font-semibold text-black transition hover:bg-black/[0.05] cursor-pointer"
+          >
+            Go back
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-lg bg-black px-4 py-2 text-xs font-semibold text-white transition hover:bg-black/80 cursor-pointer"
+          >
+            Approve and continue
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function HITLPermissionCard({
+  hitlPermission,
+  onHITLResponse,
+}: {
+  hitlPermission: HITLPermissionState
+  onHITLResponse?: (decision: "yes" | "no" | "tell_agent", feedback?: string) => void
+  isDark?: boolean
+}) {
+  const [feedback, setFeedback] = useState("")
+  const [approvalConfirmOpen, setApprovalConfirmOpen] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const isGithub = hitlPermission.agent === "github_agent" || hitlPermission.tool?.includes("github")
+  const isGmail = hitlPermission.agent === "gmail_agent" || hitlPermission.draft || hitlPermission.tool?.includes("gmail")
+
+  const handleAction = (decision: "yes" | "no" | "tell_agent") => {
+    setIsSubmitting(true)
+    onHITLResponse?.(decision, feedback)
+  }
+
+  return (
+    <>
+      <ApprovalConfirmModal
+        open={approvalConfirmOpen}
+        onClose={() => setApprovalConfirmOpen(false)}
+        onConfirm={() => {
+          setApprovalConfirmOpen(false)
+          handleAction("yes")
+        }}
+        hitlPermission={hitlPermission}
+      />
+
+      <section className="my-4 space-y-4 rounded-[22px] border border-black bg-white p-5 text-black shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-black/10 pb-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-black text-white shrink-0">
+              {isGithub ? (
+                <Github className="h-4 w-4" />
+              ) : isGmail ? (
+                <Mail className="h-4 w-4" />
+              ) : (
+                <ShieldAlert className="h-4 w-4" />
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-black/45">
+                Human approval required
+              </p>
+              <h2 className="mt-1 text-sm font-semibold">
+                {isGithub
+                  ? "Review this GitHub action"
+                  : isGmail
+                    ? "Review this Gmail action"
+                    : "Review this action"}
+              </h2>
+            </div>
+          </div>
+          {hitlPermission.risk && (
+            <span className="rounded-full border border-black/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-black/60 shrink-0">
+              {hitlPermission.risk}
+            </span>
+          )}
+        </div>
+
+        <div className="space-y-3 rounded-xl border border-black/10 bg-black/[0.03] p-4 text-xs">
+          <div>
+            <span className="font-semibold text-black/50">ACTION</span>
+            <p className="mt-1 font-mono text-[11px]">
+              {hitlPermission.tool || hitlPermission.action}
+            </p>
+          </div>
+
+          {hitlPermission.description && (
+            <p className="border-t border-black/10 pt-3 leading-relaxed text-black/65">
+              {hitlPermission.description}
+            </p>
+          )}
+
+          {hitlPermission.to || hitlPermission.subject || hitlPermission.body ? (
+            <div className="space-y-2 border-t border-black/10 pt-3">
+              <span className="font-semibold text-black/50">EMAIL CONTENT</span>
+              {hitlPermission.from && <p><b>From:</b> {hitlPermission.from}</p>}
+              <p><b>To:</b> {hitlPermission.to || "Not specified"}</p>
+              {hitlPermission.cc && <p><b>Cc:</b> {hitlPermission.cc}</p>}
+              {hitlPermission.bcc && <p><b>Bcc:</b> {hitlPermission.bcc}</p>}
+              <p><b>Subject:</b> {hitlPermission.subject || "Not specified"}</p>
+              <div className="max-h-32 overflow-y-auto whitespace-pre-wrap border-t border-black/10 pt-2 text-black/75">
+                {hitlPermission.body || "No message body"}
+              </div>
+            </div>
+          ) : hitlPermission.args ? (
+            <div className="border-t border-black/10 pt-3">
+              <span className="font-semibold text-black/50">COMMAND PARAMETERS</span>
+              <pre className="reasoning-scroll mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/[0.06] p-3 font-mono text-[11px] text-black">
+                {JSON.stringify(hitlPermission.args, null, 2)}
+              </pre>
+            </div>
+          ) : hitlPermission.preview ? (
+            <div className="border-t border-black/10 pt-3">
+              <span className="font-semibold text-black/50">REQUEST</span>
+              <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/[0.06] p-3 font-mono text-[11px] text-black">
+                {hitlPermission.preview}
+              </pre>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-xs font-semibold">
+            <MessageSquare className="h-3.5 w-3.5" />
+            Instructions for the agent <span className="font-normal text-black/45">(optional)</span>
+          </label>
+          <textarea
+            value={feedback}
+            onChange={(event) => setFeedback(event.target.value)}
+            rows={2}
+            placeholder="Add a change or tell the agent what to do instead..."
+            className="w-full resize-none rounded-xl border border-black/15 bg-white p-3 text-xs text-black placeholder-black/35 outline-none transition focus:border-black focus:ring-2 focus:ring-black/10"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-black/10 pt-4">
+          <span className="text-[11px] text-black/45">
+            {isSubmitting
+              ? "Sending your decision..."
+              : isGithub
+                ? "This action will be sent to GitHub."
+                : isGmail
+                  ? "This action will be sent to Gmail."
+                  : "This action will be executed."}
+          </span>
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => handleAction("no")}
+              disabled={isSubmitting}
+              className="flex items-center gap-1.5 rounded-lg border border-black/20 bg-white px-3.5 py-2 text-xs font-semibold text-black transition hover:bg-black/[0.05] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Reject
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleAction("tell_agent")}
+              disabled={isSubmitting || !feedback.trim()}
+              className="flex items-center gap-1.5 rounded-lg border border-black/15 bg-black/[0.06] px-3.5 py-2 text-xs font-semibold text-black transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              Send instruction
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setApprovalConfirmOpen(true)}
+              disabled={isSubmitting}
+              className="flex items-center gap-1.5 rounded-lg bg-black px-4 py-2 text-xs font-semibold text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Approve
+            </button>
+          </div>
+        </div>
+      </section>
+    </>
   )
 }
 
@@ -918,6 +1364,11 @@ export function AgentChatThread({
   thinkingEvents,
   isDark,
   onSourceAccessChanged,
+  agentActivities = [],
+  elapsedSeconds = 0,
+  isAgentMode = false,
+  hitlPermission = null,
+  onHITLResponse,
 }: AgentChatThreadProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
@@ -958,13 +1409,16 @@ export function AgentChatThread({
       top: viewport.scrollHeight,
       behavior: messageWasAppended ? "smooth" : "auto",
     })
-  }, [messages.length, isThinking])
+  }, [messages.length, isThinking, agentActivities.length])
 
   return (
     <ScrollArea ref={scrollRef} className="min-h-0 flex-1">
       <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 pb-4 pt-8">
-        {messages.map((message) => {
+        {messages.map((message, index) => {
           const isUser = message.role === "user"
+          // Only show saved reasoning (from completed agent responses), never live activities inside messages
+          const messageActivities = message.reasoning
+
           return (
             <div
               key={message.id}
@@ -980,6 +1434,18 @@ export function AgentChatThread({
                     : "w-full bg-transparent text-slate-800 dark:text-zinc-200 py-1"
                 )}
               >
+                {!isUser && messageActivities && messageActivities.length > 0 && (
+                  <AgentReasoningPanel
+                    activities={messageActivities}
+                    elapsedSeconds={message.latencyMs ? message.latencyMs / 1000 : elapsedSeconds}
+                    isStreaming={false}
+                    isDark={isDark}
+                    inputTokens={message.inputTokens}
+                    outputTokens={message.outputTokens}
+                    totalTokens={message.totalTokens}
+                  />
+                )}
+
                 {isUser ? (
                   message.content
                 ) : (
@@ -1001,12 +1467,31 @@ export function AgentChatThread({
             </div>
           )
         })}
+
         {isThinking && (
-          <div className="flex w-full justify-start">
-            <AgentThinkingIndicator events={thinkingEvents} isDark={isDark} />
+          <div className="flex w-full flex-col justify-start gap-3">
+            {isAgentMode || agentActivities.length > 0 ? (
+              <AgentReasoningPanel
+                activities={agentActivities}
+                elapsedSeconds={elapsedSeconds}
+                isStreaming={true}
+                isDark={isDark}
+              />
+            ) : (
+              <AgentThinkingIndicator events={thinkingEvents} isDark={isDark} />
+            )}
           </div>
+        )}
+
+        {hitlPermission && (
+          <HITLPermissionCard
+            hitlPermission={hitlPermission}
+            onHITLResponse={onHITLResponse}
+            isDark={isDark}
+          />
         )}
       </div>
     </ScrollArea>
   )
 }
+
