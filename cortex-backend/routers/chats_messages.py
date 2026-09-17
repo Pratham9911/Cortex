@@ -672,6 +672,9 @@ async def ask_chat(
 
         try:
             if not is_agent:
+                input_tokens = 0
+                output_tokens = 0
+                total_tokens = 0
                 for event in run_pipeline(
                     query=query,
                     project_id=chat.project_id,
@@ -685,13 +688,24 @@ async def ask_chat(
                     if event.get("type") == "sources":
                         web_sources.extend(event.get("sources", []))
 
+                    stream_event = event
                     if event.get("type") == "final":
                         final_answer = event.get("answer")
                         final_intent = event.get("intent") or final_intent
+                        input_tokens = event.get("input_tokens", input_tokens) or 0
+                        output_tokens = event.get("output_tokens", output_tokens) or 0
+                        total_tokens = event.get("total_tokens")
+                        if total_tokens is None:
+                            total_tokens = input_tokens + output_tokens
                         web_sources.extend(event.get("sources", []))
                         document_chunks.extend(event.get("chunks", []))
+                        stream_event = {
+                            **event,
+                            "sources": _normalize_web_sources(web_sources),
+                            "chunks": _normalize_document_sources(document_chunks),
+                        }
 
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(stream_event)}\n\n"
 
                 if final_answer is None:
                     final_answer = "I could not generate a final answer for this request."
@@ -706,6 +720,9 @@ async def ask_chat(
                         "intent": final_intent or "unknown",
                         "mode": "normal",
                         "latency_ms": latency_ms,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": total_tokens,
                         "web": _normalize_web_sources(web_sources),
                         "documents": _normalize_document_sources(document_chunks)
                     }

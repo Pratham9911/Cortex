@@ -22,10 +22,11 @@ SYSTEM_PROMPT = SystemMessage(
         "RULES:\n"
         "You will get a sentence which may contains seperate Topics like find A and B , Identify them and use Search for Individual Topics don't mix.\n"
         "As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and answer in clear and facts only text.\n"
-        "if Searching Fails to retreive more then once for a Query, STOP calling tools and answer the query with the information you have gathered so far as Info may not be present in Project.\n"
+        "if Searching Fails to retreive relevent info , more then once for a Query, STOP calling tools and answer the query with the information you have gathered so far as Info may not be present in Project.\n"
         "Output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it\n"
         "Citation Rule: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
         "CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine "
+        "Always use Project_search with clear query with sentence which make sense like sending task and not just simple keywords.\n"
 
     )
 )

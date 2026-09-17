@@ -46,6 +46,7 @@ Citation Rules:
 - NEVER use full-width or non-standard brackets (e.g. do NOT output `【` or `】`).
 - NEVER invent document IDs or page numbers outside of the provided Project Context headers.
 - Place every citation at the end of it's relevent paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line character \n. Never place a citation mid-paragraph or between sentences.
+- Never directly expose document IDs in answer without citation.
 
 Rejection Rules:
 - If the context is insufficient to answer the question or Not Matching, OR"
