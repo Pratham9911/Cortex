@@ -32,9 +32,6 @@ import type { ActivityItem, HITLPermissionState, Message, MessageSources, Thinki
 import { AgentThinkingIndicator } from "./agent-thinking-indicator"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
-const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks]
-const passthroughUrl = (url: string) => url
-
 type AgentChatThreadProps = {
   messages: Message[]
   isThinking: boolean
@@ -609,8 +606,8 @@ export function AssistantMessageContent({
       isDark ? "prose-invert text-zinc-200" : "text-slate-800"
     )}>
       <ReactMarkdown
-        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-        urlTransform={passthroughUrl}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        urlTransform={(url) => url}
         components={components}
       >
         {processedContent}
@@ -1429,22 +1426,58 @@ export function AgentChatThread({
     const viewport = getViewport()
     if (!viewport) return
 
-    const messageWasAppended = messages.length > previousMessageCountRef.current
-    previousMessageCountRef.current = messages.length
+    const prevCount = previousMessageCountRef.current
+    const currentCount = messages.length
+    previousMessageCountRef.current = currentCount
 
-    if (!shouldStickToBottomRef.current && !messageWasAppended) {
+    if (prevCount === 0 && currentCount > 0) {
+      viewport.scrollTo({
+        top: viewport.scrollHeight,
+        behavior: "auto",
+      })
       return
     }
 
-    viewport.scrollTo({
-      top: viewport.scrollHeight,
-      behavior: messageWasAppended ? "smooth" : "auto",
-    })
-  }, [messages.length, isThinking, agentActivities.length])
+    if (shouldStickToBottomRef.current) {
+      const userMessageNodes = viewport.querySelectorAll<HTMLElement>('[data-role="user"]')
+      const lastUserNode = userMessageNodes[userMessageNodes.length - 1]
+
+      if (isThinking && lastUserNode) {
+        const viewportRect = viewport.getBoundingClientRect()
+        const nodeRect = lastUserNode.getBoundingClientRect()
+        const relativeTop = nodeRect.top - viewportRect.top + viewport.scrollTop
+        const desiredScrollTop = Math.max(0, relativeTop - 32)
+        const maxScrollTop = viewport.scrollHeight - viewport.clientHeight
+
+        let targetScrollTop: number
+        if (maxScrollTop < desiredScrollTop) {
+          targetScrollTop = maxScrollTop
+        } else {
+          const contentBelowUser = viewport.scrollHeight - relativeTop
+          if (contentBelowUser > viewport.clientHeight) {
+            targetScrollTop = maxScrollTop
+          } else {
+            targetScrollTop = desiredScrollTop
+          }
+        }
+
+        viewport.scrollTo({
+          top: targetScrollTop,
+          behavior: "smooth",
+        })
+        return
+      }
+
+      viewport.scrollTo({
+        top: viewport.scrollHeight,
+        behavior: "smooth",
+      })
+    }
+  }, [messages.length, isThinking, agentActivities.length, thinkingEvents.length])
 
   return (
     <ScrollArea ref={scrollRef} className="min-h-0 flex-1">
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 pb-4 pt-8">
+      <div className={cn("mx-auto flex max-w-4xl flex-col gap-6 px-8 pt-8 transition-all duration-300", isThinking ? "pb-32" : "pb-6")}>
         {messages.map((message, index) => {
           const isUser = message.role === "user"
           // Only show saved reasoning (from completed agent responses), never live activities inside messages
@@ -1453,6 +1486,8 @@ export function AgentChatThread({
           return (
             <div
               key={message.id}
+              data-role={message.role}
+              data-message-id={message.id}
               className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}
             >
               <div

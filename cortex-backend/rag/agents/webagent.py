@@ -67,9 +67,9 @@ Return ONLY valid JSON.
 
     payload = {
         "model":
-            "accounts/fireworks/models/gpt-oss-20b",
+            "accounts/fireworks/models/gpt-oss-120b",
         "temperature": 0,
-        "max_tokens": 256,
+        "max_tokens": 512,
         "messages": [
             {
                 "role": "user",

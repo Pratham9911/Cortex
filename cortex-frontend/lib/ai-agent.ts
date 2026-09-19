@@ -156,12 +156,31 @@ export async function downloadDocument(documentId: number): Promise<void> {
   window.open(data.download_url, "_blank", "noopener,noreferrer")
 }
 
+export async function stopChatExecution(
+  chatId: number,
+  content: string = "⚠️ *Execution stopped by user.*",
+  sources: any = null
+): Promise<void> {
+  await fetch(`${apiUrl}/chats/${chatId}/messages`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      role: "assistant",
+      content,
+      sources,
+    }),
+  })
+}
+
 export async function streamChatAsk(
   chatId: number,
   query: string,
-  options: { isAgent?: boolean } & StreamCallbacks = {}
+  options: { isAgent?: boolean; signal?: AbortSignal } & StreamCallbacks = {}
 ): Promise<void> {
-  const { isAgent = false, onEvent } = options
+  const { isAgent = false, signal, onEvent } = options
   const response = await fetch(`${apiUrl}/chats/${chatId}/ask`, {
     method: "POST",
     headers: {
@@ -169,6 +188,7 @@ export async function streamChatAsk(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query, is_agent: isAgent }),
+    signal,
   })
 
   if (!response.ok || !response.body) {
@@ -212,9 +232,9 @@ export async function streamResumeAgent(
   threadId: string,
   decision: "yes" | "no" | "tell_agent",
   feedbackText?: string,
-  options: StreamCallbacks = {}
+  options: { signal?: AbortSignal } & StreamCallbacks = {}
 ): Promise<void> {
-  const { onEvent } = options
+  const { signal, onEvent } = options
   const token = localStorage.getItem("access_token")
   let url = `${apiUrl}/projects/${projectId}/agent/${threadId}/resume?decision=${decision}`
   if (feedbackText?.trim()) {
@@ -227,6 +247,7 @@ export async function streamResumeAgent(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       "Content-Type": "application/json",
     },
+    signal,
   })
 
   if (!response.ok || !response.body) {

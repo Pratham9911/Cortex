@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ArrowUp, Brain, Mic, Paperclip, Plus, Settings, Sparkles, X } from "lucide-react"
+import { ArrowUp, Brain, Mic, Paperclip, Plus, Settings, Sparkles, Square, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 function CortexAgentIcon({
@@ -53,6 +53,7 @@ type AgentChatComposerProps = {
   value: string
   onChange: (value: string) => void
   onSend: (isAgentMode?: boolean) => void
+  onStop?: () => void
   disabled?: boolean
   isDark: boolean
   isAgentMode?: boolean
@@ -66,6 +67,7 @@ export function AgentChatComposer({
   value,
   onChange,
   onSend,
+  onStop,
   disabled,
   isDark,
   isAgentMode = false,
@@ -372,7 +374,7 @@ export function AgentChatComposer({
             )}
           />
 
-          {/* Action buttons (Mic & Send) */}
+          {/* Action buttons (Mic & Send / Stop) */}
           <div className="flex items-center gap-1.5 mb-0.5 shrink-0">
             <button
               type="button"
@@ -387,29 +389,46 @@ export function AgentChatComposer({
               <Mic className="size-[18px]" />
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (value.trim() && !disabled) {
-                  onSend(isAgentMode)
-                }
-              }}
-              disabled={disabled || !value.trim()}
-              aria-label="Send message"
-              className={cn(
-                "grid size-9 place-items-center rounded-full transition-all cursor-pointer",
-                isDark
-                  ? isAgentMode
-                    ? "bg-indigo-600 text-white hover:bg-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.5)]"
-                    : "bg-white text-black hover:bg-zinc-200"
-                  : isAgentMode
-                    ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-[0_0_10px_rgba(99,102,241,0.4)]"
-                    : "bg-black text-white hover:bg-zinc-800",
-                (disabled || !value.trim()) && "opacity-35 cursor-not-allowed shadow-none"
-              )}
-            >
-              <ArrowUp className="size-4 stroke-[2.5]" />
-            </button>
+            {disabled ? (
+              <button
+                type="button"
+                onClick={onStop}
+                aria-label="Stop execution"
+                title="Stop execution"
+                className={cn(
+                  "grid size-9 place-items-center rounded-full transition-all cursor-pointer shadow-sm",
+                  isDark
+                    ? "bg-white text-black hover:bg-zinc-200"
+                    : "bg-black text-white hover:bg-zinc-800"
+                )}
+              >
+                <Square className={cn("size-3.5", isDark ? "fill-black text-black" : "fill-white text-white")} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  if (value.trim() && !disabled) {
+                    onSend(isAgentMode)
+                  }
+                }}
+                disabled={!value.trim()}
+                aria-label="Send message"
+                className={cn(
+                  "grid size-9 place-items-center rounded-full transition-all cursor-pointer",
+                  isDark
+                    ? isAgentMode
+                      ? "bg-indigo-600 text-white hover:bg-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.5)]"
+                      : "bg-white text-black hover:bg-zinc-200"
+                    : isAgentMode
+                      ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-[0_0_10px_rgba(99,102,241,0.4)]"
+                      : "bg-black text-white hover:bg-zinc-800",
+                  !value.trim() && "opacity-35 cursor-not-allowed shadow-none"
+                )}
+              >
+                <ArrowUp className="size-4 stroke-[2.5]" />
+              </button>
+            )}
           </div>
         </div>
       </div>

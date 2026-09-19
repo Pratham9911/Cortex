@@ -557,6 +557,45 @@ def list_messages(
     ]
 
 
+class CreateMessageRequest(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1)
+    sources: Optional[dict] = None
+
+
+@router.post("/chats/{chat_id}/messages")
+def create_message(
+    chat_id: int,
+    request: CreateMessageRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save a single message to the chat (used for cancellation notices, etc.)."""
+    chat = _get_owned_chat(
+        db=db,
+        chat_id=chat_id,
+        user_id=user_id
+    )
+
+    message = Message(
+        chat_id=chat.chat_id,
+        role=request.role,
+        content=request.content,
+        sources=request.sources,
+    )
+    db.add(message)
+    chat.updated_at = func.now()
+    db.commit()
+    db.refresh(message)
+
+    return _serialize_message(
+        db=db,
+        chat=chat,
+        user_id=user_id,
+        message=message
+    )
+
+
 def _emit_sse(event_type: str, **data):
     payload = {"type": event_type, **data}
     return f"data: {json.dumps(payload)}\n\n"

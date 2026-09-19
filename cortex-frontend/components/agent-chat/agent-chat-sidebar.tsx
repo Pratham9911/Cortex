@@ -39,6 +39,7 @@ type AgentChatSidebarProps = {
   onRenameChat: (chatId: number, title: string) => Promise<void>
   onDeleteChat: (chatId: number) => Promise<void>
   isDark: boolean
+  isChatsLoading?: boolean
 }
 
 function ChatListItem({
@@ -329,6 +330,32 @@ function ChatSection({
   )
 }
 
+function SidebarSkeleton({ isDark }: { isDark: boolean }) {
+  const pulse = isDark ? "bg-zinc-800" : "bg-slate-200"
+  return (
+    <div className="space-y-5 px-2 pt-2 animate-pulse">
+      <div className="space-y-2.5">
+        <div className={cn("h-3 w-16 rounded-md", pulse)} />
+        <div className="flex items-center gap-2.5 px-2 py-1.5">
+          <div className={cn("size-6 rounded-full shrink-0", pulse)} />
+          <div className={cn("h-3.5 w-32 rounded-md", pulse)} />
+        </div>
+        <div className="flex items-center gap-2.5 px-2 py-1.5">
+          <div className={cn("size-6 rounded-full shrink-0", pulse)} />
+          <div className={cn("h-3.5 w-24 rounded-md", pulse)} />
+        </div>
+      </div>
+      <div className="space-y-2.5 pt-1">
+        <div className={cn("h-3 w-14 rounded-md", pulse)} />
+        <div className="px-2 py-1.5"><div className={cn("h-3.5 w-36 rounded-md", pulse)} /></div>
+        <div className="px-2 py-1.5"><div className={cn("h-3.5 w-28 rounded-md", pulse)} /></div>
+        <div className="px-2 py-1.5"><div className={cn("h-3.5 w-32 rounded-md", pulse)} /></div>
+        <div className="px-2 py-1.5"><div className={cn("h-3.5 w-24 rounded-md", pulse)} /></div>
+      </div>
+    </div>
+  )
+}
+
 export function AgentChatSidebar({
   chats,
   activeChatId,
@@ -337,6 +364,7 @@ export function AgentChatSidebar({
   onRenameChat,
   onDeleteChat,
   isDark,
+  isChatsLoading = false,
 }: AgentChatSidebarProps) {
   const saved = chats.filter((c) => c.group === "saved")
   const today = chats.filter((c) => c.group === "today")
@@ -381,36 +409,42 @@ export function AgentChatSidebar({
       </div>
 
       <ScrollArea className="min-h-0 flex-1 px-2 pb-4">
-        <ChatSection
-          label="Agents"
-          items={saved}
-          activeChatId={activeChatId}
-          onSelectChat={onSelectChat}
-          onRenameChat={onRenameChat}
-          onDeleteChat={onDeleteChat}
-          isDark={isDark}
-          showAvatar={true}
-        />
-        <ChatSection
-          label="Today"
-          items={today}
-          activeChatId={activeChatId}
-          onSelectChat={onSelectChat}
-          onRenameChat={onRenameChat}
-          onDeleteChat={onDeleteChat}
-          isDark={isDark}
-          showAvatar={false}
-        />
-        <ChatSection
-          label="Yesterday"
-          items={yesterday}
-          activeChatId={activeChatId}
-          onSelectChat={onSelectChat}
-          onRenameChat={onRenameChat}
-          onDeleteChat={onDeleteChat}
-          isDark={isDark}
-          showAvatar={false}
-        />
+        {isChatsLoading ? (
+          <SidebarSkeleton isDark={isDark} />
+        ) : (
+          <>
+            <ChatSection
+              label="Agents"
+              items={saved}
+              activeChatId={activeChatId}
+              onSelectChat={onSelectChat}
+              onRenameChat={onRenameChat}
+              onDeleteChat={onDeleteChat}
+              isDark={isDark}
+              showAvatar={true}
+            />
+            <ChatSection
+              label="Today"
+              items={today}
+              activeChatId={activeChatId}
+              onSelectChat={onSelectChat}
+              onRenameChat={onRenameChat}
+              onDeleteChat={onDeleteChat}
+              isDark={isDark}
+              showAvatar={false}
+            />
+            <ChatSection
+              label="Yesterday"
+              items={yesterday}
+              activeChatId={activeChatId}
+              onSelectChat={onSelectChat}
+              onRenameChat={onRenameChat}
+              onDeleteChat={onDeleteChat}
+              isDark={isDark}
+              showAvatar={false}
+            />
+          </>
+        )}
       </ScrollArea>
     </aside>
   )

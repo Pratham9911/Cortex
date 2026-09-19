@@ -33,6 +33,7 @@ llm = ChatFireworks(
     model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
+    reasoning_effort="low"
 )
 
 tools = [web_agent_tool, retrieval_agent_tool, github_agent_tool, gmail_agent_tool]

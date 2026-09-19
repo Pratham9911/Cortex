@@ -19,6 +19,7 @@ type AgentChatMainProps = {
   isDark: boolean
   userInitials: string
   activeChatTitle?: string
+  activeChatId?: string | null
   onSourceAccessChanged?: () => void
   isAgentMode?: boolean
   setIsAgentMode?: (active: boolean) => void
@@ -26,6 +27,38 @@ type AgentChatMainProps = {
   elapsedSeconds?: number
   hitlPermission?: HITLPermissionState | null
   onHITLResponse?: (decision: "yes" | "no" | "tell_agent", feedback?: string) => void
+  isMessagesLoading?: boolean
+  onStop?: () => void
+}
+
+function ThreadSkeleton({ isDark }: { isDark: boolean }) {
+  const pulse = isDark ? "bg-zinc-800" : "bg-slate-200"
+
+  return (
+    <div className="min-h-0 flex-1 overflow-hidden px-8 pt-8">
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 animate-pulse">
+        <div className="flex w-full justify-end">
+          <div className={cn("h-10 w-64 rounded-[20px]", pulse)} />
+        </div>
+        <div className="flex w-full justify-start">
+          <div className="w-full space-y-3 py-1">
+            <div className={cn("h-4 w-3/4 rounded-md", pulse)} />
+            <div className={cn("h-4 w-5/6 rounded-md", pulse)} />
+            <div className={cn("h-4 w-1/2 rounded-md", pulse)} />
+          </div>
+        </div>
+        <div className="flex w-full justify-end">
+          <div className={cn("h-10 w-48 rounded-[20px]", pulse)} />
+        </div>
+        <div className="flex w-full justify-start">
+          <div className="w-full space-y-3 py-1">
+            <div className={cn("h-4 w-4/5 rounded-md", pulse)} />
+            <div className={cn("h-4 w-2/3 rounded-md", pulse)} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function AgentChatMain({
@@ -40,6 +73,7 @@ export function AgentChatMain({
   isDark,
   userInitials,
   activeChatTitle,
+  activeChatId,
   onSourceAccessChanged,
   isAgentMode = false,
   setIsAgentMode,
@@ -47,6 +81,8 @@ export function AgentChatMain({
   elapsedSeconds = 0,
   hitlPermission = null,
   onHITLResponse,
+  isMessagesLoading = false,
+  onStop,
 }: AgentChatMainProps) {
   return (
     <div
@@ -117,7 +153,9 @@ export function AgentChatMain({
         </div>
       </header>
 
-      {messages.length === 0 ? (
+      {isMessagesLoading ? (
+        <ThreadSkeleton isDark={isDark} />
+      ) : messages.length === 0 ? (
         <AgentWelcomeView
           prompts={prompts}
           onSend={(text) => onSend(text, isAgentMode)}
@@ -137,6 +175,7 @@ export function AgentChatMain({
           isAgentMode={isAgentMode}
           hitlPermission={hitlPermission}
           onHITLResponse={onHITLResponse}
+          activeChatId={activeChatId}
         />
       )}
 
@@ -144,6 +183,7 @@ export function AgentChatMain({
         value={input}
         onChange={onInputChange}
         onSend={(isAgent) => onSend(undefined, isAgent ?? isAgentMode)}
+        onStop={onStop}
         disabled={isThinking}
         isDark={isDark}
         isAgentMode={isAgentMode}

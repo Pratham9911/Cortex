@@ -8,6 +8,7 @@ import {
   deleteChat,
   listChats,
   listMessages,
+  stopChatExecution,
   streamChatAsk,
   streamResumeAgent,
   updateChatTitle,
@@ -51,6 +52,8 @@ export function AgentChatShell() {
   const [mounted, setMounted] = useState(false)
   const [chats, setChats] = useState<ChatSession[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [isChatsLoading, setIsChatsLoading] = useState(true)
+  const [loadingChatId, setLoadingChatId] = useState<string | null>(null)
   const [input, setInput] = useState("")
   const [isThinking, setIsThinking] = useState(false)
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([])
@@ -64,6 +67,9 @@ export function AgentChatShell() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [startedAt, setStartedAt] = useState<number>(Date.now())
   const [hitlPermission, setHitlPermission] = useState<HITLPermissionState | null>(null)
+  // When user stops execution, suppress message polling for a few seconds so
+  // the DB save can complete before we re-fetch (avoids overwriting local cancelled msg)
+  const suppressRefreshUntilRef = useRef<number>(0)
 
   useEffect(() => {
     setMounted(true)
@@ -96,19 +102,28 @@ export function AgentChatShell() {
 
   const refreshChats = useCallback(async () => {
     const projectId = selectedProjectId()
-    if (!projectId) return
+    if (!projectId) {
+      setIsChatsLoading(false)
+      return
+    }
 
-    const loadedChats = await listChats(projectId)
-    setChats((prev) =>
-      loadedChats.map((chat) => ({
-        ...chat,
-        messages: prev.find((item) => item.chatId === chat.chatId)?.messages ?? [],
-      }))
-    )
+    try {
+      const loadedChats = await listChats(projectId)
+      setChats((prev) =>
+        loadedChats.map((chat) => ({
+          ...chat,
+          messages: prev.find((item) => item.chatId === chat.chatId)?.messages ?? [],
+        }))
+      )
+    } finally {
+      setIsChatsLoading(false)
+    }
   }, [])
 
   const refreshActiveMessages = useCallback(async () => {
     if (!activeChatId || isThinking) return
+    // Suppress polling briefly after stop so DB save can complete
+    if (Date.now() < suppressRefreshUntilRef.current) return
 
     const chat = chats.find((item) => item.id === activeChatId)
     if (!chat) return
@@ -176,9 +191,17 @@ export function AgentChatShell() {
       setAgentActivities([])
       setHitlPermission(null)
 
-      void listMessages(chat.chatId).then((messages) => {
-        replaceChatMessages(chat.chatId, messages)
-      })
+      if (!chat.messages || chat.messages.length === 0) {
+        setLoadingChatId(id)
+      }
+
+      void listMessages(chat.chatId)
+        .then((messages) => {
+          replaceChatMessages(chat.chatId, messages)
+        })
+        .finally(() => {
+          setLoadingChatId(null)
+        })
     },
     [chats, replaceChatMessages]
   )
@@ -223,6 +246,31 @@ export function AgentChatShell() {
     [activeChatId, chats]
   )
 
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  const handleStop = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+
+    if (activeChat) {
+      const content = "⚠️ *Execution stopped by user.*"
+      const sources = {
+        mode: isAgentMode ? "agent" : "normal",
+        reasoning: [...agentActivitiesRef.current],
+      }
+      // Suppress polls for 4s so the DB POST can complete before we re-fetch
+      suppressRefreshUntilRef.current = Date.now() + 4000
+      void stopChatExecution(activeChat.chatId, content, sources)
+    }
+
+    setIsThinking(false)
+    setThinkingEvents([])
+    setAgentActivities([])
+    agentActivitiesRef.current = []
+  }, [activeChat, isAgentMode])
+
   const handleSend = useCallback(
     async (text?: string, forceIsAgent?: boolean) => {
       const trimmed = (text ?? input).trim()
@@ -232,6 +280,9 @@ export function AgentChatShell() {
       if (!projectId) return
 
       const isAgent = forceIsAgent ?? isAgentMode
+
+      const controller = new AbortController()
+      abortControllerRef.current = controller
 
       setInput("")
       setIsThinking(true)
@@ -262,6 +313,7 @@ export function AgentChatShell() {
       try {
         await streamChatAsk(targetChat.chatId, trimmed, {
           isAgent,
+          signal: controller.signal,
           onEvent: (event) => {
             const agentName = event.agent || "main"
 
@@ -417,6 +469,29 @@ export function AgentChatShell() {
         await refreshChats()
 
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          const cancelledMessage = optimisticAssistantMessage(
+            "⚠️ *Execution stopped by user.*",
+            {
+              mode: isAgent ? "agent" : "normal",
+              latency_ms: Math.round(performance.now() - startTime),
+              reasoning: [...agentActivitiesRef.current],
+            },
+            Math.round(performance.now() - startTime)
+          )
+          if (isAgent) {
+            cancelledMessage.mode = "agent"
+            cancelledMessage.reasoning = [...agentActivitiesRef.current]
+          }
+
+          replaceChatMessages(targetChat.chatId, [
+            ...(targetChat.messages ?? []),
+            userMessage,
+            cancelledMessage,
+          ])
+          return
+        }
+
         const fallbackMessage = optimisticAssistantMessage(
           error instanceof Error ? error.message : "Unable to generate an answer.",
           null,
@@ -444,6 +519,9 @@ export function AgentChatShell() {
       const projectId = selectedProjectId()
       if (!projectId) return
 
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
       const perm = hitlPermission
       const targetChat = activeChat
       setHitlPermission(null)
@@ -464,6 +542,7 @@ export function AgentChatShell() {
       try {
         let finalAnswer = ""
         await streamResumeAgent(projectId, perm.thread_id, decision, feedbackText, {
+          signal: controller.signal,
           onEvent: (event) => {
             const agentName = event.agent || "main"
 
@@ -580,6 +659,25 @@ export function AgentChatShell() {
         await refreshChats()
 
       } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") {
+          const cancelledMessage = optimisticAssistantMessage(
+            "⚠️ *Execution stopped by user.*",
+            {
+              mode: "agent",
+              latency_ms: Math.round(performance.now() - startTime),
+              reasoning: [...agentActivitiesRef.current],
+            },
+            Math.round(performance.now() - startTime)
+          )
+          cancelledMessage.mode = "agent"
+          cancelledMessage.reasoning = [...agentActivitiesRef.current]
+
+          replaceChatMessages(targetChat.chatId, [
+            ...(targetChat.messages ?? []),
+            cancelledMessage,
+          ])
+          return
+        }
         console.error("HITL resume error", e)
       } finally {
         setIsThinking(false)
@@ -606,6 +704,7 @@ export function AgentChatShell() {
         onRenameChat={handleRenameChat}
         onDeleteChat={handleDeleteChat}
         isDark={isDark}
+        isChatsLoading={isChatsLoading}
       />
 
       <AgentChatMain
@@ -620,6 +719,7 @@ export function AgentChatShell() {
         isDark={isDark}
         userInitials={userInitials}
         activeChatTitle={activeChat?.title}
+        activeChatId={activeChatId}
         onSourceAccessChanged={() => void refreshActiveMessages()}
         isAgentMode={isAgentMode}
         setIsAgentMode={setIsAgentMode}
@@ -627,6 +727,8 @@ export function AgentChatShell() {
         elapsedSeconds={elapsedSeconds}
         hitlPermission={hitlPermission}
         onHITLResponse={(decision, feedback) => void handleHITLResponse(decision, feedback)}
+        isMessagesLoading={Boolean(activeChatId && loadingChatId === activeChatId)}
+        onStop={handleStop}
       />
     </div>
   )
