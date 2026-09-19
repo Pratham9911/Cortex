@@ -58,6 +58,7 @@ class UpdateChatRequest(BaseModel):
 class AskChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=4000)
     is_agent: Optional[bool] = False
+    document_ids: Optional[list[int]] = Field(default=None, description="Optional list of document IDs to restrict RAG/Agent search to.")
 
 
 def _require_project_membership(
@@ -741,7 +742,8 @@ async def ask_chat(
                     user_role=membership.role,
                     db=db,
                     history=prior_history,
-                    summary_context=summary_ctx
+                    summary_context=summary_ctx,
+                    document_ids=request.document_ids
                 ):
                     if event.get("type") == "debug" and event.get("step") == "intent":
                         final_intent = event.get("intent")
@@ -829,6 +831,7 @@ async def ask_chat(
                     user_role=membership.role,
                     db=stream_db,
                     thread_id=thread_id,
+                    document_ids=request.document_ids
                 )
 
                 is_interrupted = False

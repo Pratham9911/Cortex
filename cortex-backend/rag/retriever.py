@@ -57,13 +57,16 @@ def reciprocal_rank_fusion(
 
 
 
+from typing import Optional
+
 def semantic_search(
     query: str,
     project_id: int,
     user_id: int,
     user_role: str,
     user_team_ids: list[int],
-    db
+    db,
+    document_ids: Optional[list[int]] = None
 ):
 
     # ----------------------------------------
@@ -133,6 +136,12 @@ WHERE
         )
     )
 
+    -- OPTIONAL SELECTED DOCUMENT FILTER
+    AND (
+        :has_document_filter = false
+        OR d.document_id = ANY(CAST(:document_ids AS integer[]))
+    )
+
 ORDER BY dc.embedding <=> CAST(:query_vector AS vector)
 
 LIMIT 10;
@@ -145,7 +154,9 @@ LIMIT 10;
             "project_id": project_id,
             "user_id": user_id,
             "user_role": user_role,
-            "user_team_ids": user_team_ids
+            "user_team_ids": user_team_ids,
+            "has_document_filter": bool(document_ids),
+            "document_ids": document_ids if document_ids else []
         }
     ).fetchall()
 
@@ -168,13 +179,16 @@ LIMIT 10;
         })
 
     return output
+
+
 def keyword_search(
     query: str,
     project_id: int,
     user_id: int,
     user_role: str,
     user_team_ids: list[int],
-    db
+    db,
+    document_ids: Optional[list[int]] = None
 ):
 
     sql = text("""
@@ -248,6 +262,12 @@ WHERE
         )
     )
 
+    -- OPTIONAL SELECTED DOCUMENT FILTER
+    AND (
+        :has_document_filter = false
+        OR d.document_id = ANY(CAST(:document_ids AS integer[]))
+    )
+
 ORDER BY
 (
     COALESCE(
@@ -276,7 +296,9 @@ LIMIT 10;
             "project_id": project_id,
             "user_id": user_id,
             "user_role": user_role,
-            "user_team_ids": user_team_ids
+            "user_team_ids": user_team_ids,
+            "has_document_filter": bool(document_ids),
+            "document_ids": document_ids if document_ids else []
         }
     ).fetchall()
 
@@ -299,12 +321,15 @@ LIMIT 10;
         })
 
     return output
+
+
 def hybrid_search(
     query: str,
     project_id: int,
     user_id: int,
     user_role: str,
-    db
+    db,
+    document_ids: Optional[list[int]] = None
 ):
 
     # ----------------------------------------
@@ -326,7 +351,8 @@ def hybrid_search(
         user_id,
         user_role,
         user_team_ids,
-        db
+        db,
+        document_ids=document_ids
     )
 
     # ----------------------------------------
@@ -338,7 +364,8 @@ def hybrid_search(
         user_id,
         user_role,
         user_team_ids,
-        db
+        db,
+        document_ids=document_ids
     )
 
     # ----------------------------------------
@@ -349,7 +376,7 @@ def hybrid_search(
         keyword_results
     )
   
-    return fused_results[:20] # need to change this to 20 
+    return fused_results[:20]
 
 
 def hybrid_search_with_rerank(
@@ -357,7 +384,8 @@ def hybrid_search_with_rerank(
     project_id: int,
     user_id: int,
     user_role: str,
-    db
+    db,
+    document_ids: Optional[list[int]] = None
 ):
 
     # ----------------------------------------
@@ -368,7 +396,8 @@ def hybrid_search_with_rerank(
         project_id,
         user_id,
         user_role,
-        db
+        db,
+        document_ids=document_ids
     )
 
     if not hybrid_results:

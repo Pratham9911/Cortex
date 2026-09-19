@@ -409,7 +409,8 @@ def handle_multi_hop(
     project_id: int,
     user_id: int,
     user_role: str,
-    db
+    db,
+    document_ids: Optional[list[int]] = None
 ):
     from rag.agents.multi_hop_agent import decompose_query
 
@@ -455,7 +456,8 @@ def handle_multi_hop(
                 user_id=user_id,
                 user_role=user_role,
                 db=db,
-                validate_response=False
+                validate_response=False,
+                document_ids=document_ids
             ):
                 if event.get("type") in ["status", "debug"]:
                     yield event
@@ -544,7 +546,8 @@ def handle_project_knowledge(
     user_role,
     db,
     validate_response=True,
-    summary_context=None
+    summary_context=None,
+    document_ids: Optional[list[int]] = None
 ):
 
  
@@ -564,7 +567,8 @@ def handle_project_knowledge(
         project_id,
         user_id,
         user_role,
-        db
+        db,
+        document_ids=document_ids
     )
 
     yield {

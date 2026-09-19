@@ -21,6 +21,7 @@ def run_pipeline(
     db,
     history: Optional[list[BaseMessage]] = None,
     summary_context: Optional[str] = None,
+    document_ids: Optional[list[int]] = None,
 ):
 
     # ----------------------------------------
@@ -75,7 +76,8 @@ def run_pipeline(
             user_id=user_id,
             user_role=user_role,
             db=db,
-            summary_context=summary_context
+            summary_context=summary_context,
+            document_ids=document_ids
         ))
 
         return
@@ -122,7 +124,8 @@ def run_pipeline(
             project_id=project_id,
             user_id=user_id,
             user_role=user_role,
-            db=db
+            db=db,
+            document_ids=document_ids
         ))
 
         return

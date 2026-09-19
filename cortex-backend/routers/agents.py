@@ -1,7 +1,9 @@
 
 import json
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from dependencies import get_current_user
@@ -22,6 +24,12 @@ from models import ProjectMember, TeamMember
 from rag.agents.intent import detect_intent
 
 router = APIRouter()
+
+
+class ProjectAskRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    document_ids: Optional[list[int]] = Field(default=None, description="Optional list of document IDs to restrict search to.")
+
 def get_db():
     db = SessionLocal()
     try:
@@ -162,7 +170,7 @@ def keyword_search_route(
 @router.post("/projects/{project_id}/ask-reranked")
 def ask_route_reranked(
         project_id: int,
-        query: str,
+        request: ProjectAskRequest,
         user_id: int = Depends(get_current_user),
         db: Session = Depends(get_db)
     ):
@@ -177,30 +185,18 @@ def ask_route_reranked(
 
         
         chunks = hybrid_search_with_rerank(
-            query,
+            request.query,
             project_id,
             user_id,
             membership.role,
-            db
+            db,
+            document_ids=request.document_ids
          )
 
-        answer = generate_answer(query, chunks)
-        # validation = validate_answer(
-        #    query,
-        #    answer
-        #  )
-
-        # if validation["decision"] == "no":
-
-        #  return {
-        #     "desision": validation["decision"],
-        #     "answer": validation["user_response"],
-         
-
-        #   }
+        answer = generate_answer(request.query, chunks)
         return {
             "project_id": project_id,
-            "query": query,
+            "query": request.query,
             "reranked_chunks": len(chunks),
             "answer": answer,
             "chunks": chunks
@@ -209,7 +205,7 @@ def ask_route_reranked(
 @router.post("/projects/{project_id}/ask-hybrid")
 def ask_route_hybrid(
     project_id: int,
-    query: str,
+    request: ProjectAskRequest,
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -228,21 +224,22 @@ def ask_route_hybrid(
 
     # Hybrid Search (Semantic + Keyword + RRF)
     chunks = hybrid_search(
-        query=query,
+        query=request.query,
         project_id=project_id,
         user_id=user_id,
         user_role=membership.role,
-        db=db
+        db=db,
+        document_ids=request.document_ids
     )
 
     # Generate answer
-    answer = generate_answer(query, chunks)
+    answer = generate_answer(request.query, chunks)
 
    
 
     return {
         "project_id": project_id,
-        "query": query,
+        "query": request.query,
         "retrieved_chunks": len(chunks),
         "answer": answer,
         "chunks": chunks
@@ -252,7 +249,7 @@ def ask_route_hybrid(
 @router.post("/projects/{project_id}/ask")
 def ask_route(
     project_id: int,
-    query: str,
+    request: ProjectAskRequest,
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -279,11 +276,12 @@ def ask_route(
         try:
 
             for event in run_pipeline(
-                query=query,
+                query=request.query,
                 project_id=project_id,
                 user_id=user_id,
                 user_role=membership.role,
-                db=db
+                db=db,
+                document_ids=request.document_ids
             ):
 
                 yield (
@@ -461,6 +459,7 @@ async def _stream_workflow(workflow, input_data, config=None):
 async def run_agent(
     project_id: int,
     question: str,
+    document_ids: Optional[list[int]] = Query(None),
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -515,6 +514,7 @@ async def run_agent(
             user_role=user_role,
             db=stream_db,
             thread_id=thread_id,
+            document_ids=document_ids,
         )
 
         try:
@@ -738,130 +738,4 @@ async def resume_agent(
 
 
 
-from typing import Optional
-from agentic.tools import set_active_event_callback, set_active_project_context
-
-
-@router.get("/projects/{project_id}/agent")
-async def run_agent(
-    project_id: int,
-    question: str,
-    user_id: int = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    # Validate project membership
-    membership = db.query(ProjectMember).filter(
-        ProjectMember.project_id == project_id,
-        ProjectMember.user_id == user_id,
-    ).first()
-
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied to this project")
-
-    user_role = membership.role
-
-    initial_state = {
-        "messages": [HumanMessage(content=question)],
-        "question": question,
-        "answer": "",
-        "reasoning": "",
-        "tool_calls": [],
-        "sources": [],
-        "chunks": [],
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "iterations": 0,
-    }
-
-    def emit(event_type: str, **data):
-        payload = {"type": event_type, **data}
-        return f"data: {json.dumps(payload)}\n\n"
-
-    async def event_generator():
-        # Open a dedicated db session that lives for the full stream
-        stream_db = SessionLocal()
-
-        final_answer = ""
-        final_sources = []
-        final_chunks = []
-        input_tokens = 0
-        output_tokens = 0
-        pending_events = []
-
-        def sub_event_emitter(event_type: str, *args, **data):
-            agent_val = data.pop("agent", None) or (args[0] if args else "main")
-            pending_events.append((event_type, {"agent": agent_val, **data}))
-
-        yield emit("agent_started", agent="main")
-
-        set_active_event_callback(sub_event_emitter)
-        set_active_project_context(
-            project_id=project_id,
-            user_id=user_id,
-            user_role=user_role,
-            db=stream_db,
-        )
-
-        try:
-            workflow = main_graph.workflow or main_graph.build_workflow()
-            async for update in workflow.astream(initial_state, stream_mode="updates"):
-
-                while pending_events:
-                    evt_type, evt_data = pending_events.pop(0)
-                    yield emit(evt_type, **evt_data)
-
-                for node_name, node_update in update.items():
-
-                    if node_name in ("chat_node", "force_synthesis_node"):
-                        reasoning = node_update.get("reasoning", "")
-                        answer = node_update.get("answer", "")
-                        tool_calls = node_update.get("tool_calls", [])
-                        iteration = node_update.get("iterations")
-
-                        if answer:
-                            final_answer = answer
-                        input_tokens = node_update.get("input_tokens", input_tokens)
-                        output_tokens = node_update.get("output_tokens", output_tokens)
-
-                        if reasoning:
-                            yield emit("reasoning", agent="main", iteration=iteration, content=reasoning)
-
-                        for tc in tool_calls:
-                            yield emit("tool_started", agent="main", iteration=iteration,
-                                       tool=tc["name"], args=tc["args"], call_id=tc.get("id"))
-
-                    elif node_name == "tool_node":
-                        yield emit("tool_completed", agent="main", tool="sub_agent")
-
-                    elif node_name == "collect_tool_results":
-                        sources = node_update.get("sources", [])
-                        chunks = node_update.get("chunks", [])
-                        if sources:
-                            final_sources = sources
-                        if chunks:
-                            final_chunks = chunks
-                        input_tokens = node_update.get("input_tokens", input_tokens)
-                        output_tokens = node_update.get("output_tokens", output_tokens)
-
-                while pending_events:
-                    evt_type, evt_data = pending_events.pop(0)
-                    yield emit(evt_type, **evt_data)
-
-        finally:
-            set_active_event_callback(None)
-            set_active_project_context(None)
-            stream_db.close()
-
-        yield emit(
-            "agent_completed",
-            agent="main",
-            answer=final_answer,
-            sources=final_sources,
-            chunks=final_chunks,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=input_tokens + output_tokens,
-        )
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
 

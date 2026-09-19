@@ -36,6 +36,7 @@ def set_active_project_context(
     thread_id=None,
     resume_action=None,
     resume_feedback=None,
+    document_ids=None,
 ):
     global _global_active_project_ctx
     ctx = {
@@ -46,6 +47,7 @@ def set_active_project_context(
         "thread_id": thread_id,
         "resume_action": resume_action,
         "resume_feedback": resume_feedback,
+        "document_ids": document_ids,
     }
     with _global_project_lock:
         _global_active_project_ctx = ctx
@@ -167,6 +169,7 @@ async def project_search(query: str) -> dict:
     user_id = ctx.get("user_id") or 1
     user_role = ctx.get("user_role") or "owner"
     db = ctx.get("db")
+    document_ids = ctx.get("document_ids")
 
     close_db_on_exit = False
     if db is None:
@@ -187,6 +190,7 @@ async def project_search(query: str) -> dict:
             user_id=user_id,
             user_role=user_role,
             db=db,
+            document_ids=document_ids,
         )
         if not chunks:
             return {
