@@ -16,6 +16,7 @@ from document_acl import can_download_document, can_search_document
 from dependencies import get_current_user
 from models import (
     Chat,
+    ChatHistory,
     Document,
     DocumentVersion,
     Message,
@@ -28,6 +29,11 @@ from rag.orchestrator import run_pipeline
 import agentic.main_graph as main_graph
 from agentic.checkpointer import delete_checkpoint
 from agentic.tools import set_active_event_callback, set_active_project_context
+from agentic.memory.short_term.stm_db import (
+    load_chat_history,
+    extract_summary_text,
+    check_and_summarize_db,
+)
 
 
 router = APIRouter()
@@ -504,6 +510,11 @@ def delete_chat(
     db.query(Message).filter(
         Message.chat_id == chat.chat_id
     ).delete(synchronize_session=False)
+
+    db.query(ChatHistory).filter(
+        ChatHistory.chat_id == chat.chat_id
+    ).delete(synchronize_session=False)
+
     db.delete(chat)
     db.commit()
 
@@ -528,7 +539,8 @@ def list_messages(
     )
 
     messages = db.query(Message).filter(
-        Message.chat_id == chat.chat_id
+        Message.chat_id == chat.chat_id,
+        Message.role != "system"
     ).order_by(
         Message.created_at.asc(),
         Message.message_id.asc()
@@ -671,6 +683,14 @@ async def ask_chat(
         activities = []
 
         try:
+            # Check and load short-term memory
+            history_messages = check_and_summarize_db(db, chat.chat_id)
+            prior_history = [
+                m for m in history_messages
+                if not (isinstance(m, HumanMessage) and m.content == query)
+            ]
+            summary_ctx = extract_summary_text(prior_history)
+
             if not is_agent:
                 input_tokens = 0
                 output_tokens = 0
@@ -680,7 +700,9 @@ async def ask_chat(
                     project_id=chat.project_id,
                     user_id=user_id,
                     user_role=membership.role,
-                    db=db
+                    db=db,
+                    history=prior_history,
+                    summary_context=summary_ctx
                 ):
                     if event.get("type") == "debug" and event.get("step") == "intent":
                         final_intent = event.get("intent")
@@ -731,6 +753,9 @@ async def ask_chat(
                 chat.updated_at = func.now()
                 db.commit()
 
+                # Post-response memory check & compaction
+                check_and_summarize_db(db, chat.chat_id)
+
                 yield "event: done\ndata: complete\n\n"
 
             else:
@@ -739,7 +764,7 @@ async def ask_chat(
                 config = {"configurable": {"thread_id": thread_id}}
 
                 initial_state = {
-                    "messages": [HumanMessage(content=query)],
+                    "messages": [*prior_history, HumanMessage(content=query)],
                     "question": query,
                     "answer": "",
                     "reasoning": "",
@@ -896,6 +921,9 @@ async def ask_chat(
                 db.add(assistant_message)
                 chat.updated_at = func.now()
                 db.commit()
+
+                # Post-response memory check & compaction
+                check_and_summarize_db(db, chat.chat_id)
 
                 yield _emit_sse(
                     "agent_completed",

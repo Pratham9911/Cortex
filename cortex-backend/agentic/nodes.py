@@ -15,7 +15,7 @@ SYSTEM_PROMPT = SystemMessage(
         "You are a helpful, accurate Cortex AI assistant.\n"
         "You have specialized sub-agent tools and utility tools available:\n"
         "Do not Use subagents if not Necessary , if something is not clear tell the user\n"
-        "If Something Fails to get information from subagents , don't make up information , tell the user you don't have that\n"
+        "Do not keep on calling subagents if they fail to full fill  work , tell the user you don't have that \n"
         "Project Knowledge Instructions only (for info from retrieval_agent) :\n"
         "Treat KB info as Hightest valid information and output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it\n"
         "Citation Rule: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
@@ -99,15 +99,29 @@ def sanitize_messages(messages: list) -> list:
     return sanitized_messages
 
 
+from agentic.memory.short_term.stm_db import _HISTORY_BRIDGE
+
 async def chat_node(state: AnswerState) -> dict:
     print("\n========== CHAT NODE ==========")
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_messages(raw_messages)
 
-    if not clean_messages or not isinstance(clean_messages[0], SystemMessage):
+    # Ensure SYSTEM_PROMPT is always at index 0 if not present
+    if not clean_messages or clean_messages[0].content != SYSTEM_PROMPT.content:
         messages_to_send = [SYSTEM_PROMPT] + clean_messages
     else:
         messages_to_send = clean_messages
+
+    # If there is conversation history before the latest HumanMessage, inject _HISTORY_BRIDGE
+    if len(messages_to_send) >= 3:
+        # Check if bridge is already in messages
+        has_bridge = any(
+            isinstance(m, SystemMessage) and "Above is the conversation history" in (m.content or "")
+            for m in messages_to_send
+        )
+        if not has_bridge and isinstance(messages_to_send[-1], HumanMessage):
+            messages_to_send = messages_to_send[:-1] + [_HISTORY_BRIDGE, messages_to_send[-1]]
+
 
     print(f"\n--- MESSAGES SENT TO LLM (Count: {len(messages_to_send)}) ---")
     for i, msg in enumerate(messages_to_send):

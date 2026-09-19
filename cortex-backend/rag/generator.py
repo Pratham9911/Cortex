@@ -28,6 +28,7 @@ Your task is to answer the user's question using ONLY the provided project conte
 
 Instructions:
 - Give detailed and well-structured answers.
+- if memory is there , you can refer it to answer user question
 - MUST format your response using standard Markdown (e.g., headings, tables, bullet points, blockquotes).
 - Combine information from multiple retrieved chunks if needed.
 - Use bullet points or tables when appropriate.
@@ -68,8 +69,13 @@ generation_chain = (
 )
 
 
-def generate_answer_with_usage(query: str, chunks):
+from typing import Optional
+
+def generate_answer_with_usage(query: str, chunks, summary_context: Optional[str] = None):
     formatted_context_blocks = []
+
+    if summary_context:
+        formatted_context_blocks.append(f"[Conversation Summary / Prior Memory]\n{summary_context}")
 
     for chunk in chunks:
         doc_id = chunk.get("document_id")
@@ -89,7 +95,7 @@ def generate_answer_with_usage(query: str, chunks):
         formatted_context_blocks.append(f"{header}\n{content}")
 
     context = "\n\n".join(formatted_context_blocks)
-    print(f"\n\n\n\n[Answer is Getting Generated from Generator.py]\n\n\\n")
+    print(f"\n\n\n\n[Answer is Getting Generated from Generator.py]\n\n\n")
     prompt_value = prompt.invoke(
         {
             "query": query,
@@ -108,7 +114,8 @@ def generate_answer_with_usage(query: str, chunks):
     }
 
 
-def generate_answer(query: str, chunks):
+def generate_answer(query: str, chunks, summary_context: Optional[str] = None):
     """Backward-compatible answer-only wrapper."""
-    answer, _ = generate_answer_with_usage(query, chunks)
+    answer, _ = generate_answer_with_usage(query, chunks, summary_context=summary_context)
     return answer
+

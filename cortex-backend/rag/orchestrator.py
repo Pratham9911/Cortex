@@ -9,12 +9,18 @@ from rag.handlers import (
 )
 
 
+from typing import Optional
+from langchain_core.messages import BaseMessage
+
+
 def run_pipeline(
     query: str,
     project_id: int,
     user_id: int,
     user_role: str,
-    db
+    db,
+    history: Optional[list[BaseMessage]] = None,
+    summary_context: Optional[str] = None,
 ):
 
     # ----------------------------------------
@@ -26,7 +32,7 @@ def run_pipeline(
         "message": "Understanding your request..."
     }
 
-    intent_result = detect_intent(query)
+    intent_result = detect_intent(query, history=history)
 
     intent = intent_result["intent"]
     search_query = intent_result.get("query") or query
@@ -68,7 +74,8 @@ def run_pipeline(
             project_id=project_id,
             user_id=user_id,
             user_role=user_role,
-            db=db
+            db=db,
+            summary_context=summary_context
         ))
 
         return
@@ -79,7 +86,8 @@ def run_pipeline(
     if intent == "general_chat":
 
         yield from emit_handler_events(handle_general_chat(
-            query=query
+            query=query,
+            history=history
         ))
 
         return

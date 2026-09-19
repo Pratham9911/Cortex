@@ -106,6 +106,36 @@ class Message(Base):
     )
 
 
+class ChatHistory(Base):
+    __tablename__ = "chat_histories"
+
+    history_id = Column(Integer, primary_key=True, index=True)
+
+    chat_id = Column(
+        Integer,
+        ForeignKey("chats.chat_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+
+    summary = Column(String, nullable=False)
+
+    last_summarized_message_id = Column(Integer, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+
+
 class Document(Base):
     __tablename__ = "documents"
 

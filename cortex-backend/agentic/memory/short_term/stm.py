@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
-from summarizer import summarize_history
+from agentic.memory.short_term.summarizer import summarize_history
 
 
 class ShortTermMemory:

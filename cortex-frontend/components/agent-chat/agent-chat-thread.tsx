@@ -32,6 +32,9 @@ import type { ActivityItem, HITLPermissionState, Message, MessageSources, Thinki
 import { AgentThinkingIndicator } from "./agent-thinking-indicator"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks]
+const passthroughUrl = (url: string) => url
+
 type AgentChatThreadProps = {
   messages: Message[]
   isThinking: boolean
@@ -244,6 +247,26 @@ function InlineDocCitationBadge({
   onSourceAccessChanged?: () => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const handleMouseEnter = () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setIsOpen(true)
+  }
+
+  const handleMouseLeave = () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      setIsOpen(false)
+    }, 150)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
   const docSource = (sources?.documents ?? []).find((d) => d.document_id === docId)
 
   const fileName = docSource?.file_name
@@ -271,8 +294,8 @@ function InlineDocCitationBadge({
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         <span
-          onMouseEnter={() => setIsOpen(true)}
-          onMouseLeave={() => setIsOpen(false)}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
@@ -308,8 +331,8 @@ function InlineDocCitationBadge({
       </PopoverTrigger>
 
       <PopoverContent
-        onMouseEnter={() => setIsOpen(true)}
-        onMouseLeave={() => setIsOpen(false)}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         className={cn(
           "w-[320px] rounded-xl border p-3.5 shadow-2xl z-50 pointer-events-auto",
           isDark
@@ -369,7 +392,216 @@ export function AssistantMessageContent({
   sources?: MessageSources | null
   onSourceAccessChanged?: () => void
 }) {
-  const processedContent = preprocessCitationTokens(content)
+  const processedContent = React.useMemo(
+    () => preprocessCitationTokens(content),
+    [content]
+  )
+
+  const components = React.useMemo(
+    () => ({
+      h1: ({ children }: any) => <h1 className="text-base font-bold mt-4 mb-2 first:mt-0 text-zinc-900 dark:text-white">{children}</h1>,
+      h2: ({ children }: any) => <h2 className="text-[15px] font-semibold mt-3.5 mb-1.5 first:mt-0 text-zinc-900 dark:text-zinc-100">{children}</h2>,
+      h3: ({ children }: any) => <h3 className="text-[14px] font-semibold mt-3 mb-1 first:mt-0 text-zinc-900 dark:text-zinc-200">{children}</h3>,
+      p: ({ children }: any) => <p className="mb-2.5 last:mb-0 leading-relaxed">{children}</p>,
+      ul: ({ children }: any) => <ul className="list-disc pl-5 mb-2.5 space-y-1">{children}</ul>,
+      ol: ({ children }: any) => <ol className="list-decimal pl-5 mb-2.5 space-y-1">{children}</ol>,
+      li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
+      a: ({ href, children }: any) => {
+        const citation = extractDocCitationInfo(href, children)
+        if (citation) {
+          return (
+            <InlineDocCitationBadge
+              docId={citation.docId}
+              page={citation.page}
+              sources={sources}
+              isDark={isDark}
+              onSourceAccessChanged={onSourceAccessChanged}
+            />
+          )
+        }
+
+        let faviconUrl = ""
+        if (href && href.startsWith("http")) {
+          try {
+            const parsed = new URL(href)
+            faviconUrl = `https://www.google.com/s2/favicons?domain=${parsed.hostname}&sz=32`
+          } catch (e) {}
+        }
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              "inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-md border font-semibold transition-all shadow-2xs hover:scale-[1.01] hover:no-underline",
+              isDark
+                ? "bg-zinc-900/40 border-zinc-800 text-indigo-400 hover:bg-zinc-850 hover:text-indigo-350"
+                : "bg-slate-50 border-slate-200/80 text-indigo-650 hover:bg-slate-100 hover:text-indigo-600"
+            )}
+          >
+            {faviconUrl && (
+              <img src={faviconUrl} className="size-3.5 object-contain rounded-xs shrink-0" alt="" />
+            )}
+            <span>{children}</span>
+          </a>
+        )
+      },
+      strong: ({ children }: any) => <strong className="font-semibold text-zinc-900 dark:text-white">{children}</strong>,
+      em: ({ children }: any) => <em className="italic">{children}</em>,
+      pre: ({ children }: any) => {
+        let codeText = ""
+        try {
+          const codeElement = React.Children.only(children) as React.ReactElement<any>
+          codeText = codeElement.props.children as string
+        } catch (e) {
+          codeText = String(children)
+        }
+        return (
+          <div className="relative group my-3">
+            <pre className={cn(
+              "p-3 rounded-lg font-mono text-[12px] overflow-x-auto border",
+              isDark ? "bg-zinc-950 border-zinc-800 text-zinc-250" : "bg-slate-50 border-slate-200 text-slate-800"
+            )}>
+              {children}
+            </pre>
+            <CopyButton text={codeText} isDark={isDark} />
+          </div>
+        )
+      },
+      code: ({ className, children, ...props }: any) => {
+        const match = /language-(\w+)/.exec(className || "");
+        const inline = !match;
+        if (inline) {
+          const citation = extractDocCitationInfo(undefined, children)
+          if (citation) {
+            return (
+              <InlineDocCitationBadge
+                docId={citation.docId}
+                page={citation.page}
+                sources={sources}
+                isDark={isDark}
+                onSourceAccessChanged={onSourceAccessChanged}
+              />
+            )
+          }
+          return (
+            <code className={cn(
+              "px-1.5 py-0.5 rounded-md font-mono text-[12px]",
+              isDark ? "bg-zinc-800 text-zinc-200" : "bg-slate-100 text-slate-800"
+            )} {...props}>
+              {children}
+            </code>
+          )
+        }
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      },
+      blockquote: ({ children }: any) => (
+        <blockquote className={cn(
+          "pl-4 border-l-2 my-3 italic",
+          isDark ? "border-zinc-700 text-zinc-400" : "border-slate-300 text-slate-600"
+        )}>
+          {children}
+        </blockquote>
+      ),
+      table: ({ children }: any) => {
+        let tableText = ""
+        try {
+          const extractText = (node: React.ReactNode): string => {
+            if (!node) return ""
+            if (typeof node === "string" || typeof node === "number") return String(node)
+            if (Array.isArray(node)) return node.map(extractText).join("")
+            if (React.isValidElement<any>(node)) {
+              const type = node.type as any
+              const isCell = type === "td" || type === "th"
+              const isRow = type === "tr"
+              const cellContent = extractText((node as any).props.children)
+              if (isCell) return cellContent + "\t"
+              if (isRow) return cellContent.trimEnd() + "\n"
+              return cellContent
+            }
+            return ""
+          }
+          tableText = extractText(children).trim()
+        } catch (e) {}
+
+        return (
+          <div className="relative group my-3.5">
+            <div
+              className={cn(
+                "overflow-x-auto rounded-xl border shadow-sm",
+                isDark
+                  ? "border-zinc-700/70 bg-zinc-950/90 shadow-black/30 ring-1 ring-white/[0.04]"
+                  : "border-slate-200"
+              )}
+            >
+              <table className="w-full text-left border-collapse text-[12.5px]">
+                {children}
+              </table>
+            </div>
+            <CopyButton text={tableText} isDark={isDark} />
+          </div>
+        )
+      },
+      thead: ({ children }: any) => (
+        <thead
+          className={cn(
+            "border-b font-semibold",
+            isDark
+              ? "bg-zinc-800/95 border-zinc-600/60 text-zinc-50"
+              : "bg-slate-200 border-slate-300 text-slate-900"
+          )}
+        >
+          {children}
+        </thead>
+      ),
+      tbody: ({ children }: any) => (
+        <tbody className={cn(isDark && "[&_tr:nth-child(even)]:bg-zinc-900/45")}>
+          {children}
+        </tbody>
+      ),
+      tr: ({ children }: any) => (
+        <tr
+          className={cn(
+            "border-b last:border-b-0 transition-colors",
+            isDark
+              ? "border-zinc-800/90 bg-zinc-950/40 hover:bg-zinc-800/55"
+              : "border-slate-100 hover:bg-slate-100/60"
+          )}
+        >
+          {children}
+        </tr>
+      ),
+      th: ({ children }: any) => (
+        <th
+          className={cn(
+            "px-4 py-3 font-bold text-[11px] uppercase tracking-wider",
+            isDark
+              ? "text-zinc-100 border-r border-zinc-700/50 last:border-r-0 bg-zinc-800/95"
+              : ""
+          )}
+        >
+          <TableCellContent>{children}</TableCellContent>
+        </th>
+      ),
+      td: ({ children }: any) => (
+        <td
+          className={cn(
+            "px-4 py-2.5 transition-colors",
+            isDark
+              ? "text-zinc-300 border-r border-zinc-800/70 last:border-r-0"
+              : ""
+          )}
+        >
+          <TableCellContent>{children}</TableCellContent>
+        </td>
+      ),
+    }),
+    [isDark, sources, onSourceAccessChanged]
+  )
 
   return (
     <div className={cn(
@@ -377,210 +609,9 @@ export function AssistantMessageContent({
       isDark ? "prose-invert text-zinc-200" : "text-slate-800"
     )}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        urlTransform={(url) => url}
-        components={{
-          h1: ({ children }) => <h1 className="text-base font-bold mt-4 mb-2 first:mt-0 text-zinc-900 dark:text-white">{children}</h1>,
-          h2: ({ children }) => <h2 className="text-[15px] font-semibold mt-3.5 mb-1.5 first:mt-0 text-zinc-900 dark:text-zinc-100">{children}</h2>,
-          h3: ({ children }) => <h3 className="text-[14px] font-semibold mt-3 mb-1 first:mt-0 text-zinc-900 dark:text-zinc-200">{children}</h3>,
-          p: ({ children }) => <p className="mb-2.5 last:mb-0 leading-relaxed">{children}</p>,
-          ul: ({ children }) => <ul className="list-disc pl-5 mb-2.5 space-y-1">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal pl-5 mb-2.5 space-y-1">{children}</ol>,
-          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-          a: ({ href, children }) => {
-            const citation = extractDocCitationInfo(href, children)
-            if (citation) {
-              return (
-                <InlineDocCitationBadge
-                  docId={citation.docId}
-                  page={citation.page}
-                  sources={sources}
-                  isDark={isDark}
-                  onSourceAccessChanged={onSourceAccessChanged}
-                />
-              )
-            }
-
-            let faviconUrl = ""
-            if (href && href.startsWith("http")) {
-              try {
-                const parsed = new URL(href)
-                faviconUrl = `https://www.google.com/s2/favicons?domain=${parsed.hostname}&sz=32`
-              } catch (e) {}
-            }
-            return (
-              <a
-                href={href}
-                target="_blank"
-                rel="noreferrer"
-                className={cn(
-                  "inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-md border font-semibold transition-all shadow-2xs hover:scale-[1.01] hover:no-underline",
-                  isDark
-                    ? "bg-zinc-900/40 border-zinc-800 text-indigo-400 hover:bg-zinc-850 hover:text-indigo-350"
-                    : "bg-slate-50 border-slate-200/80 text-indigo-650 hover:bg-slate-100 hover:text-indigo-600"
-                )}
-              >
-                {faviconUrl && (
-                  <img src={faviconUrl} className="size-3.5 object-contain rounded-xs shrink-0" alt="" />
-                )}
-                <span>{children}</span>
-              </a>
-            )
-          },
-          strong: ({ children }) => <strong className="font-semibold text-zinc-900 dark:text-white">{children}</strong>,
-          em: ({ children }) => <em className="italic">{children}</em>,
-          pre: ({ children }) => {
-            let codeText = ""
-            try {
-              const codeElement = React.Children.only(children) as React.ReactElement<any>
-              codeText = codeElement.props.children as string
-            } catch (e) {
-              codeText = String(children)
-            }
-            return (
-              <div className="relative group my-3">
-                <pre className={cn(
-                  "p-3 rounded-lg font-mono text-[12px] overflow-x-auto border",
-                  isDark ? "bg-zinc-950 border-zinc-800 text-zinc-250" : "bg-slate-50 border-slate-200 text-slate-800"
-                )}>
-                  {children}
-                </pre>
-                <CopyButton text={codeText} isDark={isDark} />
-              </div>
-            )
-          },
-          code: ({ className, children, ...props }) => {
-            const match = /language-(\w+)/.exec(className || "");
-            const inline = !match;
-            if (inline) {
-              const citation = extractDocCitationInfo(undefined, children)
-              if (citation) {
-                return (
-                  <InlineDocCitationBadge
-                    docId={citation.docId}
-                    page={citation.page}
-                    sources={sources}
-                    isDark={isDark}
-                    onSourceAccessChanged={onSourceAccessChanged}
-                  />
-                )
-              }
-              return (
-                <code className={cn(
-                  "px-1.5 py-0.5 rounded-md font-mono text-[12px]",
-                  isDark ? "bg-zinc-800 text-zinc-200" : "bg-slate-100 text-slate-800"
-                )} {...props}>
-                  {children}
-                </code>
-              )
-            }
-            return (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            );
-          },
-          blockquote: ({ children }) => (
-            <blockquote className={cn(
-              "pl-4 border-l-2 my-3 italic",
-              isDark ? "border-zinc-700 text-zinc-400" : "border-slate-300 text-slate-600"
-            )}>
-              {children}
-            </blockquote>
-          ),
-          table: ({ children }) => {
-            let tableText = ""
-            try {
-              const extractText = (node: React.ReactNode): string => {
-                if (!node) return ""
-                if (typeof node === "string" || typeof node === "number") return String(node)
-                if (Array.isArray(node)) return node.map(extractText).join("")
-                if (React.isValidElement<any>(node)) {
-                  const type = node.type as any
-                  const isCell = type === "td" || type === "th"
-                  const isRow = type === "tr"
-                  const cellContent = extractText((node as any).props.children)
-                  if (isCell) return cellContent + "\t"
-                  if (isRow) return cellContent.trimEnd() + "\n"
-                  return cellContent
-                }
-                return ""
-              }
-              tableText = extractText(children).trim()
-            } catch (e) {}
-
-            return (
-              <div className="relative group my-3.5">
-                <div
-                  className={cn(
-                    "overflow-x-auto rounded-xl border shadow-sm",
-                    isDark
-                      ? "border-zinc-700/70 bg-zinc-950/90 shadow-black/30 ring-1 ring-white/[0.04]"
-                      : "border-slate-200"
-                  )}
-                >
-                  <table className="w-full text-left border-collapse text-[12.5px]">
-                    {children}
-                  </table>
-                </div>
-                <CopyButton text={tableText} isDark={isDark} />
-              </div>
-            )
-          },
-          thead: ({ children }) => (
-            <thead
-              className={cn(
-                "border-b font-semibold",
-                isDark
-                  ? "bg-zinc-800/95 border-zinc-600/60 text-zinc-50"
-                  : "bg-slate-200 border-slate-300 text-slate-900"
-              )}
-            >
-              {children}
-            </thead>
-          ),
-          tbody: ({ children }) => (
-            <tbody className={cn(isDark && "[&_tr:nth-child(even)]:bg-zinc-900/45")}>
-              {children}
-            </tbody>
-          ),
-          tr: ({ children }) => (
-            <tr
-              className={cn(
-                "border-b last:border-b-0 transition-colors",
-                isDark
-                  ? "border-zinc-800/90 bg-zinc-950/40 hover:bg-zinc-800/55"
-                  : "border-slate-100 hover:bg-slate-100/60"
-              )}
-            >
-              {children}
-            </tr>
-          ),
-          th: ({ children }) => (
-            <th
-              className={cn(
-                "px-4 py-3 font-bold text-[11px] uppercase tracking-wider",
-                isDark
-                  ? "text-zinc-100 border-r border-zinc-700/50 last:border-r-0 bg-zinc-800/95"
-                  : ""
-              )}
-            >
-              <TableCellContent>{children}</TableCellContent>
-            </th>
-          ),
-          td: ({ children }) => (
-            <td
-              className={cn(
-                "px-4 py-2.5 transition-colors",
-                isDark
-                  ? "text-zinc-300 border-r border-zinc-800/70 last:border-r-0"
-                  : ""
-              )}
-            >
-              <TableCellContent>{children}</TableCellContent>
-            </td>
-          ),
-        }}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+        urlTransform={passthroughUrl}
+        components={components}
       >
         {processedContent}
       </ReactMarkdown>

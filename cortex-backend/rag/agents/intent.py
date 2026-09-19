@@ -4,6 +4,10 @@ import json
 from langchain_fireworks import ChatFireworks
 
 
+from typing import Optional
+from langchain_core.messages import BaseMessage
+
+
 MODEL = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
 
 client = ChatFireworks(
@@ -23,7 +27,15 @@ VALID_INTENTS = {
     "multi_hop"
 }
 
-def detect_intent(query: str):
+def detect_intent(query: str, history: Optional[list[BaseMessage]] = None):
+
+    history_str = ""
+    if history:
+        history_lines = []
+        for m in history:
+            m_type = "User" if m.type == "human" else ("Memory" if m.type == "system" else "AI")
+            history_lines.append(f"{m_type}: {m.content}")
+        history_str = "\nConversation History / Context:\n" + "\n".join(history_lines) + "\n"
 
     prompt = f"""
 You are an intent classification agent.
@@ -86,7 +98,7 @@ Output:
 Query: "What have come in the latest Gemini release?"
 Output:
 {{"intent":"web_search","query":"Search the web for the latest Gemini release "}}
-
+{history_str}
 User Query:
 {query}
 """
@@ -108,6 +120,7 @@ User Query:
       intent = result.get("intent")
       print("Printing intent result from Fireworks API:")
       print(f"Detected intent: {intent}")
+      print(f"User Query: {response.content}")
       if intent not in VALID_INTENTS:
           intent = "project_knowledge"
 

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_fireworks import ChatFireworks
 
-from stm import ShortTermMemory
+from agentic.memory.short_term.stm import ShortTermMemory
 
 load_dotenv()
 

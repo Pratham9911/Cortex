@@ -115,15 +115,16 @@ open_items
 
 The conversation may start with a PERSISTENT MEMORY block — a prior summary.
   - Merge it with the new messages.
-  - Preserve existing user_information_and_preferences fully; only update if explicitly changed.
+  - Preserve existing user_information_and_preferences fully; only update / replace if explicitly changed.
   - For other sections: update stale facts, add new items, remove fully resolved items.
   - Mention each fact only once; no duplicates.
   - Prefer new information over old when they conflict.
+  - try to place imp and relevant items at the top of each section, less important items at the bottom and later can be removed if irrelevent.
 
 === QUALITY RULES ===
 
   - Keep bullets concise and factual.
-  - Drop useless filler ("User said hi", "Assistant acknowledged").
+  - Drop useless filler and old useless info to current context.
   - Do not copy messages verbatim; extract the useful information.
   - Do not invent facts not present in the conversation.
   - Never erase memory at the user's request.

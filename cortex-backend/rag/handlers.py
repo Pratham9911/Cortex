@@ -37,7 +37,11 @@ def _normal_answer(prompt: str):
     }
 
 
-def handle_general_chat(query):
+from typing import Optional
+from langchain_core.messages import BaseMessage
+
+
+def handle_general_chat(query: str, history: Optional[list[BaseMessage]] = None):
 
     yield {
         "type": "status",
@@ -45,12 +49,20 @@ def handle_general_chat(query):
         "message": "Generating response..."
     }
 
+    history_str = ""
+    if history:
+        history_lines = []
+        for m in history:
+            m_type = "User" if m.type == "human" else ("Memory" if m.type == "system" else "AI")
+            history_lines.append(f"{m_type}: {m.content}")
+        history_str = "Conversation History / Memory:\n" + "\n".join(history_lines) + "\n\n"
+
     answer, usage = _normal_answer(
-        f"""You are a helpful general-purpose assistant. Answer the user's
-question naturally and directly. This is not a project-knowledge retrieval
+        f"""You are a helpful general-purpose Cortex AI assistant. Answer the user's
+question naturally and directly. Refer to conversation history if relevant. This is not a project-knowledge retrieval
 request, so do not mention project documents or missing project context.
 
-User Query:
+{history_str}User Query:
 {query}"""
     )
 
@@ -61,6 +73,7 @@ User Query:
         "chunks": [],
         **usage,
     }
+
 
 def handle_suspicious(
     query
@@ -530,7 +543,8 @@ def handle_project_knowledge(
     user_id,
     user_role,
     db,
-    validate_response=True
+    validate_response=True,
+    summary_context=None
 ):
 
  
@@ -586,7 +600,7 @@ def handle_project_knowledge(
         "message": "Building a response..."
     }
 
-    answer, usage = generate_answer_with_usage(query, chunks)
+    answer, usage = generate_answer_with_usage(query, chunks, summary_context=summary_context)
 
     yield {
         "type": "final",
