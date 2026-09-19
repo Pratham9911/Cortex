@@ -49,6 +49,10 @@ function CortexAgentIcon({
   )
 }
 
+import { ProjectDocumentSelectModal, getFileFormatIcon } from "./project-document-select-modal"
+import type { ProjectDocumentItem } from "@/lib/ai-agent"
+import { Folder } from "lucide-react"
+
 type AgentChatComposerProps = {
   value: string
   onChange: (value: string) => void
@@ -59,6 +63,10 @@ type AgentChatComposerProps = {
   isAgentMode?: boolean
   setIsAgentMode?: (active: boolean) => void
   onOpenSettings?: () => void
+  projectId?: number
+  selectedDocs?: ProjectDocumentItem[]
+  onSelectDocs?: (docs: ProjectDocumentItem[]) => void
+  onRemoveDoc?: (docId: number) => void
 }
 
 const MAX_HEIGHT = 128
@@ -73,6 +81,10 @@ export function AgentChatComposer({
   isAgentMode = false,
   setIsAgentMode,
   onOpenSettings,
+  projectId = 1,
+  selectedDocs = [],
+  onSelectDocs,
+  onRemoveDoc,
 }: AgentChatComposerProps) {
   const maxChars = 4000
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -80,6 +92,7 @@ export function AgentChatComposer({
   const menuRef = useRef<HTMLDivElement>(null)
 
   const [menuOpen, setMenuOpen] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
 
   useEffect(() => {
@@ -120,6 +133,17 @@ export function AgentChatComposer({
 
   const menuItems = [
     {
+      id: "select-docs",
+      label: "Select project documents",
+      description: "Ask questions from specific documents",
+      icon: Folder,
+      action: () => {
+        setModalOpen(true)
+        setMenuOpen(false)
+        onChange(value.replace(/\/$/, ""))
+      },
+    },
+    {
       id: "upload",
       label: "Add photos & files",
       description: "Upload from computer",
@@ -136,6 +160,7 @@ export function AgentChatComposer({
       description: "multi-step reasoning agent",
       icon: (props: any) => <CortexAgentIcon invert={!isDark} {...props} />,
       action: () => {
+        setIsAgentMode?.(false)
         setIsAgentMode?.(true)
         setMenuOpen(false)
         onChange(value.replace(/\/$/, "").replace(/cortex-agent/i, "").trim())
@@ -197,6 +222,9 @@ export function AgentChatComposer({
     alert(`Selected ${files.length} file(s): ${Array.from(files).map((f) => f.name).join(", ")}`)
   }
 
+  const visibleDocs = selectedDocs.slice(0, 4)
+  const remainingCount = selectedDocs.length - 4
+
   return (
     <div className="relative shrink-0 px-10 pb-3 pt-1">
       <input
@@ -205,6 +233,16 @@ export function AgentChatComposer({
         onChange={handleFileChange}
         className="hidden"
         multiple
+      />
+
+      {/* Project Document Selection Modal */}
+      <ProjectDocumentSelectModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        projectId={projectId}
+        selectedDocs={selectedDocs}
+        onApplySelection={(docs) => onSelectDocs?.(docs)}
+        isDark={isDark}
       />
 
       {/* Slash / Plus Menu Popup */}
@@ -283,96 +321,160 @@ export function AgentChatComposer({
 
       {/* Main Composer Box Container with Purple Aurora Glow backdrop */}
       <div className="relative mx-auto w-full max-w-[52rem]">
-        {/* Animated Purple boundary glow (citation purple theme) when agent mode is active */}
-        {isAgentMode && (
-          <div
-            className="absolute -inset-[1.5px] rounded-[27px] bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-500 opacity-75 blur-[3px] animate-pulse pointer-events-none transition-all duration-300"
-          />
+        {/* Selected Documents Pill Cards Row (outside input bar glow wrapper) */}
+        {selectedDocs.length > 0 && (
+          <div className="flex items-center gap-2 mb-2.5 px-0.5 flex-wrap animate-in fade-in slide-in-from-bottom-1 duration-150">
+            {visibleDocs.map((doc) => {
+              const rawName = doc.title || doc.file_name
+              const truncatedName = rawName.length > 22 ? `${rawName.slice(0, 20)}...` : rawName
+              return (
+                <div
+                  key={doc.document_id}
+                  className={cn(
+                    "group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-medium transition-all shadow-2xs select-none cursor-default",
+                    isDark
+                      ? "bg-[#18181c] border-zinc-800 text-zinc-200 hover:border-zinc-700 hover:bg-zinc-800/80"
+                      : "bg-white border-slate-200/90 text-slate-800 hover:border-slate-300 hover:bg-slate-50/80"
+                  )}
+                >
+                  {getFileFormatIcon(doc.file_name, "size-4 shrink-0")}
+                  <span className="truncate max-w-[180px]" title={rawName}>
+                    {truncatedName}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onRemoveDoc?.(doc.document_id)
+                    }}
+                    className={cn(
+                      "opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all duration-150 cursor-pointer rounded-full p-0.5 border border-transparent select-none",
+                      isDark
+                        ? "text-zinc-400 hover:bg-red-950/80 hover:border-red-500/60 hover:text-red-300"
+                        : "text-slate-400 hover:bg-red-50 hover:border-red-200 hover:text-red-600"
+                    )}
+                    title="Remove document"
+                    aria-label={`Remove ${rawName} from selection`}
+                  >
+                    <X className="size-3.5 stroke-[2.5]" />
+                  </button>
+                </div>
+              )
+            })}
+
+            {/* At last of these docs, put more to select or view more button */}
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-xs font-medium transition-all cursor-pointer shadow-2xs",
+                isDark
+                  ? "bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-700 hover:text-white"
+                  : "bg-slate-100/80 border-slate-200 text-slate-700 hover:bg-slate-200/80 hover:text-slate-900"
+              )}
+            >
+              <span>{remainingCount > 0 ? `+${remainingCount} More` : "+ Select more"}</span>
+            </button>
+          </div>
         )}
 
-        <div
-          className={cn(
-            "relative flex w-full items-end gap-2 rounded-[26px] border p-2.5 transition-all duration-200",
-            isDark
-              ? isAgentMode
-                ? "border-indigo-500/60 bg-[#09090b] shadow-[0_0_30px_rgba(99,102,241,0.35)]"
-                : "border-zinc-800 bg-[#121214]"
-              : isAgentMode
-                ? "border-indigo-400 bg-white shadow-[0_0_25px_rgba(99,102,241,0.25)]"
-                : "border-slate-200 bg-white shadow-sm"
+        {/* Input Bar Wrapper with Glow (Glow wraps ONLY the input bar box, not the pill cards above) */}
+        <div className="relative">
+          {/* Animated Purple boundary glow when agent mode is active */}
+          {isAgentMode && (
+            <div
+              className="absolute -inset-[1.5px] rounded-[27px] bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-500 opacity-75 blur-[3px] animate-pulse pointer-events-none transition-all duration-300"
+            />
           )}
-        >
-          {/* Left-side action button: Plus button when normal, Cortex Agent icon button when active */}
-          {isAgentMode ? (
-            <div className="relative mb-0.5 shrink-0">
+
+          <div
+            className={cn(
+              "relative flex w-full items-end gap-2 rounded-[26px] border p-2.5 transition-all duration-200",
+              isDark
+                ? isAgentMode
+                  ? "border-indigo-500/60 bg-[#09090b] shadow-[0_0_30px_rgba(99,102,241,0.35)]"
+                  : "border-zinc-800 bg-[#121214]"
+                : isAgentMode
+                  ? "border-indigo-400 bg-white shadow-[0_0_25px_rgba(99,102,241,0.25)]"
+                  : "border-slate-200 bg-white shadow-sm"
+            )}
+          >
+            {/* Left-side action button: Plus button when normal, Cortex Agent icon button when active */}
+            {isAgentMode ? (
+              <div className="relative mb-0.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((prev) => !prev)}
+                  aria-label="Cortex agent active. Click to open menu."
+                  title="Cortex Agent Active"
+                  className={cn(
+                    "grid size-9 shrink-0 place-items-center rounded-full transition-all cursor-pointer border shadow-sm",
+                    isDark
+                      ? "bg-indigo-950/80 border-indigo-700/80 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.4)] hover:bg-indigo-900"
+                      : "bg-indigo-50 border-indigo-300 text-indigo-700 shadow-[0_0_12px_rgba(99,102,241,0.3)] hover:bg-indigo-100"
+                  )}
+                >
+                  <CortexAgentIcon className="size-5" invert={!isDark} pulse={true} />
+                </button>
+
+                {/* Small circle badge with X to cancel Cortex Agent */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsAgentMode?.(false)
+                  }}
+                  title="Deactivate Cortex Agent"
+                  aria-label="Deactivate Cortex Agent"
+                  className={cn(
+                    "absolute -top-1 -right-1 grid size-4.5 place-items-center rounded-full border transition-all cursor-pointer shadow-xs hover:scale-110 active:scale-95 z-10",
+                    isDark
+                      ? "bg-zinc-900 border-indigo-500/80 text-indigo-300 hover:bg-red-950 hover:border-red-500 hover:text-red-300"
+                      : "bg-white border-indigo-300 text-indigo-700 hover:bg-red-50 hover:border-red-400 hover:text-red-600"
+                  )}
+                >
+                  <X className="size-3 stroke-[2.5]" />
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
                 onClick={() => setMenuOpen((prev) => !prev)}
-                aria-label="Cortex agent active. Click to open menu."
-                title="Cortex Agent Active"
+                aria-label="Add attachment or open menu"
                 className={cn(
-                  "grid size-9 shrink-0 place-items-center rounded-full transition-all cursor-pointer border shadow-sm",
+                  "mb-0.5 grid size-9 shrink-0 place-items-center rounded-full transition-colors cursor-pointer",
                   isDark
-                    ? "bg-indigo-950/80 border-indigo-700/80 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.4)] hover:bg-indigo-900"
-                    : "bg-indigo-50 border-indigo-300 text-indigo-700 shadow-[0_0_12px_rgba(99,102,241,0.3)] hover:bg-indigo-100"
+                    ? "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 )}
               >
-                <CortexAgentIcon className="size-5" invert={!isDark} pulse={true} />
+                <Plus className="size-5" />
               </button>
-
-              {/* Small circle badge with X to cancel Cortex Agent */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setIsAgentMode?.(false)
-                }}
-                title="Deactivate Cortex Agent"
-                aria-label="Deactivate Cortex Agent"
-                className={cn(
-                  "absolute -top-1 -right-1 grid size-4.5 place-items-center rounded-full border transition-all cursor-pointer shadow-xs hover:scale-110 active:scale-95 z-10",
-                  isDark
-                    ? "bg-zinc-900 border-indigo-500/80 text-indigo-300 hover:bg-red-950 hover:border-red-500 hover:text-red-300"
-                    : "bg-white border-indigo-300 text-indigo-700 hover:bg-red-50 hover:border-red-400 hover:text-red-600"
-                )}
-              >
-                <X className="size-3 stroke-[2.5]" />
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setMenuOpen((prev) => !prev)}
-              aria-label="Add attachment or open menu"
-              className={cn(
-                "mb-0.5 grid size-9 shrink-0 place-items-center rounded-full transition-colors cursor-pointer",
-                isDark
-                  ? "text-zinc-400 hover:bg-zinc-800 hover:text-white"
-                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              )}
-            >
-              <Plus className="size-5" />
-            </button>
-          )}
-
-
-          {/* Input Textarea */}
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => handleInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={disabled}
-            placeholder={isAgentMode ? "Ask Cortex Agent multi-step reasoning..." : "Ask anything..."}
-            rows={1}
-            className={cn(
-              "min-h-[36px] max-h-32 flex-1 resize-none bg-transparent px-1 py-1.5 text-[13.5px] leading-relaxed outline-none",
-              "agent-composer-scroll",
-              isDark
-                ? "text-white placeholder:text-zinc-500"
-                : "text-slate-900 placeholder:text-slate-400"
             )}
-          />
+
+            {/* Input Textarea */}
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => handleInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={disabled}
+              placeholder={
+                selectedDocs.length > 0
+                  ? `Ask from ${selectedDocs.length} selected doc${selectedDocs.length === 1 ? "" : "s"}...`
+                  : isAgentMode
+                  ? "Ask Cortex Agent multi-step reasoning..."
+                  : "Ask anything..."
+              }
+              rows={1}
+              className={cn(
+                "min-h-[36px] max-h-32 flex-1 resize-none bg-transparent px-1 py-1.5 text-[13.5px] leading-relaxed outline-none",
+                "custom-scrollbar agent-composer-scroll",
+                isDark
+                  ? "text-white placeholder:text-zinc-500"
+                  : "text-slate-900 placeholder:text-slate-400"
+              )}
+            />
 
           {/* Action buttons (Mic & Send / Stop) */}
           <div className="flex items-center gap-1.5 mb-0.5 shrink-0">
@@ -433,6 +535,7 @@ export function AgentChatComposer({
         </div>
       </div>
     </div>
+  </div>
   )
 }
 

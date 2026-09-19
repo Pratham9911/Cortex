@@ -147,6 +147,30 @@ export async function listMessages(chatId: number): Promise<Message[]> {
   return messages.map((message) => toMessage(message))
 }
 
+export type ProjectDocumentItem = {
+  document_id: number
+  title: string
+  description?: string
+  file_name: string
+  file_size?: number
+  active_version?: number
+  folder_id?: number | null
+  folder_name?: string | null
+  allowed_team_ids?: number[]
+  allowed_team_names?: string[]
+  download_access_level?: string
+  search_access_level?: string
+  status?: string
+}
+
+export async function listProjectDocuments(projectId: number): Promise<ProjectDocumentItem[]> {
+  const response = await fetch(`${apiUrl}/projects/${projectId}/documents`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  })
+  return parseJsonResponse<ProjectDocumentItem[]>(response)
+}
+
 export async function downloadDocument(documentId: number): Promise<void> {
   const response = await fetch(`${apiUrl}/documents/${documentId}/download`, {
     headers: authHeaders(),
@@ -178,16 +202,20 @@ export async function stopChatExecution(
 export async function streamChatAsk(
   chatId: number,
   query: string,
-  options: { isAgent?: boolean; signal?: AbortSignal } & StreamCallbacks = {}
+  options: { isAgent?: boolean; documentIds?: number[]; signal?: AbortSignal } & StreamCallbacks = {}
 ): Promise<void> {
-  const { isAgent = false, signal, onEvent } = options
+  const { isAgent = false, documentIds, signal, onEvent } = options
   const response = await fetch(`${apiUrl}/chats/${chatId}/ask`, {
     method: "POST",
     headers: {
       ...authHeaders(),
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ query, is_agent: isAgent }),
+    body: JSON.stringify({
+      query,
+      is_agent: isAgent,
+      document_ids: documentIds && documentIds.length > 0 ? documentIds : undefined,
+    }),
     signal,
   })
 

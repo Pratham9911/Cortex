@@ -1,14 +1,13 @@
 import os
 import requests
-from google import genai
-from google.genai import types
 from sqlalchemy import text
 from models import TeamMember
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY1")
-)
 
-MODEL_NAME = "gemini-embedding-2"
+FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
+FIREWORKS_EMBEDDING_URL = "https://api.fireworks.ai/inference/v1/embeddings"
+EMBEDDING_MODEL_NAME = "fireworks/qwen3-embedding-8b"
+
+
 def reciprocal_rank_fusion(
     semantic_results,
     keyword_results,
@@ -70,18 +69,28 @@ def semantic_search(
 ):
 
     # ----------------------------------------
-    # 1. Generate query embedding
+    # 1. Generate query embedding via Fireworks AI
     # ----------------------------------------
-    response = client.models.embed_content(
-        model=MODEL_NAME,
-        contents=query,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_QUERY",
-            output_dimensionality=1024
-        )
-    )
+    headers = {
+        "Authorization": f"Bearer {os.getenv('FIREWORKS_API_KEY')}",
+        "Content-Type": "application/json"
+    }
 
-    query_embedding = response.embeddings[0].values
+    payload = {
+        "model": EMBEDDING_MODEL_NAME,
+        "input": query,
+        "dimensions": 1024
+    }
+
+    response = requests.post(
+        FIREWORKS_EMBEDDING_URL,
+        headers=headers,
+        json=payload
+    )
+    response.raise_for_status()
+
+    result = response.json()
+    query_embedding = result["data"][0]["embedding"]
 
     vector_str = "[" + ",".join(map(str, query_embedding)) + "]"
 

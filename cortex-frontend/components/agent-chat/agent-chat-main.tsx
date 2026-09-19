@@ -7,6 +7,8 @@ import { AgentChatComposer } from "./agent-chat-composer"
 import { AgentChatThread } from "./agent-chat-thread"
 import { AgentWelcomeView } from "./agent-welcome"
 
+import type { ProjectDocumentItem } from "@/lib/ai-agent"
+
 type AgentChatMainProps = {
   messages: Message[]
   prompts: PromptCard[]
@@ -29,6 +31,10 @@ type AgentChatMainProps = {
   onHITLResponse?: (decision: "yes" | "no" | "tell_agent", feedback?: string) => void
   isMessagesLoading?: boolean
   onStop?: () => void
+  projectId?: number
+  selectedDocs?: ProjectDocumentItem[]
+  onSelectDocs?: (docs: ProjectDocumentItem[]) => void
+  onRemoveDoc?: (docId: number) => void
 }
 
 function ThreadSkeleton({ isDark }: { isDark: boolean }) {
@@ -83,6 +89,10 @@ export function AgentChatMain({
   onHITLResponse,
   isMessagesLoading = false,
   onStop,
+  projectId = 1,
+  selectedDocs = [],
+  onSelectDocs,
+  onRemoveDoc,
 }: AgentChatMainProps) {
   return (
     <div
@@ -188,6 +198,10 @@ export function AgentChatMain({
         isDark={isDark}
         isAgentMode={isAgentMode}
         setIsAgentMode={setIsAgentMode}
+        projectId={projectId}
+        selectedDocs={selectedDocs}
+        onSelectDocs={onSelectDocs}
+        onRemoveDoc={onRemoveDoc}
       />
     </div>
   )

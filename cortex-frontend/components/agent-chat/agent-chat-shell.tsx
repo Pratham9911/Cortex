@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import { useAuth } from "@/components/auth/protected-route"
 import {
+  ProjectDocumentItem,
   createChat,
   deleteChat,
   listChats,
@@ -67,6 +68,12 @@ export function AgentChatShell() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [startedAt, setStartedAt] = useState<number>(Date.now())
   const [hitlPermission, setHitlPermission] = useState<HITLPermissionState | null>(null)
+  // Selected Documents Filter State
+  const [selectedDocs, setSelectedDocs] = useState<ProjectDocumentItem[]>([])
+  const handleRemoveDoc = useCallback((docId: number) => {
+    setSelectedDocs((prev) => prev.filter((d) => d.document_id !== docId))
+  }, [])
+
   // When user stops execution, suppress message polling for a few seconds so
   // the DB save can complete before we re-fetch (avoids overwriting local cancelled msg)
   const suppressRefreshUntilRef = useRef<number>(0)
@@ -313,6 +320,7 @@ export function AgentChatShell() {
       try {
         await streamChatAsk(targetChat.chatId, trimmed, {
           isAgent,
+          documentIds: selectedDocs.length > 0 ? selectedDocs.map((d) => d.document_id) : undefined,
           signal: controller.signal,
           onEvent: (event) => {
             const agentName = event.agent || "main"
@@ -510,7 +518,7 @@ export function AgentChatShell() {
         agentActivitiesRef.current = []
       }
     },
-    [activeChat, input, isAgentMode, isThinking, refreshChats, replaceChatMessages]
+    [activeChat, input, isAgentMode, isThinking, refreshChats, replaceChatMessages, selectedDocs]
   )
 
   const handleHITLResponse = useCallback(
@@ -729,6 +737,10 @@ export function AgentChatShell() {
         onHITLResponse={(decision, feedback) => void handleHITLResponse(decision, feedback)}
         isMessagesLoading={Boolean(activeChatId && loadingChatId === activeChatId)}
         onStop={handleStop}
+        projectId={selectedProjectId() || 1}
+        selectedDocs={selectedDocs}
+        onSelectDocs={setSelectedDocs}
+        onRemoveDoc={handleRemoveDoc}
       />
     </div>
   )

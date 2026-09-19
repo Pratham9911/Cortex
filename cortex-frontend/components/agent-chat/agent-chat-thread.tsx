@@ -44,6 +44,7 @@ type AgentChatThreadProps = {
   isAgentMode?: boolean
   hitlPermission?: HITLPermissionState | null
   onHITLResponse?: (decision: "yes" | "no" | "tell_agent", feedback?: string) => void
+  activeChatId?: string | null
 }
 
 
