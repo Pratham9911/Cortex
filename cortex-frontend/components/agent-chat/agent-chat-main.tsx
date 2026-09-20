@@ -13,15 +13,16 @@ type AgentChatMainProps = {
   messages: Message[]
   prompts: PromptCard[]
   thinkingEvents: ThinkingEvent[]
-  input: string
-  onInputChange: (value: string) => void
   onSend: (text?: string, isAgentMode?: boolean) => void
   onNewChat: () => void
   isThinking: boolean
+  isPipelineRunning?: boolean
   isDark: boolean
   userInitials: string
   activeChatTitle?: string
   activeChatId?: string | null
+  hasMoreMessages?: boolean
+  onLoadOlder?: (beforeMessageId: number) => Promise<{ messages: Message[]; hasMore: boolean }>
   onSourceAccessChanged?: () => void
   isAgentMode?: boolean
   setIsAgentMode?: (active: boolean) => void
@@ -71,15 +72,16 @@ export function AgentChatMain({
   messages,
   prompts,
   thinkingEvents,
-  input,
-  onInputChange,
   onSend,
   onNewChat,
   isThinking,
+  isPipelineRunning = isThinking,
   isDark,
   userInitials,
   activeChatTitle,
   activeChatId,
+  hasMoreMessages = false,
+  onLoadOlder,
   onSourceAccessChanged,
   isAgentMode = false,
   setIsAgentMode,
@@ -186,15 +188,15 @@ export function AgentChatMain({
           hitlPermission={hitlPermission}
           onHITLResponse={onHITLResponse}
           activeChatId={activeChatId}
+          hasMoreMessages={hasMoreMessages}
+          onLoadOlder={onLoadOlder}
         />
       )}
 
       <AgentChatComposer
-        value={input}
-        onChange={onInputChange}
-        onSend={(isAgent) => onSend(undefined, isAgent ?? isAgentMode)}
+        onSend={(text, isAgent) => onSend(text, isAgent ?? isAgentMode)}
         onStop={onStop}
-        disabled={isThinking}
+        disabled={isPipelineRunning}
         isDark={isDark}
         isAgentMode={isAgentMode}
         setIsAgentMode={setIsAgentMode}

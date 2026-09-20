@@ -51,6 +51,7 @@ export type ChatSession = {
   avatarLetter: string
   avatarColor: string
   messages: Message[]
+  hasMoreMessages?: boolean
   isImageIcon?: boolean
 }
 

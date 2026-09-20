@@ -54,9 +54,7 @@ import type { ProjectDocumentItem } from "@/lib/ai-agent"
 import { Folder } from "lucide-react"
 
 type AgentChatComposerProps = {
-  value: string
-  onChange: (value: string) => void
-  onSend: (isAgentMode?: boolean) => void
+  onSend: (text: string, isAgentMode?: boolean) => void
   onStop?: () => void
   disabled?: boolean
   isDark: boolean
@@ -72,8 +70,6 @@ type AgentChatComposerProps = {
 const MAX_HEIGHT = 128
 
 export function AgentChatComposer({
-  value,
-  onChange,
   onSend,
   onStop,
   disabled,
@@ -90,6 +86,7 @@ export function AgentChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const [value, setValue] = useState("")
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
@@ -108,7 +105,7 @@ export function AgentChatComposer({
   // Handle slash '/' trigger in typing
   const handleInputChange = (newValue: string) => {
     const trimmed = newValue.slice(0, maxChars)
-    onChange(trimmed)
+    setValue(trimmed)
 
     // Open menu only if user types a standalone slash '/' (e.g. "/" or ending with " /")
     const isStandaloneSlash = trimmed === "/" || trimmed.endsWith(" /")
@@ -140,7 +137,7 @@ export function AgentChatComposer({
       action: () => {
         setModalOpen(true)
         setMenuOpen(false)
-        onChange(value.replace(/\/$/, ""))
+        setValue(value.replace(/\/$/, ""))
       },
     },
     {
@@ -151,7 +148,7 @@ export function AgentChatComposer({
       action: () => {
         fileInputRef.current?.click()
         setMenuOpen(false)
-        onChange(value.replace(/\/$/, ""))
+        setValue(value.replace(/\/$/, ""))
       },
     },
     {
@@ -163,7 +160,7 @@ export function AgentChatComposer({
         setIsAgentMode?.(false)
         setIsAgentMode?.(true)
         setMenuOpen(false)
-        onChange(value.replace(/\/$/, "").replace(/cortex-agent/i, "").trim())
+        setValue(value.replace(/\/$/, "").replace(/cortex-agent/i, "").trim())
       },
     },
     {
@@ -174,7 +171,7 @@ export function AgentChatComposer({
       action: () => {
         onOpenSettings?.()
         setMenuOpen(false)
-        onChange(value.replace(/\/$/, ""))
+        setValue(value.replace(/\/$/, ""))
       },
     },
   ]
@@ -211,7 +208,8 @@ export function AgentChatComposer({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       if (value.trim() && !disabled) {
-        onSend(isAgentMode)
+        onSend(value, isAgentMode)
+        setValue("")
       }
     }
   }
@@ -511,7 +509,8 @@ export function AgentChatComposer({
                 type="button"
                 onClick={() => {
                   if (value.trim() && !disabled) {
-                    onSend(isAgentMode)
+                    onSend(value, isAgentMode)
+                    setValue("")
                   }
                 }}
                 disabled={!value.trim()}

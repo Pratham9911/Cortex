@@ -45,6 +45,8 @@ type AgentChatThreadProps = {
   hitlPermission?: HITLPermissionState | null
   onHITLResponse?: (decision: "yes" | "no" | "tell_agent", feedback?: string) => void
   activeChatId?: string | null
+  hasMoreMessages?: boolean
+  onLoadOlder?: (beforeMessageId: number) => Promise<{ messages: Message[]; hasMore: boolean }>
 }
 
 
@@ -1398,10 +1400,13 @@ export function AgentChatThread({
   isAgentMode = false,
   hitlPermission = null,
   onHITLResponse,
+  hasMoreMessages = false,
+  onLoadOlder,
 }: AgentChatThreadProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const previousMessageCountRef = useRef(messages.length)
+  const loadingOlderRef = useRef(false)
 
   const getViewport = () => {
     return scrollRef.current?.querySelector<HTMLDivElement>("[data-slot=scroll-area-viewport]")
@@ -1418,10 +1423,25 @@ export function AgentChatThread({
     }
 
     updateStickiness()
-    viewport.addEventListener("scroll", updateStickiness, { passive: true })
+    const handleScroll = () => {
+      updateStickiness()
+      const oldestMessageId = messages[0]?.messageId
+      if (viewport.scrollTop < 120 && hasMoreMessages && onLoadOlder && oldestMessageId && !loadingOlderRef.current) {
+        loadingOlderRef.current = true
+        const previousScrollHeight = viewport.scrollHeight
+        void onLoadOlder(oldestMessageId).then(() => {
+          requestAnimationFrame(() => {
+            viewport.scrollTop += viewport.scrollHeight - previousScrollHeight
+          })
+        }).finally(() => {
+          loadingOlderRef.current = false
+        })
+      }
+    }
+    viewport.addEventListener("scroll", handleScroll, { passive: true })
 
-    return () => viewport.removeEventListener("scroll", updateStickiness)
-  }, [])
+    return () => viewport.removeEventListener("scroll", handleScroll)
+  }, [hasMoreMessages, messages, onLoadOlder])
 
   useLayoutEffect(() => {
     const viewport = getViewport()

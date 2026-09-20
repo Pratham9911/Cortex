@@ -138,13 +138,23 @@ export async function updateChatTitle(
   return toChatSession(data.chat)
 }
 
-export async function listMessages(chatId: number): Promise<Message[]> {
-  const response = await fetch(`${apiUrl}/chats/${chatId}/messages`, {
+export type MessagePage = { messages: Message[]; hasMore: boolean }
+
+export async function listMessages(
+  chatId: number,
+  options: { beforeMessageId?: number; limit?: number } = {}
+): Promise<MessagePage> {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 20) })
+  if (options.beforeMessageId != null) params.set("before_message_id", String(options.beforeMessageId))
+  const response = await fetch(`${apiUrl}/chats/${chatId}/messages?${params.toString()}`, {
     headers: authHeaders(),
     cache: "no-store",
   })
   const messages = await parseJsonResponse<ApiMessage[]>(response)
-  return messages.map((message) => toMessage(message))
+  return {
+    messages: messages.map((message) => toMessage(message)),
+    hasMore: response.headers.get("X-Has-More") === "true",
+  }
 }
 
 export type ProjectDocumentItem = {

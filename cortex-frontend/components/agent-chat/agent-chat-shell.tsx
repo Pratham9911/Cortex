@@ -55,8 +55,8 @@ export function AgentChatShell() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [isChatsLoading, setIsChatsLoading] = useState(true)
   const [loadingChatId, setLoadingChatId] = useState<string | null>(null)
-  const [input, setInput] = useState("")
   const [isThinking, setIsThinking] = useState(false)
+  const [executionChatId, setExecutionChatId] = useState<string | null>(null)
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([])
   const [promptPoolIndex] = useState(0)
 
@@ -93,6 +93,7 @@ export function AgentChatShell() {
   const isDark = mounted && theme === "dark"
   const userInitials = user?.name ? user.name.slice(0, 2).toUpperCase() : "U"
   const activeChat = activeChatId ? chats.find((c) => c.id === activeChatId) : null
+  const isActiveChatThinking = isThinking && executionChatId === activeChatId
 
   const replaceChatMessages = useCallback((chatId: number, messages: Message[]) => {
     setChats((prev) =>
@@ -105,6 +106,47 @@ export function AgentChatShell() {
           : chat
       )
     )
+  }, [])
+
+  const mergeChatMessages = useCallback((chatId: number, messages: Message[], hasMoreMessages?: boolean) => {
+    setChats((prev) => prev.map((chat) => {
+      if (chat.chatId !== chatId) return chat
+      const existingMessages = [...chat.messages]
+
+      messages.forEach((message) => {
+        const optimisticIndex = existingMessages.findIndex(
+          (existing) =>
+            existing.messageId == null &&
+            existing.role === message.role &&
+            existing.content === message.content
+        )
+        if (optimisticIndex !== -1) existingMessages.splice(optimisticIndex, 1)
+        existingMessages.push(message)
+      })
+
+      const byId = new Map(existingMessages.map((message) => [message.id, message]))
+      return {
+        ...chat,
+        messages: Array.from(byId.values()).sort(
+          (left, right) => (left.messageId ?? Number.MAX_SAFE_INTEGER) - (right.messageId ?? Number.MAX_SAFE_INTEGER)
+        ),
+        hasMoreMessages: hasMoreMessages ?? chat.hasMoreMessages,
+      }
+    }))
+  }, [])
+
+  const loadOlderMessages = useCallback(async (chatId: number, beforeMessageId: number) => {
+    const page = await listMessages(chatId, { beforeMessageId })
+    setChats((prev) => prev.map((chat) => {
+      if (chat.chatId !== chatId) return chat
+      const existingIds = new Set(chat.messages.map((message) => message.id))
+      return {
+        ...chat,
+        messages: [...page.messages.filter((message) => !existingIds.has(message.id)), ...chat.messages],
+        hasMoreMessages: page.hasMore,
+      }
+    }))
+    return page
   }, [])
 
   const refreshChats = useCallback(async () => {
@@ -120,6 +162,7 @@ export function AgentChatShell() {
         loadedChats.map((chat) => ({
           ...chat,
           messages: prev.find((item) => item.chatId === chat.chatId)?.messages ?? [],
+          hasMoreMessages: prev.find((item) => item.chatId === chat.chatId)?.hasMoreMessages,
         }))
       )
     } finally {
@@ -135,9 +178,9 @@ export function AgentChatShell() {
     const chat = chats.find((item) => item.id === activeChatId)
     if (!chat) return
 
-    const messages = await listMessages(chat.chatId)
-    replaceChatMessages(chat.chatId, messages)
-  }, [activeChatId, chats, isThinking, replaceChatMessages])
+    const page = await listMessages(chat.chatId)
+    mergeChatMessages(chat.chatId, page.messages, page.hasMore)
+  }, [activeChatId, chats, isThinking, mergeChatMessages])
 
   useEffect(() => {
     void refreshChats()
@@ -181,7 +224,6 @@ export function AgentChatShell() {
 
   const handleNewChat = useCallback(() => {
     setActiveChatId(null)
-    setInput("")
     setThinkingEvents([])
     setAgentActivities([])
     setHitlPermission(null)
@@ -193,7 +235,6 @@ export function AgentChatShell() {
       if (!chat) return
 
       setActiveChatId(id)
-      setInput("")
       setThinkingEvents([])
       setAgentActivities([])
       setHitlPermission(null)
@@ -203,14 +244,17 @@ export function AgentChatShell() {
       }
 
       void listMessages(chat.chatId)
-        .then((messages) => {
-          replaceChatMessages(chat.chatId, messages)
+        .then((page) => {
+          setChats((prev) => prev.map((item) => item.chatId === chat.chatId
+            ? { ...item, messages: page.messages, hasMoreMessages: page.hasMore }
+            : item
+          ))
         })
         .finally(() => {
           setLoadingChatId(null)
         })
     },
-    [chats, replaceChatMessages]
+    [chats]
   )
 
   const handleRenameChat = useCallback(
@@ -244,7 +288,6 @@ export function AgentChatShell() {
 
       if (deletedActiveChat) {
         setActiveChatId(null)
-        setInput("")
         setThinkingEvents([])
         setAgentActivities([])
         setHitlPermission(null)
@@ -273,6 +316,7 @@ export function AgentChatShell() {
     }
 
     setIsThinking(false)
+    setExecutionChatId(null)
     setThinkingEvents([])
     setAgentActivities([])
     agentActivitiesRef.current = []
@@ -280,7 +324,7 @@ export function AgentChatShell() {
 
   const handleSend = useCallback(
     async (text?: string, forceIsAgent?: boolean) => {
-      const trimmed = (text ?? input).trim()
+      const trimmed = text?.trim() ?? ""
       if (!trimmed || isThinking) return
 
       const projectId = selectedProjectId()
@@ -291,7 +335,6 @@ export function AgentChatShell() {
       const controller = new AbortController()
       abortControllerRef.current = controller
 
-      setInput("")
       setIsThinking(true)
       setThinkingEvents([])
       agentActivitiesRef.current = []
@@ -306,6 +349,8 @@ export function AgentChatShell() {
         setChats((prev) => [targetChat!, ...prev])
         setActiveChatId(targetChat.id)
       }
+
+      setExecutionChatId(targetChat.id)
 
       const userMessage = optimisticUserMessage(trimmed)
       replaceChatMessages(targetChat.chatId, [
@@ -467,6 +512,7 @@ export function AgentChatShell() {
                 assistantMessage,
               ])
               setIsThinking(false)
+              setExecutionChatId(null)
               setThinkingEvents([])
               setAgentActivities([])
               agentActivitiesRef.current = []
@@ -513,12 +559,13 @@ export function AgentChatShell() {
         ])
       } finally {
         setIsThinking(false)
+        setExecutionChatId(null)
         setThinkingEvents([])
         setAgentActivities([])
         agentActivitiesRef.current = []
       }
     },
-    [activeChat, input, isAgentMode, isThinking, refreshChats, replaceChatMessages, selectedDocs]
+    [activeChat, activeChatId, executionChatId, isAgentMode, isThinking, refreshChats, replaceChatMessages, selectedDocs]
   )
 
   const handleHITLResponse = useCallback(
@@ -534,6 +581,7 @@ export function AgentChatShell() {
       const targetChat = activeChat
       setHitlPermission(null)
       setIsThinking(true)
+      setExecutionChatId(activeChat.id)
       const startTime = performance.now()
       let hitlAssistantMsg: Message | null = null
 
@@ -657,6 +705,7 @@ export function AgentChatShell() {
                 assistantMessage,
               ])
               setIsThinking(false)
+              setExecutionChatId(null)
               setThinkingEvents([])
               setAgentActivities([])
               agentActivitiesRef.current = []
@@ -689,6 +738,7 @@ export function AgentChatShell() {
         console.error("HITL resume error", e)
       } finally {
         setIsThinking(false)
+        setExecutionChatId(null)
         setThinkingEvents([])
         setAgentActivities([])
         agentActivitiesRef.current = []
@@ -718,20 +768,23 @@ export function AgentChatShell() {
       <AgentChatMain
         messages={activeChat?.messages ?? []}
         prompts={PROMPT_POOLS[promptPoolIndex]}
-        thinkingEvents={thinkingEvents}
-        input={input}
-        onInputChange={setInput}
+        thinkingEvents={isActiveChatThinking ? thinkingEvents : []}
         onSend={(text, forceIsAgent) => void handleSend(text, forceIsAgent)}
         onNewChat={handleNewChat}
-        isThinking={isThinking}
+        isThinking={isActiveChatThinking}
+        isPipelineRunning={isThinking}
         isDark={isDark}
         userInitials={userInitials}
         activeChatTitle={activeChat?.title}
         activeChatId={activeChatId}
+        hasMoreMessages={activeChat?.hasMoreMessages}
+        onLoadOlder={activeChatId
+          ? (beforeMessageId: number) => loadOlderMessages(Number(activeChatId), beforeMessageId)
+          : undefined}
         onSourceAccessChanged={() => void refreshActiveMessages()}
         isAgentMode={isAgentMode}
         setIsAgentMode={setIsAgentMode}
-        agentActivities={agentActivities}
+        agentActivities={isActiveChatThinking ? agentActivities : []}
         elapsedSeconds={elapsedSeconds}
         hitlPermission={hitlPermission}
         onHITLResponse={(decision, feedback) => void handleHITLResponse(decision, feedback)}

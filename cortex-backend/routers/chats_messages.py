@@ -4,7 +4,7 @@ from uuid import uuid4
 from typing import Optional
 
 import json
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -528,6 +528,8 @@ def delete_chat(
 def list_messages(
     chat_id: int,
     response: Response,
+    limit: int = Query(default=20, ge=1, le=100),
+    before_message_id: Optional[int] = Query(default=None, ge=1),
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -539,13 +541,20 @@ def list_messages(
         user_id=user_id
     )
 
-    messages = db.query(Message).filter(
+    query = db.query(Message).filter(
         Message.chat_id == chat.chat_id,
         Message.role != "system"
-    ).order_by(
-        Message.created_at.asc(),
-        Message.message_id.asc()
-    ).all()
+    )
+    if before_message_id is not None:
+        query = query.filter(Message.message_id < before_message_id)
+
+    messages = query.order_by(
+        Message.created_at.desc(),
+        Message.message_id.desc()
+    ).limit(limit + 1).all()
+    has_more = len(messages) > limit
+    response.headers["X-Has-More"] = "true" if has_more else "false"
+    messages = list(reversed(messages[:limit]))
 
     return [
         _serialize_message(
