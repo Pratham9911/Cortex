@@ -3,9 +3,16 @@
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { useTheme } from "next-themes"
-import { Check, Loader2, Mail, Search, Trash2, UserPlus } from "lucide-react"
+import {
+  Check,
+  Loader2,
+  Mail,
+  Plus,
+  Search,
+  Trash2,
+  UserPlus,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -17,6 +24,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useAuth } from "@/components/auth/protected-route"
+import { DiscussionsTab } from "@/components/teams/discussions-tab"
+import { FilesTab } from "@/components/teams/files-tab"
+import { OverviewTab } from "@/components/teams/overview-tab"
+import { TasksTab } from "@/components/teams/tasks-tab"
+import { TeamTabs, type TeamTabName } from "@/components/teams/team-tabs"
+import { TimelinesTab } from "@/components/teams/timelines-tab"
 
 type TeamMember = {
   user_id: number
@@ -59,7 +72,6 @@ export default function TeamDetailPage() {
   const [currentUserRole, setCurrentUserRole] = useState<"admin" | "member">("member")
   const [members, setMembers] = useState<TeamMember[]>([])
   const [error, setError] = useState("")
-  const [memberQuery, setMemberQuery] = useState("")
   const [memberDetailsOpen, setMemberDetailsOpen] = useState(false)
   const [memberDetails, setMemberDetails] = useState<MemberDetails | null>(null)
   const [memberDetailsLoading, setMemberDetailsLoading] = useState(false)
@@ -82,6 +94,7 @@ export default function TeamDetailPage() {
   const [teamAddSuccess, setTeamAddSuccess] = useState("")
   const [addingTeamMemberId, setAddingTeamMemberId] = useState<number | null>(null)
   const [removingTeamMemberId, setRemovingTeamMemberId] = useState<number | null>(null)
+  const [activeTab, setActiveTab] = useState<TeamTabName>("Tasks")
 
   const getInitials = (name: string) => {
     const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -288,20 +301,13 @@ export default function TeamDetailPage() {
 
   const canInvite = teamName.trim().toLowerCase() === "general" && currentUserRole === "admin"
   const isGeneralTeam = teamName.trim().toLowerCase() === "general"
-  const filteredMembers = members
-    .filter((member) => {
-      const q = memberQuery.trim().toLowerCase()
-      if (!q) return true
-      return member.name.toLowerCase().includes(q) || member.email.toLowerCase().includes(q)
-    })
-    .sort((a, b) => {
-      if (a.role !== b.role) {
-        if (a.role === "admin") return -1
-        if (b.role === "admin") return 1
-      }
-      return a.name.localeCompare(b.name)
-    })
-
+  const teamTag = isGeneralTeam ? "Core team" : "Website"
+  const fallbackHeaderMembers: TeamMember[] = [
+    { user_id: -1, name: "Pratham Tiwari", email: "pratham@example.com" },
+    { user_id: -2, name: "Alex Kim", email: "alex@example.com" },
+  ]
+  const headerMembers = [...members, ...fallbackHeaderMembers].slice(0, 2)
+  const extraMemberLabel = members.length > 2 ? `+${members.length - 2}` : "+5"
   const openMemberDetails = async (member: TeamMember) => {
     setMemberDetailsOpen(true)
     setMemberDetails(member.role && member.joined_at ? { ...member, role: member.role, joined_at: member.joined_at, teams: [], can_remove: false } : null)
@@ -414,134 +420,45 @@ export default function TeamDetailPage() {
   }
 
   return (
-    <section className="space-y-4">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Team</p>
-          <h1 className={cn("mt-2 text-3xl md:text-5xl font-bold tracking-tight", isDark ? "text-white" : "text-zinc-900")}>
-            {teamName}
-          </h1>
-        </div>
-        {canInvite && (
-          <Button
-            onClick={() => {
-              resetInviteDialog()
-              setInviteOpen(true)
-            }}
-            className="h-10 rounded-xl bg-violet-600 px-5 text-white shadow-lg shadow-violet-600/20 hover:bg-violet-500"
-          >
-            <UserPlus className="mr-2 size-4" />
-            Invite member
-          </Button>
-        )}
-        {!isGeneralTeam && currentUserRole === "admin" && (
-          <Button
-            onClick={() => {
-              resetTeamAddDialog()
-              setTeamAddOpen(true)
-            }}
-            className="h-10 rounded-xl bg-violet-600 px-5 text-white shadow-lg shadow-violet-600/20 hover:bg-violet-500"
-          >
-            <UserPlus className="mr-2 size-4" />
-            Add member
-          </Button>
-        )}
-      </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <p className={cn("text-sm", isDark ? "text-zinc-400" : "text-zinc-600")}>
-        Members: {members.length}
-      </p>
-
-      <Card className={cn("border rounded-2xl p-4", isDark ? "border-zinc-800 bg-[#171920]" : "border-zinc-200 bg-white")}>
-        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className={cn("text-base font-semibold", isDark ? "text-zinc-100" : "text-zinc-900")}>
-            {isGeneralTeam ? "Project Members" : "Team Members"}
-          </h2>
-          {isGeneralTeam && (
-            <div className="relative sm:w-80">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-              <Input
-                value={memberQuery}
-                onChange={(event) => setMemberQuery(event.target.value)}
-                placeholder="Search members"
-                className={cn("h-9 rounded-xl pl-9 text-sm", isDark ? "border-zinc-700 bg-zinc-900/60" : "")}
-              />
+    <section className={cn("flex h-[calc(100vh-0rem)] min-h-0 flex-col overflow-hidden", isDark ? "bg-[#0d0f10]" : "bg-[#f8fafb]")}>
+      <div className={cn("relative z-20 shrink-0 border-b px-5 pt-3 sm:px-6 sm:pt-4", isDark ? "border-zinc-800/80 bg-[#0d0f10]" : "border-slate-200 bg-white")}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={cn("flex size-5 items-center justify-center rounded-md border-2 text-[9px]", isDark ? "border-white text-white" : "border-black text-black")}>□</span>
+              <h1 className={cn("truncate text-xl font-bold tracking-tight sm:text-2xl", isDark ? "text-white" : "text-slate-900")}>{teamName}</h1>
             </div>
-          )}
-        </div>
-        <div className="space-y-2">
-          {filteredMembers.map((member) => (
-            <button
-              key={member.user_id}
-              type="button"
-              onClick={() => isGeneralTeam ? openMemberDetails(member) : undefined}
-              className={cn(
-                "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition-colors",
-                isDark ? "border-zinc-700 bg-zinc-900/30 hover:bg-zinc-800/70" : "border-zinc-200 bg-zinc-50 hover:bg-slate-100",
-                !isGeneralTeam && "cursor-default"
-              )}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="w-8 h-8 rounded-full bg-sky-500 text-white text-[10px] font-bold flex items-center justify-center uppercase overflow-hidden shrink-0">
-                  {member.avatar_url ? (
-                    <img
-                      src={member.avatar_url}
-                      alt={member.name}
-                      className="h-full w-full object-cover"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none"
-                        const fallback = e.currentTarget.nextElementSibling as HTMLElement
-                        if (fallback) fallback.style.display = "flex"
-                      }}
-                    />
-                  ) : null}
-                  <span
-                    className="h-full w-full items-center justify-center flex"
-                    style={member.avatar_url ? { display: "none" } : {}}
-                  >
-                    {getInitials(member.name)}
-                  </span>
+            <div className={cn("mt-1 flex flex-wrap items-center gap-2 text-[11px]", isDark ? "text-zinc-300" : "text-slate-700")}>
+              <span className="text-slate-400">╰</span><span>{teamTag}</span><span>/</span><span>Team workspace</span><span>/</span><span>{members.length} members</span>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="hidden items-center sm:flex">
+              {headerMembers.map((member) => (
+                <span key={member.user_id} title={member.name} className={cn("flex size-7 items-center justify-center overflow-hidden rounded-full border-2 text-[9px] font-bold text-white -ml-1 first:ml-0", isDark ? "border-[#0d0f10] bg-zinc-700" : "border-white bg-zinc-700")}>
+                  {member.avatar_url ? <img src={member.avatar_url} alt={member.name} className="size-full object-cover" /> : getInitials(member.name)}
                 </span>
-                <div className="min-w-0">
-                  <p className={cn("text-sm font-semibold truncate", isDark ? "text-zinc-100" : "text-zinc-900")}>{member.name}</p>
-                  <p className={cn("text-xs truncate", isDark ? "text-zinc-400" : "text-zinc-600")}>{member.email}</p>
-                </div>
-              </div>
-              {isGeneralTeam && (
-                <div className="ml-3 flex shrink-0 items-center gap-2">
-                  {member.role && (
-                    <span className={cn(
-                      "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                      member.role === "admin"
-                        ? "bg-violet-500/15 text-violet-500"
-                        : isDark ? "bg-zinc-800 text-zinc-400" : "bg-slate-200 text-slate-600"
-                    )}>
-                      {member.role}
-                    </span>
-                  )}
-                </div>
-              )}
-              {!isGeneralTeam && currentUserRole === "admin" && member.user_id !== user?.user_id && !member.is_project_owner && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={removingTeamMemberId === member.user_id}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    removeMemberFromTeamOnly(member)
-                  }}
-                  className="ml-3 h-8 shrink-0 border-red-500/40 px-3 text-xs text-red-500 hover:bg-red-500/10"
-                >
-                  {removingTeamMemberId === member.user_id ? <Loader2 className="size-3 animate-spin" /> : "Remove"}
-                </Button>
-              )}
-            </button>
-          ))}
-          {filteredMembers.length === 0 && (
-            <p className={cn("text-sm", isDark ? "text-zinc-400" : "text-zinc-600")}>No members found.</p>
-          )}
+              ))}
+              <span className={cn("ml-1 flex size-7 items-center justify-center rounded-full border text-[9px] font-semibold", isDark ? "border-zinc-700 bg-zinc-800 text-zinc-200" : "border-slate-300 bg-slate-100 text-slate-700")}>{extraMemberLabel}</span>
+            </div>
+            <Button variant="outline" size="icon-sm" className={cn("rounded-full", isDark ? "border-zinc-700 text-white" : "border-slate-300 text-black")} onClick={() => { if (isGeneralTeam) { resetInviteDialog(); setInviteOpen(true) } else { resetTeamAddDialog(); setTeamAddOpen(true) } }}><Plus /></Button>
+          </div>
         </div>
-      </Card>
+
+        <div className="mt-3 flex items-end justify-between gap-3">
+          <TeamTabs activeTab={activeTab} onChange={setActiveTab} isDark={isDark} />
+        </div>
+      </div>
+
+      {error && <p className="shrink-0 px-5 pt-4 text-sm text-red-400 sm:px-8">{error}</p>}
+
+      <div className={cn("min-h-0 flex-1 overflow-y-auto", activeTab === "Discussions" ? "p-0" : "p-5 sm:p-8")}>
+        {activeTab === "Tasks" && <TasksTab isDark={isDark} />}
+        {activeTab === "Discussions" && <DiscussionsTab isDark={isDark} />}
+        {activeTab === "Timelines" && <TimelinesTab isDark={isDark} />}
+        {activeTab === "Files" && <FilesTab isDark={isDark} />}
+        {activeTab === "Overview" && <OverviewTab isDark={isDark} />}
+      </div>
 
       <Dialog
         open={teamAddOpen}

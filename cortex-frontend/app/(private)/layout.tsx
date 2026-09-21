@@ -31,7 +31,8 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
   const pathname = usePathname()
   const isAgentRoute = pathname.startsWith("/ai-agent")
   const isSettingsRoute = pathname.startsWith("/settings")
-  const isFullPageRoute = isAgentRoute || isSettingsRoute
+  const isTeamDetailRoute = pathname.startsWith("/teams/")
+  const isFullPageRoute = isAgentRoute || isSettingsRoute || isTeamDetailRoute
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isMobileOpen, setIsMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -62,6 +63,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
       if (!isCollapsed) {
         setIsCollapsed(true)
       }
+      setIsMobileOpen(false)
       return
     }
     if (preFullPageCollapsedRef.current !== null) {

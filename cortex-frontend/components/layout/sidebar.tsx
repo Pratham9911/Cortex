@@ -424,11 +424,16 @@ function SidebarContent({
 
 /* ─── Main export ─── */
 export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen, agentMode = false }: SidebarProps) {
+  const pathname = usePathname()
   const { theme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [hoverExpanded, setHoverExpanded] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   const isDark = mounted && theme === "dark"
+
+  useEffect(() => {
+    setHoverExpanded(false)
+  }, [agentMode, pathname])
 
   const effectiveCollapsed = agentMode ? !hoverExpanded : isCollapsed
   const desktopWidth = agentMode
