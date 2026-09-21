@@ -3,6 +3,7 @@ from sqlalchemy import (
     Integer,
     BigInteger,
     String,
+    Text,
     DateTime,
     ForeignKey,
     Boolean,
@@ -482,6 +483,49 @@ class TeamMember(Base):
     )
 
 
+class TeamDiscussion(Base):
+    __tablename__ = "team_discussions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    team_id = Column(
+        Integer,
+        ForeignKey("teams.team_id"),
+        nullable=False,
+        index=True
+    )
+
+    name = Column(String, nullable=False)
+
+    description = Column(String, nullable=True)
+
+    is_pinned = Column(Boolean, default=False, nullable=False)
+
+    created_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "team_id",
+            "name",
+            name="uq_team_discussion_name"
+        ),
+    )
+
 
 class InboxMessage(Base):
     __tablename__ = "inbox_messages"
@@ -564,3 +608,70 @@ class UserIntegration(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "provider", "integration_type", name="uq_user_provider_integration"),
     )
+
+
+class DiscussionMessage(Base):
+    __tablename__ = "discussion_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(
+        Integer,
+        ForeignKey("team_discussions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    sender_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False,
+        index=True
+    )
+    content = Column(Text, nullable=False)
+    parent_message_id = Column(
+        Integer,
+        ForeignKey("discussion_messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+
+class DiscussionMessageReaction(Base):
+    __tablename__ = "discussion_message_reactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(
+        Integer,
+        ForeignKey("discussion_messages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False,
+        index=True
+    )
+    emoji = Column(String(10), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "message_id",
+            "user_id",
+            "emoji",
+            name="uq_msg_user_emoji"
+        ),
+    )

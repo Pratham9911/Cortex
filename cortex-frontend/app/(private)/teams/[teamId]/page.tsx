@@ -454,7 +454,13 @@ export default function TeamDetailPage() {
 
       <div className={cn("min-h-0 flex-1 overflow-y-auto", activeTab === "Discussions" ? "p-0" : "p-5 sm:p-8")}>
         {activeTab === "Tasks" && <TasksTab isDark={isDark} />}
-        {activeTab === "Discussions" && <DiscussionsTab isDark={isDark} />}
+        {activeTab === "Discussions" && (
+          <DiscussionsTab
+            isDark={isDark}
+            teamId={params.teamId}
+            userRole={currentUserRole}
+          />
+        )}
         {activeTab === "Timelines" && <TimelinesTab isDark={isDark} />}
         {activeTab === "Files" && <FilesTab isDark={isDark} />}
         {activeTab === "Overview" && <OverviewTab isDark={isDark} />}

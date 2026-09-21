@@ -1,145 +1,399 @@
 "use client"
 
-import { useMemo, useState, type ReactNode } from "react"
-import {
-  Hash,
-  Link2,
-  MessageCircle,
-  MoreHorizontal,
-  Pin,
-  Plus,
-  Search,
-  Send,
-  Smile,
-  Sparkles,
-  Users,
-} from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Loader2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
-type Discussion = {
-  id: string
-  title: string
-  preview: string
-  description: string
-  time: string
-  count?: string
-  initials: string
-  avatar: string
-  pinned?: boolean
-}
+import { CreateDiscussionDialog } from "./discussions/create-discussion-dialog"
+import { DiscussionChat } from "./discussions/discussion-chat"
+import { DiscussionInfoPanel } from "./discussions/discussion-info-panel"
+import { DiscussionSidebar } from "./discussions/discussion-sidebar"
+import type { DiscussionItem, WsMessage } from "./discussions/types"
 
-const discussions: Discussion[] = [
-  { id: "general", title: "General", preview: "664 members online", description: "A shared space for team updates and announcements.", time: "4h ago", count: "664", initials: "#", avatar: "bg-zinc-700", pinned: true },
-  { id: "william", title: "William Thomson", preview: "Struggling with consistency...", description: "Talk through ideas, blockers, and creative work.", time: "now", initials: "WT", avatar: "bg-amber-700" },
-  { id: "joycelina", title: "Joycelina Oliver", preview: "Too many ideas, not enough...", description: "A place for sharing ideas and getting feedback.", time: "now", initials: "JO", avatar: "bg-violet-700" },
-  { id: "gerrald", title: "Gerrald Jovy", preview: "Overthinking my content be...", description: "Turn rough thoughts into clear next steps.", time: "1h ago", initials: "GJ", avatar: "bg-emerald-700" },
-  { id: "amelia", title: "Amelia Clara", preview: "Done > perfect. Always", description: "Small wins and progress check-ins.", time: "2h ago", initials: "AC", avatar: "bg-rose-700" },
-  { id: "florine", title: "Florine Alexandra", preview: "Trying to be more consisten...", description: "Share work in progress and helpful feedback.", time: "2h ago", initials: "FA", avatar: "bg-orange-700" },
-]
+export { EmptyTeamTab } from "./discussions/empty-team-tab"
+export type { DiscussionItem, WsMessage } from "./discussions/types"
 
-const messages = [
-  { author: "Joycelina Oliver", handle: "@joyceliver", time: "April 16", initials: "JO", avatar: "bg-violet-700", text: "Hey everyone! Joy here 👋\nI help creators grow and monetize their audience.\nCurious — what’s one thing you’re currently struggling with in your content?", reactions: ["🔥 12", "✨ 48", "💬 24"], align: "right" },
-  { author: "William Thomson", handle: "@wilson", time: "April 16", initials: "WT", avatar: "bg-amber-700", text: "Hey Joy, welcome! 🙌\nLately I’ve been struggling with consistency...\nI start strong, but after a week I kinda lose momentum. Any tips?", reactions: ["🔥 12"], align: "left" },
-  { author: "Gerrald Jovy", handle: "@gerraldjoy", time: "April 16", initials: "GJ", avatar: "bg-emerald-700", text: "Same here actually.\nFor me it’s not ideas — I have too many 😂\nBut turning them into actual content is the hard part.", reactions: ["✨ 48"], align: "left" },
-  { author: "Florine Alexandra", handle: "@florexa", time: "April 16", initials: "FA", avatar: "bg-orange-700", text: "Trying to be more consistent lately!\nJust posted this today ✨ any feedback?", reactions: [], align: "left" },
-]
+export function DiscussionsTab({
+  isDark,
+  teamId,
+  userRole = "member",
+}: {
+  isDark: boolean
+  teamId?: string | number
+  userRole?: "admin" | "member"
+}) {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const isAdmin = userRole === "admin"
 
-export function DiscussionsTab({ isDark }: { isDark: boolean }) {
-  const [query, setQuery] = useState("")
-  const [activeDiscussion, setActiveDiscussion] = useState("general")
-  const [message, setMessage] = useState("")
-  const filteredDiscussions = useMemo(
-    () => discussions.filter((discussion) => `${discussion.title} ${discussion.preview}`.toLowerCase().includes(query.toLowerCase())),
-    [query]
-  )
-  const active = discussions.find((discussion) => discussion.id === activeDiscussion) ?? discussions[0]
+  const getAuthToken = () => {
+    if (typeof window === "undefined") return null
+    return localStorage.getItem("access_token") || localStorage.getItem("token")
+  }
+
+  const getProjectId = () => {
+    if (typeof window === "undefined") return "1"
+    return localStorage.getItem("selected_project_id") || "1"
+  }
+
+  // Discussions API state
+  const [discussions, setDiscussions] = useState<DiscussionItem[]>([])
+  const [loadingDiscussions, setLoadingDiscussions] = useState(true)
+  const [activeDiscussionId, setActiveDiscussionId] = useState<number | null>(null)
+  const [singleDetails, setSingleDetails] = useState<DiscussionItem | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+
+  // Panel 3 visibility
+  const [showDetailsPanel, setShowDetailsPanel] = useState(false)
+
+  // Create Discussion Dialog state
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [createName, setCreateName] = useState("")
+  const [createDescription, setCreateDescription] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState("")
+
+  // Edit Discussion state (in Panel 3)
+  const [isEditingDetails, setIsEditingDetails] = useState(false)
+  const [editName, setEditName] = useState("")
+  const [editDescription, setEditDescription] = useState("")
+  const [savingDetails, setSavingDetails] = useState(false)
+  const [editError, setEditError] = useState("")
+
+  // Pin / Delete states
+  const [togglingPin, setTogglingPin] = useState(false)
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // WebSocket Chat state
+  const [socketStatus, setSocketStatus] = useState<"connecting" | "connected" | "disconnected" | "error">("connecting")
+  const [messages, setMessages] = useState<WsMessage[]>([])
+  const [inputMessage, setInputMessage] = useState("")
+  const socketRef = useRef<WebSocket | null>(null)
+
+  // Fetch all discussions for team
+  const fetchDiscussions = async () => {
+    if (!teamId) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) {
+      console.warn("DiscussionsTab: No auth token found in localStorage")
+      setLoadingDiscussions(false)
+      return
+    }
+
+    try {
+      setLoadingDiscussions(true)
+      const res = await fetch(`${apiUrl}/projects/${projectId}/teams/${teamId}/discussions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      if (!res.ok) {
+        setDiscussions([])
+        return
+      }
+
+      const data = await res.json()
+      const list: DiscussionItem[] = data.discussions || []
+      setDiscussions(list)
+
+      // Set active discussion if none selected
+      if (list.length > 0) {
+        setActiveDiscussionId((prev) => {
+          if (prev && list.some((d) => d.id === prev)) return prev
+          return list[0].id
+        })
+      } else {
+        setActiveDiscussionId(null)
+      }
+    } catch (err) {
+      console.error("Failed to load team discussions:", err)
+    } finally {
+      setLoadingDiscussions(false)
+    }
+  }
+
+  // Fetch detailed info for active discussion
+  const fetchDiscussionDetails = async (discId: number) => {
+    if (!teamId) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) return
+
+    try {
+      const res = await fetch(`${apiUrl}/projects/${projectId}/teams/${teamId}/discussions/${discId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setSingleDetails(data)
+      }
+    } catch (err) {
+      console.error("Failed to fetch discussion details:", err)
+    }
+  }
+
+  useEffect(() => {
+    fetchDiscussions()
+  }, [teamId])
+
+  useEffect(() => {
+    if (activeDiscussionId) {
+      fetchDiscussionDetails(activeDiscussionId)
+    } else {
+      setSingleDetails(null)
+    }
+  }, [activeDiscussionId])
+
+  // Create discussion handler
+  const handleCreateDiscussion = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!createName.trim() || !teamId) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) return
+
+    setCreating(true)
+    setCreateError("")
+
+    try {
+      const res = await fetch(`${apiUrl}/projects/${projectId}/teams/${teamId}/discussions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: createName.trim(),
+          description: createDescription.trim() || null,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to create discussion")
+      }
+
+      setIsCreateOpen(false)
+      setCreateName("")
+      setCreateDescription("")
+      await fetchDiscussions()
+      if (data.discussion?.id) {
+        setActiveDiscussionId(data.discussion.id)
+      }
+    } catch (err: any) {
+      setCreateError(err.message || "Failed to create discussion")
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  // Save inline edit in Panel 3
+  const handleSaveDetails = async () => {
+    if (!activeDiscussionId || !teamId) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) return
+
+    setSavingDetails(true)
+    setEditError("")
+
+    try {
+      const res = await fetch(`${apiUrl}/projects/${projectId}/teams/${teamId}/discussions/${activeDiscussionId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: editName.trim(),
+          description: editDescription.trim() || null,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to update discussion")
+      }
+
+      setIsEditingDetails(false)
+      await fetchDiscussions()
+      await fetchDiscussionDetails(activeDiscussionId)
+    } catch (err: any) {
+      setEditError(err.message || "Failed to update discussion")
+    } finally {
+      setSavingDetails(false)
+    }
+  }
+
+  // Pin / Unpin handler
+  const handleTogglePin = async () => {
+    const target = singleDetails || activeDiscussion
+    if (!target || !teamId) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) return
+
+    setTogglingPin(true)
+    try {
+      const res = await fetch(`${apiUrl}/projects/${projectId}/teams/${teamId}/discussions/${target.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          is_pinned: !target.is_pinned,
+        }),
+      })
+
+      if (res.ok) {
+        await fetchDiscussions()
+        await fetchDiscussionDetails(target.id)
+      }
+    } catch (err) {
+      console.error("Failed to pin/unpin discussion:", err)
+    } finally {
+      setTogglingPin(false)
+    }
+  }
+
+  // Delete discussion handler
+  const handleDeleteDiscussion = async () => {
+    if (!activeDiscussionId || !teamId) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) return
+
+    setDeleting(true)
+    try {
+      const res = await fetch(`${apiUrl}/projects/${projectId}/teams/${teamId}/discussions/${activeDiscussionId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      if (res.ok) {
+        setIsDeleteOpen(false)
+        setShowDetailsPanel(false)
+        setActiveDiscussionId(null)
+        await fetchDiscussions()
+      }
+    } catch (err) {
+      console.error("Failed to delete discussion:", err)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const activeDiscussion = discussions.find((d) => d.id === activeDiscussionId) || null
 
   return (
     <div className={cn("flex h-full min-h-0 overflow-hidden", isDark ? "bg-[#0b0d0f] text-white" : "bg-[#fbfcfd] text-slate-900")}>
-      <aside style={{ scrollbarWidth: "thin", scrollbarColor: isDark ? "#4b5563 transparent" : "#cbd5e1 transparent" }} className={cn("w-[280px] shrink-0 overflow-y-auto border-r p-4 sm:w-[320px]", isDark ? "border-zinc-800 bg-[#121518]" : "border-slate-200 bg-white")}>
-        <div className="flex items-center gap-2">
-          <div className="relative min-w-0 flex-1">
-            <Search className={cn("pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2", isDark ? "text-zinc-400" : "text-slate-400")} />
-            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search discussions" className={cn("h-10 rounded-xl pl-9 text-xs shadow-sm", isDark ? "border-zinc-700 bg-[#1b2024] text-white placeholder:text-zinc-500 focus-visible:border-zinc-500" : "border-slate-200 bg-slate-50")} />
-          </div>
-          <Button variant="ghost" size="icon-sm" className={cn("shrink-0 rounded-xl", isDark ? "text-zinc-300 hover:bg-zinc-800 hover:text-white" : "text-slate-600 hover:bg-slate-100 hover:text-black")}><Plus /></Button>
-        </div>
-        <div className="mt-6">
-          <p className={cn("flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em]", isDark ? "text-zinc-400" : "text-slate-500")}><Pin className="size-3" />Pinned</p>
-          <div className="mt-2">
-            {filteredDiscussions.filter((discussion) => discussion.pinned).map((discussion) => <DiscussionRow key={discussion.id} discussion={discussion} active={activeDiscussion === discussion.id} isDark={isDark} onClick={() => setActiveDiscussion(discussion.id)} />)}
-          </div>
-        </div>
-        <div className="mt-6">
-          <p className={cn("flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em]", isDark ? "text-zinc-400" : "text-slate-500")}><Sparkles className="size-3" />Primary</p>
-          <div className="mt-2 space-y-1">
-            {filteredDiscussions.filter((discussion) => !discussion.pinned).map((discussion) => <DiscussionRow key={discussion.id} discussion={discussion} active={activeDiscussion === discussion.id} isDark={isDark} onClick={() => setActiveDiscussion(discussion.id)} />)}
-          </div>
-          {filteredDiscussions.length === 0 && <p className="px-2 py-6 text-xs text-zinc-500">No discussions found.</p>}
-        </div>
-      </aside>
+      {/* PANEL 1: SIDEBAR */}
+      <DiscussionSidebar
+        isDark={isDark}
+        isAdmin={isAdmin}
+        discussions={discussions}
+        loading={loadingDiscussions}
+        activeDiscussionId={activeDiscussionId}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSelectDiscussion={setActiveDiscussionId}
+        onCreateOpen={() => {
+          setCreateError("")
+          setIsCreateOpen(true)
+        }}
+      />
 
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className={cn("flex h-[54px] shrink-0 items-center justify-between border-b px-5", isDark ? "border-zinc-800 bg-[#101315]" : "border-slate-200 bg-white")}>
-          <div className="flex min-w-0 items-center gap-3">
-            <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-xl text-lg font-semibold", isDark ? "bg-zinc-800 text-white" : "bg-slate-100 text-slate-800")}><Hash className="size-4" /></span>
-            <div className="min-w-0"><h2 className="truncate text-sm font-semibold">{active.title}</h2><p className={cn("truncate text-[11px]", isDark ? "text-zinc-500" : "text-slate-500")}>{active.description}</p></div>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon-sm" className={cn("rounded-lg", isDark ? "text-zinc-300 hover:bg-zinc-800 hover:text-white" : "text-slate-600 hover:bg-slate-100 hover:text-black")}><Search /></Button>
-            <Button variant="ghost" size="icon-sm" className={cn("rounded-lg", isDark ? "text-zinc-300 hover:bg-zinc-800 hover:text-white" : "text-slate-600 hover:bg-slate-100 hover:text-black")}><Users /></Button>
-            <Button variant="ghost" size="icon-sm" className={cn("rounded-lg", isDark ? "text-zinc-300 hover:bg-zinc-800 hover:text-white" : "text-slate-600 hover:bg-slate-100 hover:text-black")}><MoreHorizontal /></Button>
-          </div>
-        </header>
+      {/* PANEL 2: CHAT AREA */}
+      <DiscussionChat
+        isDark={isDark}
+        teamId={teamId}
+        userRole={userRole}
+        activeDiscussion={activeDiscussion}
+        showDetailsPanel={showDetailsPanel}
+        onToggleDetailsPanel={() => setShowDetailsPanel((prev) => !prev)}
+      />
 
-        <div style={{ scrollbarWidth: "thin", scrollbarColor: isDark ? "#4b5563 transparent" : "#cbd5e1 transparent" }} className="min-h-0 flex-1 space-y-7 overflow-y-auto px-5 py-5">
-          <div className={cn("flex items-center gap-3 text-[10px]", isDark ? "text-zinc-600" : "text-slate-400")}><span className="h-px flex-1 bg-current opacity-30" />Yesterday<span className="h-px flex-1 bg-current opacity-30" /></div>
-          {messages.map((item) => <MessageBubble key={item.author} message={item} isDark={isDark} />)}
-          <div className={cn("flex items-center gap-3 text-[10px]", isDark ? "text-zinc-600" : "text-slate-400")}><span className="h-px flex-1 bg-current opacity-30" />Today<span className="h-px flex-1 bg-current opacity-30" /></div>
-        </div>
+      {/* PANEL 3: DETAILS DRAWER (WHATSAPP STYLE) */}
+      {showDetailsPanel && activeDiscussion && (
+        <DiscussionInfoPanel
+          isDark={isDark}
+          isAdmin={isAdmin}
+          activeDiscussion={activeDiscussion}
+          singleDetails={singleDetails}
+          onClose={() => setShowDetailsPanel(false)}
+          isEditingDetails={isEditingDetails}
+          editName={editName}
+          editDescription={editDescription}
+          savingDetails={savingDetails}
+          editError={editError}
+          onStartEditing={() => {
+            setEditName(activeDiscussion.name)
+            setEditDescription(activeDiscussion.description || "")
+            setIsEditingDetails(true)
+          }}
+          onCancelEditing={() => setIsEditingDetails(false)}
+          onNameChange={setEditName}
+          onDescriptionChange={setEditDescription}
+          onSaveDetails={handleSaveDetails}
+          togglingPin={togglingPin}
+          onTogglePin={handleTogglePin}
+          onOpenDelete={() => setIsDeleteOpen(true)}
+        />
+      )}
 
-        <form onSubmit={(event) => { event.preventDefault(); setMessage("") }} className={cn("flex shrink-0 items-center gap-2 border-t px-4 py-3", isDark ? "border-zinc-800 bg-[#101315]" : "border-slate-200 bg-white")}>
-          <div className={cn("flex min-w-0 flex-1 items-center gap-1 rounded-2xl border px-2 py-1.5 shadow-sm", isDark ? "border-zinc-700 bg-[#1b2024] shadow-black/20" : "border-slate-200 bg-slate-50")}>
-            <Button type="button" variant="ghost" size="icon-sm" className={cn("rounded-xl", isDark ? "text-zinc-300 hover:bg-zinc-800 hover:text-white" : "text-slate-600 hover:bg-white hover:text-black")}><Link2 /></Button>
-            <Button type="button" variant="ghost" size="icon-sm" className={cn("rounded-xl", isDark ? "text-zinc-300 hover:bg-zinc-800 hover:text-white" : "text-slate-600 hover:bg-white hover:text-black")}><Smile /></Button>
-            <Input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Type a message..." className={cn("h-9 flex-1 border-0 bg-transparent px-2 text-sm shadow-none focus-visible:ring-0", isDark ? "text-white placeholder:text-zinc-500" : "text-slate-900")} />
-            <Button type="submit" size="icon-sm" className={cn("rounded-xl", isDark ? "bg-white text-black hover:bg-zinc-200" : "bg-black text-white hover:bg-zinc-800")}><Send className="size-4" /></Button>
-          </div>
-        </form>
-      </section>
-    </div>
-  )
-}
+      {/* MODAL: CREATE DISCUSSION */}
+      <CreateDiscussionDialog
+        isOpen={isCreateOpen}
+        onOpenChange={setIsCreateOpen}
+        isDark={isDark}
+        name={createName}
+        description={createDescription}
+        onNameChange={setCreateName}
+        onDescriptionChange={setCreateDescription}
+        onSubmit={handleCreateDiscussion}
+        creating={creating}
+        error={createError}
+      />
 
-function DiscussionRow({ discussion, active, isDark, onClick }: { discussion: Discussion; active: boolean; isDark: boolean; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className={cn("group flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors", active ? (isDark ? "bg-[#252b30] shadow-sm" : "bg-slate-100 shadow-sm") : (isDark ? "hover:bg-[#1b2024]" : "hover:bg-slate-50"))}>
-      <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white", discussion.avatar)}>{discussion.initials}</span>
-      <span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><span className={cn("truncate text-xs font-semibold", isDark ? "text-zinc-100" : "text-slate-900")}>{discussion.title}</span><span className={cn("shrink-0 text-[10px]", isDark ? "text-zinc-400" : "text-slate-400")}>{discussion.time}</span></span><span className={cn("mt-0.5 block truncate text-[11px]", isDark ? "text-zinc-400" : "text-slate-500")}>{discussion.preview}</span></span>
-    </button>
-  )
-}
+      {/* MODAL: DELETE CONFIRMATION */}
+      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <DialogContent className={cn("sm:max-w-[400px]", isDark ? "border-zinc-800 bg-[#121518] text-white" : "bg-white text-slate-900")}>
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-rose-500 flex items-center gap-2">
+              <Trash2 className="size-5" /> Delete Discussion?
+            </DialogTitle>
+            <DialogDescription className={cn("text-xs leading-relaxed pt-1", isDark ? "text-zinc-400" : "text-slate-500")}>
+              Are you sure you want to delete <strong>#{activeDiscussion?.name}</strong>? This action cannot be undone and will permanently remove all associated channel data.
+            </DialogDescription>
+          </DialogHeader>
 
-function MessageBubble({ message, isDark }: { message: (typeof messages)[number]; isDark: boolean }) {
-  const isRight = message.align === "right"
-  return (
-    <div className={cn("flex gap-3", isRight && "flex-row-reverse text-right")}>
-      <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white", message.avatar)}>{message.initials}</span>
-      <div className={cn("max-w-[560px]", isRight && "items-end")}>
-        <div className={cn("flex items-center gap-2 text-xs", isRight && "justify-end")}><span className="font-semibold">{message.author}</span><span className={cn(isDark ? "text-zinc-600" : "text-slate-400")}>{message.handle} · {message.time}</span></div>
-        <p className={cn("mt-2 whitespace-pre-line rounded-2xl px-4 py-3 text-sm leading-5 shadow-sm", isDark ? "bg-[#20262b] text-zinc-200 shadow-black/20" : "bg-slate-100 text-slate-700")}>{message.text}</p>
-        {message.reactions.length > 0 && <div className={cn("mt-1 flex gap-1", isRight && "justify-end")}>{message.reactions.map((reaction) => <span key={reaction} className={cn("rounded-full border px-2 py-0.5 text-[10px]", isDark ? "border-zinc-700 bg-[#171c20] text-zinc-300" : "border-slate-200 bg-white text-slate-500")}>{reaction}</span>)}</div>}
-      </div>
-    </div>
-  )
-}
-
-export function EmptyTeamTab({ isDark, icon, title, description }: { isDark: boolean; icon: ReactNode; title: string; description: string }) {
-  return (
-    <div className={cn("flex min-h-[420px] flex-col items-center justify-center rounded-xl border border-dashed text-center", isDark ? "border-zinc-800 bg-[#111315]" : "border-slate-200 bg-white")}>
-      {icon}<h2 className={cn("mt-4 text-lg font-semibold", isDark ? "text-white" : "text-slate-900")}>{title}</h2><p className={cn("mt-2 max-w-sm text-sm", isDark ? "text-zinc-500" : "text-slate-500")}>{description}</p>
+          <DialogFooter className="gap-2 pt-3">
+            <Button type="button" variant="ghost" onClick={() => setIsDeleteOpen(false)} className="rounded-xl text-xs">
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleting}
+              onClick={handleDeleteDiscussion}
+              className="rounded-xl text-xs font-semibold"
+            >
+              {deleting ? <Loader2 className="size-3.5 animate-spin" /> : "Delete Discussion"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
