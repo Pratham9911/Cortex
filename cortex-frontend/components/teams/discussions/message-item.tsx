@@ -1,6 +1,6 @@
 "use client"
 
-import { MoreHorizontal } from "lucide-react"
+import { useState } from "react"
 import { cn } from "@/lib/utils"
 import type { ChatMessage } from "./types"
 
@@ -8,15 +8,22 @@ export function MessageItem({
   isDark,
   message,
   currentUserId,
+  isHighlighted,
+  onJumpToMessage,
   onContextMenu,
   onReact,
+  onOpenReactionDetails,
 }: {
   isDark: boolean
   message: ChatMessage
   currentUserId: number
+  isHighlighted?: boolean
+  onJumpToMessage?: (messageId: number) => void
   onContextMenu: (e: React.MouseEvent, message: ChatMessage) => void
   onReact: (message: ChatMessage, emoji: string) => void
+  onOpenReactionDetails: (message: ChatMessage) => void
 }) {
+  const [imgError, setImgError] = useState(false)
   const isSelf = message.sender_id === currentUserId
   const initials = message.sender_name
     ? message.sender_name
@@ -43,19 +50,27 @@ export function MessageItem({
     message.created_at &&
     new Date(message.updated_at).getTime() - new Date(message.created_at).getTime() > 1000
 
+  const truncateText = (str?: string | null, maxLen = 20) => {
+    if (!str) return ""
+    return str.length > maxLen ? `${str.slice(0, maxLen)}...` : str
+  }
+
   return (
     <div
+      id={`msg-${message.id}`}
       onContextMenu={(e) => onContextMenu(e, message)}
       className={cn(
-        "group relative flex items-start gap-3 transition-colors rounded-2xl p-1",
-        isSelf ? "flex-row-reverse" : "flex-row"
+        "group relative flex w-full min-w-0 items-start gap-3 rounded-2xl p-1 select-none transition-all duration-300",
+        isSelf ? "flex-row-reverse justify-start" : "flex-row justify-start",
+        isHighlighted && (isDark ? "bg-zinc-800/90" : "bg-slate-200/80")
       )}
     >
-      {/* Sender Avatar / Badge */}
-      {message.sender_avatar_url ? (
+      {/* Sender Avatar with onError Fallback */}
+      {message.sender_avatar_url && !imgError ? (
         <img
           src={message.sender_avatar_url}
           alt={message.sender_name}
+          onError={() => setImgError(true)}
           className="size-9 shrink-0 rounded-full border object-cover shadow-sm"
         />
       ) : (
@@ -73,8 +88,8 @@ export function MessageItem({
         </span>
       )}
 
-      {/* Message Content Container */}
-      <div className={cn("max-w-[580px] min-w-0 flex flex-col", isSelf ? "items-end" : "items-start")}>
+      {/* Message Content Container with w-fit max-w-[70%] bound */}
+      <div className={cn("w-fit max-w-[70%] sm:max-w-[75%] min-w-0 flex flex-col", isSelf ? "items-end" : "items-start")}>
         {/* Header Name & Timestamp */}
         <div className="flex items-center gap-2 text-xs mb-1 px-1">
           <span className="font-semibold truncate">{isSelf ? "You" : message.sender_name}</span>
@@ -91,7 +106,7 @@ export function MessageItem({
         {/* Message Bubble */}
         <div
           className={cn(
-            "relative rounded-2xl px-4 py-2.5 text-sm shadow-sm border transition-shadow",
+            "relative rounded-2xl px-4 py-2.5 text-sm shadow-sm border transition-all w-fit max-w-full [overflow-wrap:anywhere] [word-break:break-word]",
             message.is_deleted
               ? isDark
                 ? "border-zinc-800 bg-[#161a1e]/60 text-zinc-400 italic"
@@ -105,54 +120,48 @@ export function MessageItem({
               : "border-slate-200 bg-slate-50 text-slate-900"
           )}
         >
-          {/* Reply Quote Block Preview */}
+          {/* Reply Quote Block Preview — Click jumps to original message */}
           {!message.is_deleted && message.parent_message && (
             <div
+              onClick={(e) => {
+                e.stopPropagation()
+                if (message.parent_message_id && onJumpToMessage) {
+                  onJumpToMessage(message.parent_message_id)
+                }
+              }}
+              title="Click to jump to original message"
               className={cn(
-                "mb-2 flex flex-col border-l-4 rounded-r-xl px-3 py-1.5 text-xs transition-colors",
+                "mb-2 flex flex-col border-l-4 rounded-r-xl px-2.5 py-1 text-xs transition-all max-w-full cursor-pointer hover:opacity-90 select-none overflow-hidden min-w-0",
                 isDark
-                  ? "border-violet-400 bg-zinc-900/80 text-zinc-300"
-                  : "border-violet-600 bg-white/80 text-slate-800 shadow-inner"
+                  ? "border-violet-400 bg-zinc-900/80 text-zinc-300 hover:bg-zinc-900"
+                  : "border-violet-600 bg-white/90 text-slate-800 shadow-inner hover:bg-white"
               )}
             >
-              <span className="font-bold text-violet-400 text-[11px]">
+              <span className="font-bold text-violet-400 text-[11px] truncate block max-w-full">
                 {message.parent_message.sender_name}
               </span>
-              <span className="truncate opacity-80">
+              <span className="truncate opacity-80 block max-w-full text-[11px]">
                 {message.parent_message.is_deleted
                   ? "Deleted message"
-                  : message.parent_message.content}
+                  : truncateText(message.parent_message.content, 20)}
               </span>
             </div>
           )}
 
           {/* Text Content */}
-          <p className="whitespace-pre-wrap break-words text-xs sm:text-sm leading-relaxed">
+          <p className="whitespace-pre-wrap break-words text-xs sm:text-sm leading-relaxed max-w-full">
             {message.content}
           </p>
-
-          {/* Quick Context Menu Options Trigger (Hover Icon) */}
-          <button
-            type="button"
-            onClick={(e) => onContextMenu(e, message)}
-            className={cn(
-              "absolute right-2 top-2 rounded-lg p-1 opacity-0 group-hover:opacity-100 transition-opacity",
-              isDark ? "hover:bg-zinc-700 text-zinc-300" : "hover:bg-slate-200 text-slate-600"
-            )}
-            title="Message options"
-          >
-            <MoreHorizontal className="size-3.5" />
-          </button>
         </div>
 
-        {/* Reactions Summary List (Top 3 Reactions) */}
+        {/* Reactions Summary List (Top 3 Reactions) — Clicking opens Who Reacted Modal */}
         {!message.is_deleted && message.reactions.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5 px-1">
             {message.reactions.slice(0, 3).map((r) => (
               <button
                 key={r.emoji}
                 type="button"
-                onClick={() => onReact(message, r.emoji)}
+                onClick={() => onOpenReactionDetails(message)}
                 className={cn(
                   "flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold border transition-all hover:scale-105 active:scale-95",
                   r.user_reacted
@@ -163,7 +172,7 @@ export function MessageItem({
                     ? "border-zinc-800 bg-[#161a1e] text-zinc-300 hover:bg-zinc-800"
                     : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
                 )}
-                title={`Reacted with ${r.emoji}`}
+                title={`Click to view who reacted with ${r.emoji}`}
               >
                 <span>{r.emoji}</span>
                 <span className="text-[10px] opacity-80">{r.count}</span>

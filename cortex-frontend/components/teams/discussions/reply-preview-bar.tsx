@@ -31,8 +31,12 @@ export function ReplyPreviewBar({
         <div className="h-9 w-1 shrink-0 rounded-full bg-violet-500" />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold text-violet-400 truncate">{senderLabel}</p>
-          <p className={cn("text-xs truncate mt-0.5", isDark ? "text-zinc-300" : "text-slate-600")}>
-            {replyingTo.is_deleted ? "Deleted message" : replyingTo.content}
+          <p className={cn("text-xs truncate mt-0.5 max-w-full", isDark ? "text-zinc-300" : "text-slate-600")}>
+            {replyingTo.is_deleted
+              ? "Deleted message"
+              : replyingTo.content.length > 20
+              ? `${replyingTo.content.slice(0, 20)}...`
+              : replyingTo.content}
           </p>
         </div>
       </div>

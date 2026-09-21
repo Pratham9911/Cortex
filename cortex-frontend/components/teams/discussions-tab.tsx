@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
+import { useAuth } from "@/components/auth/protected-route"
 import { CreateDiscussionDialog } from "./discussions/create-discussion-dialog"
 import { DiscussionChat } from "./discussions/discussion-chat"
 import { DiscussionInfoPanel } from "./discussions/discussion-info-panel"
@@ -31,6 +32,7 @@ export function DiscussionsTab({
   teamId?: string | number
   userRole?: "admin" | "member"
 }) {
+  const { user } = useAuth()
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const isAdmin = userRole === "admin"
 
@@ -319,6 +321,7 @@ export function DiscussionsTab({
         isDark={isDark}
         teamId={teamId}
         userRole={userRole}
+        currentUserId={user?.user_id}
         activeDiscussion={activeDiscussion}
         showDetailsPanel={showDetailsPanel}
         onToggleDetailsPanel={() => setShowDetailsPanel((prev) => !prev)}

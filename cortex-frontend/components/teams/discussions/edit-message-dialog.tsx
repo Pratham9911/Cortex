@@ -56,7 +56,7 @@ export function EditMessageDialog({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "sm:max-w-[450px]",
+          "max-w-[95vw] sm:max-w-[480px] overflow-hidden",
           isDark ? "border-zinc-800 bg-[#121518] text-white" : "bg-white text-slate-900"
         )}
       >
@@ -70,8 +70,8 @@ export function EditMessageDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4 py-2">
-          <div>
+        <form onSubmit={handleSubmit} className="space-y-4 py-2 min-w-0">
+          <div className="min-w-0">
             <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -79,8 +79,9 @@ export function EditMessageDialog({
               rows={4}
               maxLength={5000}
               required
+              style={{ scrollbarWidth: "thin" }}
               className={cn(
-                "text-xs resize-none rounded-xl",
+                "w-full max-w-full min-h-[100px] max-h-[220px] overflow-y-auto text-xs resize-none rounded-xl [overflow-wrap:anywhere] [word-break:break-word]",
                 isDark ? "border-zinc-700 bg-[#1b2024] text-white" : "border-slate-300 bg-slate-50"
               )}
             />

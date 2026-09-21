@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, validator
 # ---------------------------------------------------
 
 class CreateDiscussionRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=80)
+    name: str = Field(..., min_length=1, max_length=50)
     description: Optional[str] = Field(default=None, max_length=500)
     is_pinned: Optional[bool] = Field(default=False)
 
@@ -17,6 +17,8 @@ class CreateDiscussionRequest(BaseModel):
         stripped = v.strip()
         if not stripped:
             raise ValueError("Discussion name cannot be blank")
+        if len(stripped) > 50:
+            raise ValueError("Discussion name cannot exceed 50 characters")
         return stripped
 
     @validator("description")
@@ -28,7 +30,7 @@ class CreateDiscussionRequest(BaseModel):
 
 
 class UpdateDiscussionRequest(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=50)
     description: Optional[str] = Field(default=None, max_length=500)
     is_pinned: Optional[bool] = Field(default=None)
 
@@ -39,6 +41,8 @@ class UpdateDiscussionRequest(BaseModel):
         stripped = v.strip()
         if not stripped:
             raise ValueError("Discussion name cannot be blank")
+        if len(stripped) > 50:
+            raise ValueError("Discussion name cannot exceed 50 characters")
         return stripped
 
     @validator("description")

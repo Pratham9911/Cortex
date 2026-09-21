@@ -301,13 +301,8 @@ export default function TeamDetailPage() {
 
   const canInvite = teamName.trim().toLowerCase() === "general" && currentUserRole === "admin"
   const isGeneralTeam = teamName.trim().toLowerCase() === "general"
-  const teamTag = isGeneralTeam ? "Core team" : "Website"
-  const fallbackHeaderMembers: TeamMember[] = [
-    { user_id: -1, name: "Pratham Tiwari", email: "pratham@example.com" },
-    { user_id: -2, name: "Alex Kim", email: "alex@example.com" },
-  ]
-  const headerMembers = [...members, ...fallbackHeaderMembers].slice(0, 2)
-  const extraMemberLabel = members.length > 2 ? `+${members.length - 2}` : "+5"
+  const headerMembers = members.slice(0, 2)
+  const extraMemberCount = members.length > 2 ? members.length - 2 : 0
   const openMemberDetails = async (member: TeamMember) => {
     setMemberDetailsOpen(true)
     setMemberDetails(member.role && member.joined_at ? { ...member, role: member.role, joined_at: member.joined_at, teams: [], can_remove: false } : null)
@@ -422,26 +417,62 @@ export default function TeamDetailPage() {
   return (
     <section className={cn("flex h-[calc(100vh-0rem)] min-h-0 flex-col overflow-hidden", isDark ? "bg-[#0d0f10]" : "bg-[#f8fafb]")}>
       <div className={cn("relative z-20 shrink-0 border-b px-5 pt-3 sm:px-6 sm:pt-4", isDark ? "border-zinc-800/80 bg-[#0d0f10]" : "border-slate-200 bg-white")}>
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className={cn("flex size-5 items-center justify-center rounded-md border-2 text-[9px]", isDark ? "border-white text-white" : "border-black text-black")}>□</span>
-              <h1 className={cn("truncate text-xl font-bold tracking-tight sm:text-2xl", isDark ? "text-white" : "text-slate-900")}>{teamName}</h1>
-            </div>
-            <div className={cn("mt-1 flex flex-wrap items-center gap-2 text-[11px]", isDark ? "text-zinc-300" : "text-slate-700")}>
-              <span className="text-slate-400">╰</span><span>{teamTag}</span><span>/</span><span>Team workspace</span><span>/</span><span>{members.length} members</span>
-            </div>
+            <h1 className={cn("truncate text-xl font-bold tracking-tight sm:text-2xl", isDark ? "text-white" : "text-slate-900")}>
+              {teamName}
+            </h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="hidden items-center sm:flex">
               {headerMembers.map((member) => (
-                <span key={member.user_id} title={member.name} className={cn("flex size-7 items-center justify-center overflow-hidden rounded-full border-2 text-[9px] font-bold text-white -ml-1 first:ml-0", isDark ? "border-[#0d0f10] bg-zinc-700" : "border-white bg-zinc-700")}>
-                  {member.avatar_url ? <img src={member.avatar_url} alt={member.name} className="size-full object-cover" /> : getInitials(member.name)}
+                <span
+                  key={member.user_id}
+                  title={member.name}
+                  onClick={() => openMemberDetails(member)}
+                  className={cn(
+                    "flex size-7 items-center justify-center overflow-hidden rounded-full border-2 text-[9px] font-bold text-white -ml-1.5 first:ml-0 cursor-pointer hover:scale-105 transition-transform",
+                    isDark ? "border-[#0d0f10] bg-zinc-700" : "border-white bg-zinc-700"
+                  )}
+                >
+                  {member.avatar_url ? (
+                    <img src={member.avatar_url} alt={member.name} className="size-full object-cover" />
+                  ) : (
+                    getInitials(member.name)
+                  )}
                 </span>
               ))}
-              <span className={cn("ml-1 flex size-7 items-center justify-center rounded-full border text-[9px] font-semibold", isDark ? "border-zinc-700 bg-zinc-800 text-zinc-200" : "border-slate-300 bg-slate-100 text-slate-700")}>{extraMemberLabel}</span>
+              {extraMemberCount > 0 && (
+                <span
+                  className={cn(
+                    "ml-1 flex size-7 items-center justify-center rounded-full border text-[9px] font-bold",
+                    isDark ? "border-zinc-700 bg-zinc-800 text-zinc-300" : "border-slate-300 bg-slate-100 text-slate-700"
+                  )}
+                >
+                  +{extraMemberCount}
+                </span>
+              )}
             </div>
-            <Button variant="outline" size="icon-sm" className={cn("rounded-full", isDark ? "border-zinc-700 text-white" : "border-slate-300 text-black")} onClick={() => { if (isGeneralTeam) { resetInviteDialog(); setInviteOpen(true) } else { resetTeamAddDialog(); setTeamAddOpen(true) } }}><Plus /></Button>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              title="Add member"
+              className={cn(
+                "rounded-full transition-colors",
+                isDark ? "border-zinc-700 text-white hover:bg-zinc-800" : "border-slate-300 text-black hover:bg-slate-100"
+              )}
+              onClick={() => {
+                if (isGeneralTeam) {
+                  resetInviteDialog()
+                  setInviteOpen(true)
+                } else {
+                  resetTeamAddDialog()
+                  setTeamAddOpen(true)
+                }
+              }}
+            >
+              <Plus className="size-4" />
+            </Button>
           </div>
         </div>
 

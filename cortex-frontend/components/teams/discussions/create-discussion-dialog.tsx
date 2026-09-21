@@ -71,7 +71,7 @@ export function CreateDiscussionDialog({
               value={name}
               onChange={(e) => onNameChange(e.target.value)}
               placeholder="e.g. Frontend Architecture"
-              maxLength={80}
+              maxLength={50}
               required
               className={cn("h-10 text-xs rounded-xl", isDark ? "border-zinc-700 bg-[#1b2024] text-white" : "border-slate-300 bg-slate-50")}
             />

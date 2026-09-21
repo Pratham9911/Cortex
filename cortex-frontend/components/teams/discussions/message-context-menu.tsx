@@ -102,9 +102,16 @@ export function MessageContextMenu({
           <button
             type="button"
             onClick={() => {
-              const customEmoji = prompt("Enter custom emoji:")
-              if (customEmoji) {
-                onReact(message, customEmoji.trim())
+              const input = prompt("Enter custom emoji:")
+              if (input) {
+                const trimmed = input.trim()
+                // Strict single emoji regex check
+                const isSingleEmoji = /^(\p{Extended_Pictographic}|\p{Emoji_Presentation})$/u.test(trimmed)
+                if (isSingleEmoji) {
+                  onReact(message, trimmed)
+                } else {
+                  alert("Invalid input: Please enter a single valid emoji character.")
+                }
               }
               onClose()
             }}
@@ -112,7 +119,7 @@ export function MessageContextMenu({
               "flex size-7 items-center justify-center rounded-lg text-xs font-bold transition-transform hover:scale-110",
               isDark ? "text-zinc-400 hover:bg-zinc-700" : "text-slate-500 hover:bg-slate-200"
             )}
-            title="Add reaction"
+            title="Add custom reaction emoji"
           >
             <Plus className="size-4" />
           </button>

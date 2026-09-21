@@ -67,6 +67,9 @@ def get_discussion_messages(
     project_id: int,
     team_id: int,
     discussion_id: int,
+    limit: int = Query(10, ge=1, le=100),
+    before_id: Optional[int] = Query(None),
+    target_id: Optional[int] = Query(None),
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -74,8 +77,15 @@ def get_discussion_messages(
     _require_team(db, project_id, team_id)
     _require_discussion(db, team_id, discussion_id)
 
-    messages = list_messages(db, discussion_id, user_id)
-    return {"discussion_id": discussion_id, "messages": messages}
+    messages = list_messages(
+        db, discussion_id, user_id, limit=limit, before_id=before_id, target_id=target_id
+    )
+    has_more = len(messages) == limit if target_id is None else True
+    return {
+        "discussion_id": discussion_id,
+        "messages": messages,
+        "has_more": has_more,
+    }
 
 
 # ---------------------------------------------------
@@ -247,6 +257,29 @@ async def toggle_discussion_message_reaction(
     )
 
     return {"message": "Reaction updated", "data": updated_msg}
+
+
+# ---------------------------------------------------
+# GET REACTION DETAILS
+# ---------------------------------------------------
+@router.get(
+    "/projects/{project_id}/teams/{team_id}/discussions/{discussion_id}/messages/{message_id}/reactions/details"
+)
+def get_message_reactions_details_endpoint(
+    project_id: int,
+    team_id: int,
+    discussion_id: int,
+    message_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_project_member(db, project_id, user_id)
+    _require_team(db, project_id, team_id)
+    _require_discussion(db, team_id, discussion_id)
+
+    from routers.teams.chats.service import get_message_reactions_details
+    reactors = get_message_reactions_details(db, discussion_id, message_id)
+    return {"message_id": message_id, "reactors": reactors}
 
 
 # ---------------------------------------------------

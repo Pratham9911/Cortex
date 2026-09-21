@@ -77,14 +77,42 @@ def format_message(msg: DiscussionMessage, db: Session, current_user_id: int) ->
     }
 
 
-def list_messages(db: Session, discussion_id: int, current_user_id: int) -> List[Dict[str, Any]]:
-    """Return all messages for a discussion ordered chronologically."""
+DEFAULT_PAGE_SIZE = 10  # Easily changeable to 50 later
+
+
+def list_messages(
+    db: Session,
+    discussion_id: int,
+    current_user_id: int,
+    limit: int = DEFAULT_PAGE_SIZE,
+    before_id: Optional[int] = None,
+    target_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Return messages for a discussion.
+    If target_id and before_id are provided, fetch all continuous messages in range [target_id, before_id).
+    Otherwise, fetch latest messages before before_id limited to limit.
+    """
+    query = db.query(DiscussionMessage).filter(DiscussionMessage.discussion_id == discussion_id)
+
+    if target_id is not None and before_id is not None:
+        messages = (
+            query.filter(DiscussionMessage.id >= target_id, DiscussionMessage.id < before_id)
+            .order_by(DiscussionMessage.id.asc())
+            .limit(200)
+            .all()
+        )
+        return [format_message(msg, db, current_user_id) for msg in messages]
+
+    if before_id is not None:
+        query = query.filter(DiscussionMessage.id < before_id)
+
     messages = (
-        db.query(DiscussionMessage)
-        .filter(DiscussionMessage.discussion_id == discussion_id)
-        .order_by(DiscussionMessage.created_at.asc())
+        query.order_by(DiscussionMessage.id.desc())
+        .limit(limit)
         .all()
     )
+    messages.reverse()
     return [format_message(msg, db, current_user_id) for msg in messages]
 
 
@@ -211,7 +239,7 @@ def toggle_reaction(
     user_id: int,
     emoji: str,
 ) -> Optional[Dict[str, Any]]:
-    """Add or remove an emoji reaction on a message."""
+    """Add or replace an emoji reaction on a message. A user can only have 1 active reaction per message."""
     msg = (
         db.query(DiscussionMessage)
         .filter(
@@ -223,19 +251,24 @@ def toggle_reaction(
     if not msg or msg.is_deleted:
         return None
 
-    existing = (
+    # Find any existing reaction by this user on this message
+    existing_reactions = (
         db.query(DiscussionMessageReaction)
         .filter(
             DiscussionMessageReaction.message_id == message_id,
             DiscussionMessageReaction.user_id == user_id,
-            DiscussionMessageReaction.emoji == emoji,
         )
-        .first()
+        .all()
     )
 
-    if existing:
-        db.delete(existing)
-    else:
+    tapped_same = False
+    for r in existing_reactions:
+        if r.emoji == emoji:
+            tapped_same = True
+        db.delete(r)
+
+    # If tapping a different emoji (or first reaction), add the new emoji reaction
+    if not tapped_same:
         reaction = DiscussionMessageReaction(
             message_id=message_id,
             user_id=user_id,
@@ -245,3 +278,40 @@ def toggle_reaction(
 
     db.commit()
     return format_message(msg, db, user_id)
+
+
+def get_message_reactions_details(
+    db: Session,
+    discussion_id: int,
+    message_id: int,
+) -> List[Dict[str, Any]]:
+    """Return details of all users who reacted to a message."""
+    msg = (
+        db.query(DiscussionMessage)
+        .filter(
+            DiscussionMessage.id == message_id,
+            DiscussionMessage.discussion_id == discussion_id,
+        )
+        .first()
+    )
+    if not msg or msg.is_deleted:
+        return []
+
+    rows = (
+        db.query(DiscussionMessageReaction, User)
+        .join(User, User.user_id == DiscussionMessageReaction.user_id)
+        .filter(DiscussionMessageReaction.message_id == message_id)
+        .order_by(DiscussionMessageReaction.created_at.asc())
+        .all()
+    )
+
+    return [
+        {
+            "user_id": user.user_id,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "emoji": reaction.emoji,
+        }
+        for reaction, user in rows
+    ]
+

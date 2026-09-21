@@ -14,19 +14,21 @@ import {
   XCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { cn } from "@/lib/utils"
+import { useAuth } from "@/components/auth/protected-route"
 import { ChatSkeletons } from "./chat-skeletons"
 import { EditMessageDialog } from "./edit-message-dialog"
 import { MessageContextMenu } from "./message-context-menu"
 import { MessageItem } from "./message-item"
+import { ReactionDetailsDialog } from "./reaction-details-dialog"
 import { ReplyPreviewBar } from "./reply-preview-bar"
 import type { ChatMessage, DiscussionItem, WsChatEvent } from "./types"
+import { cn } from "@/lib/utils"
 
 export function DiscussionChat({
   isDark,
   teamId,
   userRole = "member",
+  currentUserId: propCurrentUserId,
   activeDiscussion,
   showDetailsPanel,
   onToggleDetailsPanel,
@@ -34,10 +36,12 @@ export function DiscussionChat({
   isDark: boolean
   teamId?: string | number
   userRole?: "admin" | "member"
+  currentUserId?: number
   activeDiscussion: DiscussionItem | null
   showDetailsPanel: boolean
   onToggleDetailsPanel: () => void
 }) {
+  const { user } = useAuth()
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const isAdmin = userRole === "admin"
 
@@ -51,32 +55,96 @@ export function DiscussionChat({
     return localStorage.getItem("selected_project_id") || "1"
   }
 
-  const getCurrentUserId = (): number => {
-    try {
-      const userStr = localStorage.getItem("user")
-      if (userStr) {
-        const u = JSON.parse(userStr)
-        if (u.user_id) return Number(u.user_id)
-      }
-    } catch {
-      // fallback
-    }
-    return 1
-  }
+  const currentUserId = propCurrentUserId || user?.user_id || 1
 
-  const currentUserId = getCurrentUserId()
+  // Top-level pagination constant (set to 10 for testing, easily changed to 50 later)
+  const MESSAGES_PAGE_SIZE = 10
 
   // State
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [socketStatus, setSocketStatus] = useState<"connecting" | "connected" | "disconnected" | "error">("connecting")
   const [inputContent, setInputContent] = useState("")
 
-  // Reply / Edit / Context Menu States
+  // Reply / Edit / Context Menu / Reaction Details States
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null)
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
+
+  const [reactionDetailsMsg, setReactionDetailsMsg] = useState<ChatMessage | null>(null)
+  const [isReactionDetailsOpen, setIsReactionDetailsOpen] = useState(false)
+  const [highlightedMsgId, setHighlightedMsgId] = useState<number | null>(null)
+
+  const handleJumpToMessage = async (targetId: number) => {
+    // 1. If element is already in current DOM
+    const existingEl = document.getElementById(`msg-${targetId}`)
+    if (existingEl) {
+      existingEl.scrollIntoView({ behavior: "smooth", block: "center" })
+      setHighlightedMsgId(targetId)
+      setTimeout(() => {
+        setHighlightedMsgId(null)
+      }, 500)
+      return
+    }
+
+    // 2. Element is not in current DOM (fetch all continuous messages between targetId and current oldest message)
+    if (!activeDiscussion || !teamId || messages.length === 0) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) return
+
+    const oldestId = messages[0].id
+
+    try {
+      setLoadingMore(true)
+      isPrependingRef.current = true
+
+      const res = await fetch(
+        `${apiUrl}/projects/${projectId}/teams/${teamId}/discussions/${activeDiscussion.id}/messages?target_id=${targetId}&before_id=${oldestId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      )
+
+      if (res.ok) {
+        const data = await res.json()
+        const rangeMsgs: ChatMessage[] = data.messages || []
+        if (rangeMsgs.length > 0) {
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id))
+            const filteredNew = rangeMsgs.filter((m) => !existingIds.has(m.id))
+            return [...filteredNew, ...prev].sort((a, b) => a.id - b.id)
+          })
+
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              const newEl = document.getElementById(`msg-${targetId}`)
+              if (newEl) {
+                newEl.scrollIntoView({ behavior: "smooth", block: "center" })
+                setHighlightedMsgId(targetId)
+                setTimeout(() => {
+                  setHighlightedMsgId(null)
+                }, 500)
+              }
+              isPrependingRef.current = false
+            }, 60)
+          })
+        } else {
+          isPrependingRef.current = false
+        }
+      } else {
+        isPrependingRef.current = false
+      }
+    } catch (err) {
+      console.error("Failed to jump to target message:", err)
+      isPrependingRef.current = false
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const [contextMenu, setContextMenu] = useState<{
     position: { x: number; y: number }
@@ -84,7 +152,9 @@ export function DiscussionChat({
   } | null>(null)
 
   const socketRef = useRef<WebSocket | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   // Fetch REST messages for active discussion
   const fetchMessages = async () => {
@@ -96,7 +166,7 @@ export function DiscussionChat({
     try {
       setLoadingMessages(true)
       const res = await fetch(
-        `${apiUrl}/projects/${projectId}/teams/${teamId}/discussions/${activeDiscussion.id}/messages`,
+        `${apiUrl}/projects/${projectId}/teams/${teamId}/discussions/${activeDiscussion.id}/messages?limit=${MESSAGES_PAGE_SIZE}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -104,14 +174,84 @@ export function DiscussionChat({
 
       if (res.ok) {
         const data = await res.json()
-        setMessages(data.messages || [])
+        const fetchedMsgs: ChatMessage[] = data.messages || []
+        setMessages(fetchedMsgs)
+        setHasMore(data.has_more ?? (fetchedMsgs.length === MESSAGES_PAGE_SIZE))
       } else {
         setMessages([])
+        setHasMore(false)
       }
     } catch (err) {
       console.error("Failed to load messages:", err)
     } finally {
       setLoadingMessages(false)
+    }
+  }
+
+  // Load older messages when scrolling to top (lazy loading)
+  const isPrependingRef = useRef(false)
+
+  const loadMoreMessages = async () => {
+    if (!activeDiscussion || !teamId || !hasMore || loadingMore || loadingMessages || messages.length === 0) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) return
+
+    const oldestId = messages[0].id
+    const container = containerRef.current
+    if (!container) return
+
+    try {
+      setLoadingMore(true)
+      isPrependingRef.current = true
+      const previousScrollHeight = container.scrollHeight
+
+      const res = await fetch(
+        `${apiUrl}/projects/${projectId}/teams/${teamId}/discussions/${activeDiscussion.id}/messages?limit=${MESSAGES_PAGE_SIZE}&before_id=${oldestId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      )
+
+      if (res.ok) {
+        const data = await res.json()
+        const olderMsgs: ChatMessage[] = data.messages || []
+        if (olderMsgs.length > 0) {
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id))
+            const filteredOlder = olderMsgs.filter((m) => !existingIds.has(m.id))
+            return [...filteredOlder, ...prev]
+          })
+          setHasMore(data.has_more ?? (olderMsgs.length === MESSAGES_PAGE_SIZE))
+
+          requestAnimationFrame(() => {
+            if (containerRef.current) {
+              const newScrollHeight = containerRef.current.scrollHeight
+              containerRef.current.scrollTop = newScrollHeight - previousScrollHeight
+            }
+            setTimeout(() => {
+              isPrependingRef.current = false
+            }, 100)
+          })
+        } else {
+          setHasMore(false)
+          isPrependingRef.current = false
+        }
+      } else {
+        isPrependingRef.current = false
+      }
+    } catch (err) {
+      console.error("Failed to load older messages:", err)
+      isPrependingRef.current = false
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget
+    if (container.scrollTop < 60 && hasMore && !loadingMore && !loadingMessages) {
+      loadMoreMessages()
     }
   }
 
@@ -173,9 +313,42 @@ export function DiscussionChat({
     }
   }, [activeDiscussion?.id])
 
+  const isInitialLoadRef = useRef(true)
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    isInitialLoadRef.current = true
+  }, [activeDiscussion?.id])
+
+  // Smart Auto-Scroll: Instantly jump to bottom on initial load, smooth scroll on new messages
+  useEffect(() => {
+    if (!containerRef.current || messages.length === 0) return
+    const container = containerRef.current
+
+    // Do NOT scroll to bottom if we are prepending older messages
+    if (isPrependingRef.current) return
+
+    if (isInitialLoadRef.current) {
+      container.scrollTop = container.scrollHeight
+      isInitialLoadRef.current = false
+      return
+    }
+
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 140
+    const lastMsg = messages[messages.length - 1]
+    const isSelfLast = lastMsg && lastMsg.sender_id === currentUserId
+
+    if (isNearBottom || isSelfLast) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
   }, [messages])
+
+  // Auto-resize textarea height
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto"
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
+    }
+  }, [inputContent])
 
   // Handlers
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -186,6 +359,10 @@ export function DiscussionChat({
     const parentId = replyingTo?.id || null
     setInputContent("")
     setReplyingTo(null)
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto"
+    }
 
     // Try WS send first if open
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -231,6 +408,14 @@ export function DiscussionChat({
       }
     } catch (err) {
       console.error("Failed to send message via REST:", err)
+    }
+  }
+
+  // Handle Multi-line Textarea KeyDown (Shift+Enter for newline, Enter to send)
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSendMessage(e)
     }
   }
 
@@ -335,8 +520,8 @@ export function DiscussionChat({
             <Hash className="size-4 stroke-[2.5]" />
           </span>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate text-sm font-semibold">
+            <div className="flex items-center gap-2 min-w-0">
+              <h2 className="truncate max-w-[200px] sm:max-w-[320px] text-sm font-semibold">
                 {activeDiscussion?.name || "Select a Discussion"}
               </h2>
               {activeDiscussion?.is_pinned && (
@@ -393,9 +578,17 @@ export function DiscussionChat({
 
       {/* Message List */}
       <div
+        ref={containerRef}
+        onScroll={handleScroll}
         style={{ scrollbarWidth: "thin", scrollbarColor: isDark ? "#4b5563 transparent" : "#cbd5e1 transparent" }}
         className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5"
       >
+        {loadingMore && (
+          <div className="flex items-center justify-center gap-2 py-2 text-xs opacity-70">
+            <Loader2 className="size-3.5 animate-spin" />
+            <span>Loading older messages...</span>
+          </div>
+        )}
         {loadingMessages ? (
           <ChatSkeletons isDark={isDark} />
         ) : !activeDiscussion ? (
@@ -429,15 +622,21 @@ export function DiscussionChat({
               isDark={isDark}
               message={msg}
               currentUserId={currentUserId}
+              isHighlighted={highlightedMsgId === msg.id}
+              onJumpToMessage={handleJumpToMessage}
               onContextMenu={handleContextMenu}
               onReact={handleToggleReaction}
+              onOpenReactionDetails={(m) => {
+                setReactionDetailsMsg(m)
+                setIsReactionDetailsOpen(true)
+              }}
             />
           ))
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Message Input & WhatsApp Reply Preview Bar */}
+      {/* Message Input & WhatsApp Reply Preview Bar with Multi-line Textarea */}
       <div className={cn("shrink-0 px-4 pb-3 pt-1", isDark ? "bg-[#101315]" : "bg-white")}>
         {replyingTo && (
           <ReplyPreviewBar
@@ -448,10 +647,10 @@ export function DiscussionChat({
           />
         )}
 
-        <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+        <form onSubmit={handleSendMessage} className="flex items-end gap-2">
           <div
             className={cn(
-              "flex min-w-0 flex-1 items-center gap-1 border px-2 py-1.5 shadow-sm transition-all",
+              "flex min-w-0 flex-1 items-end gap-1 border px-2 py-1.5 shadow-sm transition-all",
               replyingTo ? "rounded-b-2xl border-t-0" : "rounded-2xl border",
               isDark ? "border-zinc-700 bg-[#1b2024] shadow-black/20" : "border-slate-200 bg-slate-50"
             )}
@@ -460,7 +659,7 @@ export function DiscussionChat({
               type="button"
               variant="ghost"
               size="icon-sm"
-              className={cn("rounded-xl", isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-slate-600 hover:bg-white")}
+              className={cn("rounded-xl mb-0.5", isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-slate-600 hover:bg-white")}
             >
               <Link2 className="size-4" />
             </Button>
@@ -468,30 +667,37 @@ export function DiscussionChat({
               type="button"
               variant="ghost"
               size="icon-sm"
-              className={cn("rounded-xl", isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-slate-600 hover:bg-white")}
+              className={cn("rounded-xl mb-0.5", isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-slate-600 hover:bg-white")}
             >
               <Smile className="size-4" />
             </Button>
-            <Input
+
+            {/* Auto-resizing Multi-line Textarea */}
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={inputContent}
               onChange={(e) => setInputContent(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder={
                 activeDiscussion
-                  ? `Message #${activeDiscussion.name}...`
+                  ? "Type a message..."
                   : "Select a discussion channel..."
               }
               disabled={!activeDiscussion}
+              style={{ scrollbarWidth: "thin", scrollbarColor: isDark ? "#4b5563 transparent" : "#cbd5e1 transparent" }}
               className={cn(
-                "h-9 flex-1 border-0 bg-transparent px-2 text-sm shadow-none focus-visible:ring-0",
-                isDark ? "text-white placeholder:text-zinc-500" : "text-slate-900"
+                "flex-1 border-0 bg-transparent px-2 text-sm shadow-none focus-visible:ring-0 outline-none resize-none py-1 min-h-[36px] max-h-[120px]",
+                isDark ? "text-white placeholder:text-zinc-500" : "text-slate-900 placeholder:text-slate-400"
               )}
             />
+
             <Button
               type="submit"
               size="icon-sm"
               disabled={!activeDiscussion || !inputContent.trim()}
               className={cn(
-                "rounded-xl",
+                "rounded-xl mb-0.5 shrink-0",
                 isDark
                   ? "bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-600"
                   : "bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400"
@@ -511,6 +717,19 @@ export function DiscussionChat({
         message={editingMessage}
         onSave={handleEditSave}
         saving={savingEdit}
+      />
+
+      {/* Who Reacted Details Modal */}
+      <ReactionDetailsDialog
+        isOpen={isReactionDetailsOpen}
+        onOpenChange={setIsReactionDetailsOpen}
+        isDark={isDark}
+        message={reactionDetailsMsg}
+        teamId={teamId}
+        currentUserId={currentUserId}
+        onUndoReaction={async (msg, emoji) => {
+          await handleToggleReaction(msg, emoji)
+        }}
       />
 
       {/* WhatsApp Right-Click Context Menu & Floating Emoji Bar */}

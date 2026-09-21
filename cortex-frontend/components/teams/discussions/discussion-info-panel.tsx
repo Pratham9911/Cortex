@@ -92,16 +92,16 @@ export function DiscussionInfoPanel({
       {/* Panel Body */}
       <div className="p-5 space-y-6 overflow-y-auto">
         {/* Monochromatic Black/White # Avatar Hero */}
-        <div className="flex flex-col items-center text-center">
+        <div className="flex flex-col items-center text-center min-w-0 w-full">
           <div
             className={cn(
-              "flex size-24 items-center justify-center rounded-3xl border-2 shadow-md mb-3",
+              "flex size-14 items-center justify-center rounded-2xl border-2 shadow-sm mb-2 shrink-0",
               isDark
                 ? "border-zinc-700 bg-zinc-900 text-white shadow-black/50"
                 : "border-slate-300 bg-slate-100 text-slate-900 shadow-slate-200"
             )}
           >
-            <Hash className="size-12 stroke-[2.5]" />
+            <Hash className="size-7 stroke-[2.5]" />
           </div>
 
           {/* Title & Editable Section */}
@@ -120,6 +120,7 @@ export function DiscussionInfoPanel({
                   value={editName}
                   onChange={(e) => onNameChange(e.target.value)}
                   placeholder="Discussion name..."
+                  maxLength={50}
                   className={cn("h-9 text-xs rounded-xl", isDark ? "border-zinc-700 bg-[#1b2024] text-white" : "border-slate-300 bg-slate-50")}
                 />
               </div>
@@ -159,15 +160,17 @@ export function DiscussionInfoPanel({
               </div>
             </div>
           ) : (
-            <div className="w-full relative">
-              <div className="flex items-center justify-center gap-2">
-                <h3 className="text-lg font-bold tracking-tight">{activeDiscussion.name}</h3>
+            <div className="w-full min-w-0 relative">
+              <div className="flex items-center justify-center gap-1.5 min-w-0 px-2">
+                <h3 className="text-base font-bold tracking-tight truncate max-w-[220px]" title={activeDiscussion.name}>
+                  {activeDiscussion.name}
+                </h3>
                 {isAdmin && (
                   <Button
                     variant="ghost"
                     size="icon-sm"
                     onClick={onStartEditing}
-                    className={cn("rounded-lg opacity-70 hover:opacity-100", isDark ? "hover:bg-zinc-800" : "hover:bg-slate-100")}
+                    className={cn("rounded-lg opacity-70 hover:opacity-100 shrink-0", isDark ? "hover:bg-zinc-800" : "hover:bg-slate-100")}
                     title="Edit discussion info"
                   >
                     <Pencil className="size-3.5" />
@@ -176,7 +179,7 @@ export function DiscussionInfoPanel({
               </div>
               <p
                 className={cn(
-                  "text-xs mt-1.5 px-2 leading-relaxed whitespace-pre-wrap",
+                  "text-xs mt-1 px-2 leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere] [word-break:break-word]",
                   isDark ? "text-zinc-400" : "text-slate-500"
                 )}
               >
