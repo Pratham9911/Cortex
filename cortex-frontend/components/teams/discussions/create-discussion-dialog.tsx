@@ -41,7 +41,7 @@ export function CreateDiscussionDialog({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "sm:max-w-[425px]",
+          "max-w-[95vw] sm:max-w-[425px] overflow-hidden",
           isDark ? "border-zinc-800 bg-[#121518] text-white" : "bg-white text-slate-900"
         )}
       >
@@ -62,8 +62,8 @@ export function CreateDiscussionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={onSubmit} className="space-y-4 py-2">
-          <div>
+        <form onSubmit={onSubmit} className="space-y-4 py-2 min-w-0">
+          <div className="min-w-0">
             <label className={cn("text-xs font-semibold block mb-1.5", isDark ? "text-zinc-300" : "text-slate-700")}>
               Discussion Name <span className="text-red-400">*</span>
             </label>
@@ -77,7 +77,7 @@ export function CreateDiscussionDialog({
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className={cn("text-xs font-semibold block mb-1.5", isDark ? "text-zinc-300" : "text-slate-700")}>
               Description <span className="text-zinc-500 font-normal">(optional)</span>
             </label>
@@ -86,9 +86,16 @@ export function CreateDiscussionDialog({
               onChange={(e) => onDescriptionChange(e.target.value)}
               placeholder="Brief summary of what this discussion topic is about..."
               rows={3}
-              maxLength={500}
-              className={cn("text-xs resize-none rounded-xl", isDark ? "border-zinc-700 bg-[#1b2024] text-white" : "border-slate-300 bg-slate-50")}
+              maxLength={100}
+              style={{ scrollbarWidth: "thin" }}
+              className={cn(
+                "w-full max-w-full h-24 max-h-24 overflow-y-auto resize-none text-xs rounded-xl break-words [overflow-wrap:anywhere] [word-break:break-word] box-border p-3",
+                isDark ? "border-zinc-700 bg-[#1b2024] text-white" : "border-slate-300 bg-slate-50"
+              )}
             />
+            <p className={cn("mt-1 text-right text-[10px]", isDark ? "text-zinc-500" : "text-slate-400")}>
+              {description.length}/100
+            </p>
           </div>
 
           {error && <p className="text-xs text-red-400">{error}</p>}

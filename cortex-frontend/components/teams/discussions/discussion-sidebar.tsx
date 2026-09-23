@@ -36,50 +36,63 @@ export function DiscussionSidebar({
 
   return (
     <aside
-      style={{ scrollbarWidth: "thin", scrollbarColor: isDark ? "#4b5563 transparent" : "#cbd5e1 transparent" }}
       className={cn(
-        "w-[280px] shrink-0 overflow-y-auto border-r p-4 sm:w-[320px]",
+        "flex flex-col h-full w-[240px] shrink-0 border-r min-h-0 select-none sm:w-[260px]",
         isDark ? "border-zinc-800 bg-[#121518]" : "border-slate-200 bg-white"
       )}
     >
-      <div className="flex items-center gap-2">
-        <div className="relative min-w-0 flex-1">
-          <Search
-            className={cn(
-              "pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2",
-              isDark ? "text-zinc-400" : "text-slate-400"
-            )}
-          />
-          <Input
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search discussions"
-            className={cn(
-              "h-10 rounded-xl pl-9 text-xs shadow-sm",
-              isDark
-                ? "border-zinc-700 bg-[#1b2024] text-white placeholder:text-zinc-500 focus-visible:border-zinc-500"
-                : "border-slate-200 bg-slate-50"
-            )}
-          />
-        </div>
-        {isAdmin && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onCreateOpen}
-            title="Create new discussion"
-            className={cn(
-              "shrink-0 rounded-xl",
-              isDark ? "text-zinc-300 hover:bg-zinc-800 hover:text-white" : "text-slate-600 hover:bg-slate-100 hover:text-black"
-            )}
-          >
-            <Plus className="size-4" />
-          </Button>
+      {/* Top Fixed Header with Search & Add Button */}
+      <div
+        className={cn(
+          "shrink-0 border-b p-4 shadow-sm z-10",
+          isDark ? "border-zinc-800 bg-[#121518]" : "border-slate-200 bg-white"
         )}
+      >
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search
+              className={cn(
+                "pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2",
+                isDark ? "text-zinc-400" : "text-slate-400"
+              )}
+            />
+            <Input
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search discussions"
+              className={cn(
+                "h-10 rounded-xl pl-9 text-xs shadow-sm",
+                isDark
+                  ? "border-zinc-700 bg-[#1b2024] text-white placeholder:text-zinc-500 focus-visible:border-zinc-500"
+                  : "border-slate-200 bg-slate-50"
+              )}
+            />
+          </div>
+          {isAdmin && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onCreateOpen}
+              title="Create new discussion"
+              className={cn(
+                "shrink-0 rounded-xl",
+                isDark ? "text-zinc-300 hover:bg-zinc-800 hover:text-white" : "text-slate-600 hover:bg-slate-100 hover:text-black"
+              )}
+            >
+              <Plus className="size-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
+      {/* Scrolling Discussion List Container — Starts Directly Below Search Bar Area */}
+      <div
+        style={{ scrollbarWidth: "thin", scrollbarColor: isDark ? "#4b5563 transparent" : "#cbd5e1 transparent" }}
+        className="flex-1 overflow-y-auto px-3 py-2 min-h-0"
+      >
+
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center text-xs opacity-60">
+        <div className="flex flex-col items-center justify-center py-10 text-center text-xs opacity-60">
           <Loader2 className="mb-2 size-5 animate-spin" />
           <span>Loading discussions...</span>
         </div>
@@ -87,7 +100,7 @@ export function DiscussionSidebar({
         <>
           {/* Pinned Channels */}
           {pinnedList.length > 0 && (
-            <div className="mt-6">
+            <div className="mt-1">
               <p
                 className={cn(
                   "flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em]",
@@ -96,7 +109,7 @@ export function DiscussionSidebar({
               >
                 <Pin className="size-3 fill-current text-amber-500" /> Pinned Channels
               </p>
-              <div className="mt-2 space-y-1">
+              <div className="mt-1.5 space-y-1">
                 {pinnedList.map((d) => (
                   <DiscussionRow
                     key={d.id}
@@ -111,7 +124,7 @@ export function DiscussionSidebar({
           )}
 
           {/* All Discussions */}
-          <div className="mt-6">
+          <div className={cn(pinnedList.length > 0 ? "mt-4" : "mt-1")}>
             <p
               className={cn(
                 "flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em]",
@@ -150,6 +163,7 @@ export function DiscussionSidebar({
           </div>
         </>
       )}
+      </div>
     </aside>
   )
 }

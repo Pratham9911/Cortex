@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, validator
 
 class CreateDiscussionRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=50)
-    description: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = Field(default=None, max_length=100)
     is_pinned: Optional[bool] = Field(default=False)
 
 
@@ -26,12 +26,14 @@ class CreateDiscussionRequest(BaseModel):
         if v is None:
             return v
         stripped = v.strip()
+        if stripped and len(stripped) > 100:
+            raise ValueError("Description cannot exceed 100 characters")
         return stripped if stripped else None
 
 
 class UpdateDiscussionRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=50)
-    description: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = Field(default=None, max_length=100)
     is_pinned: Optional[bool] = Field(default=None)
 
     @validator("name")
@@ -50,4 +52,6 @@ class UpdateDiscussionRequest(BaseModel):
         if v is None:
             return v
         stripped = v.strip()
+        if stripped and len(stripped) > 100:
+            raise ValueError("Description cannot exceed 100 characters")
         return stripped if stripped else None

@@ -557,7 +557,7 @@ export function DiscussionChat({
             {socketStatus === "connecting" && <Loader2 className="size-3.5 animate-spin" />}
             {(socketStatus === "disconnected" || socketStatus === "error") && <XCircle className="size-3.5" />}
             <span>
-              {socketStatus === "connected" && "WebSocket Connected"}
+              {socketStatus === "connected" && "Connected"}
               {socketStatus === "connecting" && "Connecting..."}
               {socketStatus === "disconnected" && "Disconnected"}
               {socketStatus === "error" && "Error"}

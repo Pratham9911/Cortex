@@ -445,7 +445,7 @@ export default function TeamDetailPage() {
               {extraMemberCount > 0 && (
                 <span
                   className={cn(
-                    "ml-1 flex size-7 items-center justify-center rounded-full border text-[9px] font-bold",
+                    "-ml-1.5 flex size-7 items-center justify-center rounded-full border text-[9px] font-bold",
                     isDark ? "border-zinc-700 bg-zinc-800 text-zinc-300" : "border-slate-300 bg-slate-100 text-slate-700"
                   )}
                 >
