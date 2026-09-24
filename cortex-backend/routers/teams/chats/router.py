@@ -348,6 +348,24 @@ async def discussion_websocket(
                             "message": new_msg,
                         },
                     )
+
+                    if "@cortex" in content.lower():
+                        cleaned_query = content.replace("@Cortex", "").replace("@cortex", "").strip()
+                        if not cleaned_query:
+                            cleaned_query = content
+
+                        import asyncio
+                        asyncio.create_task(
+                            _trigger_cortex_discussion_agent_ws(
+                                discussion_id=discussion_id,
+                                project_id=team.project_id,
+                                team_id=discussion.team_id,
+                                user_id=user.user_id,
+                                user_role=membership.role,
+                                query_text=cleaned_query,
+                                parent_message_id=new_msg.get("id"),
+                            )
+                        )
     except WebSocketDisconnect:
         manager.disconnect(discussion_id, websocket)
     except Exception as e:
@@ -355,3 +373,115 @@ async def discussion_websocket(
         manager.disconnect(discussion_id, websocket)
     finally:
         db.close()
+
+
+async def _trigger_cortex_discussion_agent_ws(
+    discussion_id: int,
+    project_id: int,
+    team_id: int,
+    user_id: int,
+    user_role: str,
+    query_text: str,
+    parent_message_id: Optional[int] = None,
+):
+    import asyncio
+    from database import SessionLocal
+    from routers.teams.chats.connection_manager import manager
+    from routers.teams.chats.service import create_ai_message, list_messages
+    from agentic.teams.discussion_agent.runner import run_discussion_agent
+
+    db = SessionLocal()
+    try:
+        await manager.broadcast(
+            discussion_id,
+            {
+                "event": "cortex_thinking",
+                "status": "Cortex is thinking...",
+                "agent_name": "discussion_agent",
+            },
+        )
+
+        def ws_event_callback(event_type: str, **data):
+            if event_type == "reasoning":
+                return
+
+            agent = data.get("agent", "discussion_agent")
+            if event_type == "agent_completed" and agent == "discussion_agent":
+                return
+
+            agent_display = "Retrieval Agent" if agent == "retrieval_agent" else ("Web Agent" if agent == "web_agent" else "Cortex")
+
+            status_text = f"{agent_display} is working..."
+            if event_type == "agent_started":
+                status_text = f"{agent_display}: Started task"
+            elif event_type == "tool_started":
+                tool = data.get("tool", "")
+                if tool in ("project_search", "discussion_retrieval_agent"):
+                    status_text = "Retrieval Agent: Searching team documents..."
+                elif tool in ("web_search", "discussion_web_agent"):
+                    status_text = "Web Agent: Searching web..."
+                else:
+                    status_text = f"{agent_display}: Executing {tool}..."
+            elif event_type == "agent_completed":
+                status_text = f"{agent_display}: Finalizing response..."
+
+            asyncio.create_task(
+                manager.broadcast(
+                    discussion_id,
+                    {
+                        "event": "cortex_thinking",
+                        "status": status_text,
+                        "agent_name": agent,
+                    },
+                )
+            )
+
+        result = await run_discussion_agent(
+            question=query_text,
+            project_id=project_id,
+            team_id=team_id,
+            discussion_id=discussion_id,
+            user_id=user_id,
+            user_role=user_role,
+            db=db,
+            event_callback=ws_event_callback,
+        )
+
+        ai_msg = create_ai_message(
+            db,
+            discussion_id=discussion_id,
+            content=result.get("answer", ""),
+            parent_message_id=parent_message_id,
+            ai_sources=result.get("sources"),
+            ai_chunks=result.get("chunks"),
+        )
+
+        await manager.broadcast(
+            discussion_id,
+            {
+                "event": "new_message",
+                "message": ai_msg,
+            },
+        )
+
+        await manager.broadcast(
+            discussion_id,
+            {
+                "event": "cortex_thinking",
+                "status": None,
+                "agent_name": None,
+            },
+        )
+    except Exception as e:
+        print(f"[Cortex WS Trigger Error] discussion_id={discussion_id}: {e}")
+        await manager.broadcast(
+            discussion_id,
+            {
+                "event": "cortex_thinking",
+                "status": None,
+                "agent_name": None,
+            },
+        )
+    finally:
+        db.close()
+

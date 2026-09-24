@@ -11,6 +11,7 @@ import {
   Radio,
   Send,
   Smile,
+  Sparkles,
   XCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -77,6 +78,8 @@ export function DiscussionChat({
   const [reactionDetailsMsg, setReactionDetailsMsg] = useState<ChatMessage | null>(null)
   const [isReactionDetailsOpen, setIsReactionDetailsOpen] = useState(false)
   const [highlightedMsgId, setHighlightedMsgId] = useState<number | null>(null)
+  const [cortexThinkingStatus, setCortexThinkingStatus] = useState<string | null>(null)
+  const [cortexAgentName, setCortexAgentName] = useState<string | null>(null)
 
   const handleJumpToMessage = async (targetId: number) => {
     // 1. If element is already in current DOM
@@ -256,6 +259,8 @@ export function DiscussionChat({
   }
 
   useEffect(() => {
+    setCortexThinkingStatus(null)
+    setCortexAgentName(null)
     if (activeDiscussion) {
       setReplyingTo(null)
       fetchMessages()
@@ -263,6 +268,16 @@ export function DiscussionChat({
       setMessages([])
     }
   }, [activeDiscussion?.id, teamId])
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1]
+      if (lastMsg.is_ai_message || lastMsg.sender_id === null || lastMsg.sender_id === -1) {
+        setCortexThinkingStatus(null)
+        setCortexAgentName(null)
+      }
+    }
+  }, [messages])
 
   // WebSocket Connection Lifecycle
   useEffect(() => {
@@ -285,20 +300,38 @@ export function DiscussionChat({
     socket.onmessage = (event) => {
       try {
         const payload: WsChatEvent = JSON.parse(event.data)
-        if (payload && payload.event && payload.message) {
-          const incoming = payload.message
-          if (incoming.discussion_id !== activeDiscussion.id) return
+        if (payload && payload.event) {
+          if (payload.event === "cortex_thinking") {
+            if (payload.status) {
+              setCortexThinkingStatus(payload.status)
+              setCortexAgentName(payload.agent_name || null)
+            } else {
+              setCortexThinkingStatus(null)
+              setCortexAgentName(null)
+            }
+            return
+          }
 
-          setMessages((prev) => {
-            if (payload.event === "new_message") {
-              if (prev.some((m) => m.id === incoming.id)) return prev
-              return [...prev, incoming]
+          if (payload.message) {
+            const incoming = payload.message
+            if (incoming.discussion_id !== activeDiscussion.id) return
+
+            if (incoming.is_ai_message || incoming.sender_id === null || incoming.sender_id === -1) {
+              setCortexThinkingStatus(null)
+              setCortexAgentName(null)
             }
-            if (payload.event === "edit_message" || payload.event === "delete_message" || payload.event === "reaction_update") {
-              return prev.map((m) => (m.id === incoming.id ? incoming : m))
-            }
-            return prev
-          })
+
+            setMessages((prev) => {
+              if (payload.event === "new_message") {
+                if (prev.some((m) => m.id === incoming.id)) return prev
+                return [...prev, incoming]
+              }
+              if (payload.event === "edit_message" || payload.event === "delete_message" || payload.event === "reaction_update") {
+                return prev.map((m) => (m.id === incoming.id ? incoming : m))
+              }
+              return prev
+            })
+          }
         }
       } catch (err) {
         console.error("WS Parse error:", err)
@@ -616,28 +649,92 @@ export function DiscussionChat({
             </p>
           </div>
         ) : (
-          messages.map((msg) => (
-            <MessageItem
-              key={msg.id}
-              isDark={isDark}
-              message={msg}
-              currentUserId={currentUserId}
-              isHighlighted={highlightedMsgId === msg.id}
-              onJumpToMessage={handleJumpToMessage}
-              onContextMenu={handleContextMenu}
-              onReact={handleToggleReaction}
-              onOpenReactionDetails={(m) => {
-                setReactionDetailsMsg(m)
-                setIsReactionDetailsOpen(true)
-              }}
-            />
-          ))
+          (() => {
+            const getDateLabel = (isoString?: string | null): string => {
+              if (!isoString) return ""
+              const d = new Date(isoString)
+              const today = new Date()
+              const yesterday = new Date(today)
+              yesterday.setDate(today.getDate() - 1)
+              const sameDay = (a: Date, b: Date) =>
+                a.getFullYear() === b.getFullYear() &&
+                a.getMonth() === b.getMonth() &&
+                a.getDate() === b.getDate()
+              if (sameDay(d, today)) return "Today"
+              if (sameDay(d, yesterday)) return "Yesterday"
+              return d.toLocaleDateString([], { month: "short", day: "numeric", year: d.getFullYear() !== today.getFullYear() ? "numeric" : undefined })
+            }
+
+            const rendered: React.ReactNode[] = []
+            let lastLabel = ""
+
+            messages.forEach((msg) => {
+              const label = getDateLabel(msg.created_at)
+              if (label && label !== lastLabel) {
+                lastLabel = label
+                rendered.push(
+                  <div key={`sep-${label}-${msg.id}`} className="flex items-center gap-3 my-2 select-none">
+                    <div className={cn("flex-1 h-px", isDark ? "bg-zinc-800" : "bg-slate-200")} />
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full border px-3 py-0.5 text-[11px] font-medium",
+                        isDark
+                          ? "border-zinc-700 bg-zinc-900/80 text-zinc-400"
+                          : "border-slate-200 bg-white text-slate-500"
+                      )}
+                    >
+                      {label}
+                    </span>
+                    <div className={cn("flex-1 h-px", isDark ? "bg-zinc-800" : "bg-slate-200")} />
+                  </div>
+                )
+              }
+              rendered.push(
+                <MessageItem
+                  key={msg.id}
+                  isDark={isDark}
+                  message={msg}
+                  currentUserId={currentUserId}
+                  isHighlighted={highlightedMsgId === msg.id}
+                  onJumpToMessage={handleJumpToMessage}
+                  onContextMenu={handleContextMenu}
+                  onReact={handleToggleReaction}
+                  onOpenReactionDetails={(m) => {
+                    setReactionDetailsMsg(m)
+                    setIsReactionDetailsOpen(true)
+                  }}
+                />
+              )
+            })
+            return rendered
+          })()
         )}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Message Input & WhatsApp Reply Preview Bar with Multi-line Textarea */}
       <div className={cn("shrink-0 px-4 pb-3 pt-1", isDark ? "bg-[#101315]" : "bg-white")}>
+        {cortexThinkingStatus && (
+          <div
+            className={cn(
+              "flex items-center gap-2 rounded-t-2xl border border-b-0 px-3 py-2 text-xs animate-pulse transition-all",
+              isDark
+                ? "border-violet-500/30 bg-violet-950/40 text-violet-200"
+                : "border-violet-300 bg-violet-50 text-violet-900"
+            )}
+          >
+            <img
+              src={isDark ? "/cortex_icon.png" : "/cortex-iconb.png"}
+              alt="Cortex AI"
+              className="size-4 object-contain animate-spin shrink-0"
+            />
+            <span className="font-bold text-violet-400 shrink-0">
+              ✦ {cortexAgentName === "retrieval_agent" ? "Retrieval Agent" : cortexAgentName === "web_agent" ? "Web Agent" : "Cortex AI"}:
+            </span>
+            <span className="truncate">{cortexThinkingStatus}</span>
+          </div>
+        )}
+
         {replyingTo && (
           <ReplyPreviewBar
             isDark={isDark}
@@ -651,7 +748,7 @@ export function DiscussionChat({
           <div
             className={cn(
               "flex min-w-0 flex-1 items-end gap-1 border px-2 py-1.5 shadow-sm transition-all",
-              replyingTo ? "rounded-b-2xl border-t-0" : "rounded-2xl border",
+              replyingTo || cortexThinkingStatus ? "rounded-b-2xl border-t-0" : "rounded-2xl border",
               isDark ? "border-zinc-700 bg-[#1b2024] shadow-black/20" : "border-slate-200 bg-slate-50"
             )}
           >

@@ -623,7 +623,7 @@ class DiscussionMessage(Base):
     sender_id = Column(
         Integer,
         ForeignKey("users.user_id"),
-        nullable=False,
+        nullable=True,
         index=True
     )
     content = Column(Text, nullable=False)
@@ -634,10 +634,33 @@ class DiscussionMessage(Base):
         index=True
     )
     is_deleted = Column(Boolean, default=False, nullable=False)
+    is_ai_message = Column(Boolean, default=False, nullable=False, server_default="false")
+    ai_sources = Column(JSONB, nullable=True)
+    ai_chunks = Column(JSONB, nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()
     )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+
+class DiscussionSTM(Base):
+    __tablename__ = "discussion_stm"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(
+        Integer,
+        ForeignKey("team_discussions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+    summary = Column(Text, nullable=True)
+    last_summarized_message_id = Column(Integer, nullable=True)
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),

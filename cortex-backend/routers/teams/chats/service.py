@@ -11,21 +11,34 @@ from models import (
 
 def format_message(msg: DiscussionMessage, db: Session, current_user_id: int) -> Dict[str, Any]:
     """Format a single DiscussionMessage into dict response format."""
-    sender = db.query(User).filter(User.user_id == msg.sender_id).first()
-    sender_name = sender.name if sender else "Unknown User"
-    sender_avatar_url = sender.avatar_url if sender else None
+    is_ai = getattr(msg, "is_ai_message", False) or msg.sender_id is None or msg.sender_id == -1
+
+    if is_ai:
+        sender_name = "Cortex AI"
+        sender_avatar_url = None
+    else:
+        sender = db.query(User).filter(User.user_id == msg.sender_id).first()
+        sender_name = sender.name if sender else "Unknown User"
+        sender_avatar_url = sender.avatar_url if sender else None
 
     # Parent message reference
     parent_ref = None
     if msg.parent_message_id:
         parent_msg = db.query(DiscussionMessage).filter(DiscussionMessage.id == msg.parent_message_id).first()
         if parent_msg:
-            parent_sender = db.query(User).filter(User.user_id == parent_msg.sender_id).first()
+            is_parent_ai = getattr(parent_msg, "is_ai_message", False) or parent_msg.sender_id is None or parent_msg.sender_id == -1
+            if is_parent_ai:
+                parent_sender_name = "Cortex AI"
+            else:
+                parent_sender = db.query(User).filter(User.user_id == parent_msg.sender_id).first()
+                parent_sender_name = parent_sender.name if parent_sender else "Unknown User"
+
             parent_ref = {
                 "id": parent_msg.id,
-                "sender_name": parent_sender.name if parent_sender else "Unknown User",
+                "sender_name": parent_sender_name,
                 "content": parent_msg.content,
                 "is_deleted": parent_msg.is_deleted,
+                "is_ai_message": is_parent_ai,
             }
 
     # Reactions breakdown
@@ -71,10 +84,38 @@ def format_message(msg: DiscussionMessage, db: Session, current_user_id: int) ->
         "parent_message_id": msg.parent_message_id,
         "parent_message": parent_ref,
         "is_deleted": msg.is_deleted,
+        "is_ai_message": is_ai,
+        "ai_sources": getattr(msg, "ai_sources", None),
+        "ai_chunks": getattr(msg, "ai_chunks", None),
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
         "updated_at": msg.updated_at.isoformat() if msg.updated_at else None,
         "reactions": reactions_list,
     }
+
+
+def create_ai_message(
+    db: Session,
+    discussion_id: int,
+    content: str,
+    parent_message_id: Optional[int] = None,
+    ai_sources: Optional[dict] = None,
+    ai_chunks: Optional[list] = None,
+) -> Dict[str, Any]:
+    """Create and format an AI response message from Cortex."""
+    ai_msg = DiscussionMessage(
+        discussion_id=discussion_id,
+        sender_id=None,
+        content=content,
+        parent_message_id=parent_message_id,
+        is_ai_message=True,
+        ai_sources=ai_sources,
+        ai_chunks=ai_chunks,
+    )
+    db.add(ai_msg)
+    db.commit()
+    db.refresh(ai_msg)
+    return format_message(ai_msg, db, current_user_id=-1)
+
 
 
 DEFAULT_PAGE_SIZE = 10  # Easily changeable to 50 later

@@ -20,6 +20,11 @@ async def lifespan(app: FastAPI):
     try:
         db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR;"))
         db.execute(text("ALTER TABLE team_discussions ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;"))
+        db.execute(text("ALTER TABLE discussion_messages ADD COLUMN IF NOT EXISTS is_ai_message BOOLEAN DEFAULT FALSE;"))
+        db.execute(text("ALTER TABLE discussion_messages ADD COLUMN IF NOT EXISTS ai_sources JSONB;"))
+        db.execute(text("ALTER TABLE discussion_messages ADD COLUMN IF NOT EXISTS ai_chunks JSONB;"))
+        db.execute(text("ALTER TABLE discussion_messages ALTER COLUMN sender_id DROP NOT NULL;"))
+        db.execute(text("ALTER TABLE discussion_stm ADD COLUMN IF NOT EXISTS last_summarized_message_id INTEGER;"))
         db.commit()
     except Exception as e:
         print(f"Schema migration error: {e}")
