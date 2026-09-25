@@ -237,7 +237,7 @@ Instructions:
 
     payload = {
         "model":
-            "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+            os.getenv("MAIN_MODEL"),
 
         "temperature": 0.2,
 

@@ -19,7 +19,7 @@ from agentic.memory.short_term.stm import ShortTermMemory
 
 load_dotenv()
 
-MODEL = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
+MODEL = os.getenv("MAIN_MODEL")
 FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
 
 llm = ChatFireworks(

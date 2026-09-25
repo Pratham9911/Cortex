@@ -32,14 +32,14 @@ SYSTEM_PROMPT = SystemMessage(
 
 # LLM with tools — used for iterative web search
 web_llm_with_tools = ChatFireworks(
-    model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+    model=os.getenv("MAIN_MODEL"),
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
 )
 
 # LLM without tools — used for forced synthesis (graph-level enforcement)
 web_llm_base = ChatFireworks(
-    model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+    model=os.getenv("MAIN_MODEL"),
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
 )

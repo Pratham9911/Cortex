@@ -52,7 +52,7 @@ Generated Answer:
 """
 
     response = client.chat.completions.create(
-        model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+        model=os.getenv("MAIN_MODEL"),
         messages=[
             {
                 "role": "user",

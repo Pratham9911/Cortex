@@ -46,11 +46,19 @@ _llm = ChatFireworks(
 # ---------------------------------------------------------------------------
 
 _FIELDS = [
-    "user_information_and_preferences",
-    "discussion_and_context",
-    "assistant_responses_and_progress",
-    "decisions_and_current_state",
+
+    "participants",
+
+    "discussion_context",
+
+    "conversation_state",
+
+    "decisions_and_agreements",
+
     "open_items",
+
+    "agent_interactions",
+
 ]
 
 # Hard safety cap applied in code — bullets beyond this are silently dropped.
@@ -58,77 +66,117 @@ _FIELDS = [
 _HARD_CAP = 7
 
 _SYSTEM_PROMPT = """\
-You are a memory extractor for an AI assistant.
+You are a memory extractor for a multi-user team discussion.
 
-Read the conversation below and return a single JSON object with exactly these five keys:
+Read the discussion and return ONE JSON object with exactly these six keys:
 
-  "user_information_and_preferences"
-  "discussion_and_context"
-  "assistant_responses_and_progress"
-  "decisions_and_current_state"
+  "participants"
+  "discussion_context"
+  "conversation_state"
+  "decisions_and_agreements"
   "open_items"
+  "agent_interactions"
 
-The value of each key is a JSON array of bullet strings.
-Use [] if a section has nothing useful to record.
+Each value must be a JSON array of bullet strings. Use [] when empty.
 
 === BULLET RULES ===
 
 - Max 25 words per bullet.
 - Aim for max 5 bullets per section.
-- Never exceed 5 bullets in any section (drop the least important ones).
-- Exception: user_information_and_preferences — preserve ALL important user facts but you can drop if requirements changes or no longer relevant.
-  even if that means slightly more bullets. Do NOT just drop user info to meet a count limit.
+- Never exceed 5 bullets per section.
+- Preserve who said important information using name and user_id when available.
+- Never store private chain-of-thought.
 
-=== SECTION DEFINITIONS ===
+=== SECTIONS ===
 
-user_information_and_preferences
-  Stable facts about the user that matter in future turns:
-  name, background, goals, preferences, constraints, learning interests,
-  tools or languages they use, choices already made.
-  This is the MOST important section — preserve it faithfully.
-  Update a fact only when the user explicitly changes it.
-  Never delete user information just because the topic changed.
+participants
 
-discussion_and_context
-  What the user wanted and what was actually discussed.
-  Write specific, factual sentences — not just topic names.
-  Bad:  "User asked about RAG."
-  Good: "User requested a detailed RAG overview; follow-up asked for 3rd point which was cut off."
-  Keep only the most recent / active topics; drop fully resolved older ones.
+People relevant to the discussion. Preserve user_id, name, and relevant role/context.
 
-assistant_responses_and_progress
-  Key things the assistant already explained, built, suggested, or clarified —
-  only what is useful to know later to avoid repeating the same answer.
-  Skip routine Q&A. Focus on ongoing work, incomplete explanations, or partial code.
-  Do not copy full responses verbatim.
+Example:
+"Rahul (user_id=42) is working on backend ingestion."
 
-decisions_and_current_state
-  Decisions made, approaches chosen or rejected, current task status.
-  Example: "User chose hybrid retrieval (BM25 + semantic + RRF)."
-  Drop decisions for tasks that are fully finished or abandoned.
+This is discussion-scoped memory, not permanent user memory.
+
+discussion_context
+
+Important information, statements, requirements, observations, or explanations from participants that may matter later.
+
+Always preserve attribution when it affects meaning.
+
+Good:
+"Rahul said scanned PDFs fail during OCR while normal PDFs work."
+
+Do not store vague topic names or irrelevant conversation.
+
+conversation_state
+
+The current state of the discussion: active problem, approach, progress, and important context needed for the next turn.
+
+Example:
+"The team is investigating OCR failures for scanned PDFs; normal PDF ingestion works."
+
+decisions_and_agreements
+
+Decisions, agreements, conclusions, chosen approaches, or rejected approaches.
+
+Only record an actual decision when the discussion establishes agreement.
+
+Example:
+"The team agreed to test RapidOCR for scanned PDFs."
+Do not invent agreement from a suggestion.
 
 open_items
-  Unresolved questions, pending work, or things still to be decided.
-  Remove an item once it is answered or no longer relevant.
 
-=== MERGE RULES (when PERSISTENT MEMORY is present) ===
+Unresolved questions, pending work, investigations, or decisions still to be made.
+Example:
+"The team has not yet decided how OCR failures should be handled in production."
+Remove items once resolved.
 
-The conversation may start with a PERSISTENT MEMORY block — a prior summary.
-  - Merge it with the new messages.
-  - Preserve existing user_information_and_preferences fully; only update / replace if explicitly changed.
-  - For other sections: update stale facts, add new items, remove fully resolved items.
-  - Mention each fact only once; no duplicates.
-  - Prefer new information over old when they conflict.
-  - try to place imp and relevant items at the top of each section, less important items at the bottom and later can be removed if irrelevent.
+agent_interactions
 
-=== QUALITY RULES ===
+Useful results or context from previous Cortex-agent interactions that may matter later.
 
-  - Keep bullets concise and factual.
-  - Drop useless filler and old useless info to current context.
-  - Do not copy messages verbatim; extract the useful information.
-  - Do not invent facts not present in the conversation.
-  - Never erase memory at the user's request.
-  - Output ONLY the JSON object — no prose, no markdown, no explanation.
+Store results, retrieved information, or conclusions — never the agent's private reasoning.
+Example:
+"Cortex previously found that the ingestion pipeline already supports OCR preprocessing."
+
+=== MERGE RULES ===
+
+When previous STM is provided:
+
+- Merge it with the new messages.
+- Add relevant new information and participants.
+- Update stale or corrected information.
+- Keep the latest conversation state.
+- Preserve valid decisions unless explicitly changed or superseded.
+- Remove resolved open items.
+- Avoid duplicates.
+- Prefer newer information when facts conflict.
+- Keep the most important current information first.
+- Remove information no longer useful to the active discussion.
+
+=== ATTRIBUTION ===
+
+This is a multi-user discussion.
+
+Do not merge different people's statements when attribution matters.
+
+Prefer:
+"Pratham proposed using Redis for caching."
+"Rahul questioned the invalidation strategy."
+
+Only say "the team agreed" when agreement is actually established.
+
+=== QUALITY ===
+
+- Be concise and factual.
+- Preserve useful context, not entire messages.
+- Do not invent facts, decisions, or user information.
+- Ignore greetings, filler, and irrelevant conversation.
+- Never erase useful memory merely because the topic changed.
+- Output ONLY the JSON object. No prose, markdown, or explanation.
+- try to place imp and relevant items at the top of each section, less important items at the bottom and later can be removed if irrelevent.
 """
 
 
@@ -139,12 +187,20 @@ def _empty_summary() -> dict[str, list[str]]:
 def _render_summary(data: dict[str, list[str]]) -> str:
     """Format the 5-field dict as readable memory text for the SystemMessage."""
     labels = {
-        "user_information_and_preferences":  "1. USER INFORMATION & PREFERENCES",
-        "discussion_and_context":            "2. DISCUSSION / CONTEXT",
-        "assistant_responses_and_progress":  "3. ASSISTANT RESPONSES / PROGRESS",
-        "decisions_and_current_state":       "4. DECISIONS & CURRENT STATE",
-        "open_items":                        "5. OPEN ITEMS",
-    }
+
+    "participants":              "1. PARTICIPANTS",
+
+    "discussion_context":        "2. DISCUSSION CONTEXT",
+
+    "conversation_state":        "3. CONVERSATION STATE",
+
+    "decisions_and_agreements":  "4. DECISIONS & AGREEMENTS",
+
+    "open_items":                "5. OPEN ITEMS",
+
+    "agent_interactions":        "6. AGENT INTERACTIONS",
+
+}
     sections = []
     for field, label in labels.items():
         items = data.get(field, [])

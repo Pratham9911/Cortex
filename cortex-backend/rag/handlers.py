@@ -15,7 +15,7 @@ FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
 FIREWORKS_CHAT_COMPLETIONS_URL = (
     "https://api.fireworks.ai/inference/v1/chat/completions"
 )
-FIREWORKS_MULTI_HOP_MODEL = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
+FIREWORKS_MULTI_HOP_MODEL = os.getenv("MAIN_MODEL")
 FIREWORKS_NORMAL_MODEL = "accounts/fireworks/models/gpt-oss-120b"
 
 normal_llm = ChatFireworks(

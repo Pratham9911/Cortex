@@ -3,7 +3,7 @@ from typing import Callable, Optional
 from sqlalchemy.orm import Session
 
 from agentic.tools import set_active_project_context, set_active_event_callback
-from agentic.teams.discussion_agent.stm import (
+from agentic.teams.short_term_memory import (
     get_team_document_ids,
     check_and_summarize_discussion_db,
     build_discussion_llm_messages,
@@ -20,17 +20,20 @@ async def run_discussion_agent(
     user_id: int,
     user_role: str,
     db: Session,
+    selected_document_ids: Optional[list[int]] = None,
     event_callback: Optional[Callable] = None,
 ) -> dict:
     """
     Execute Discussion Supervisory Agent:
-    1. Scope document search strictly to team_id.
+    1. Scope document search to explicit selected_document_ids (if provided) or team documents.
     2. Maintain and check Discussion STM (1000 tokens threshold + 5-section summarizer).
     3. Stream sub-agent progress updates via event_callback (excluding CoT reasoning).
     4. Return final formatted answer, sources, and chunks.
     """
-    # 1. Document scoping for this team
-    team_doc_ids = get_team_document_ids(db, project_id, team_id)
+    if selected_document_ids and len(selected_document_ids) > 0:
+        target_doc_ids = selected_document_ids
+    else:
+        target_doc_ids = get_team_document_ids(db, project_id, team_id)
 
     # 2. Context setup
     set_active_project_context(
@@ -38,7 +41,7 @@ async def run_discussion_agent(
         user_id=user_id,
         user_role=user_role,
         db=db,
-        document_ids=team_doc_ids,
+        document_ids=target_doc_ids,
     )
 
     # Filtered event callback wrapper that ignores reasoning / CoT

@@ -14,43 +14,21 @@ from migrations.migrate_audit_logs import init_audit_logs_table_and_migrate
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ──────────────────────────────────────────────────────────────
-    # Schema migrations (sync — fine before server is serving)
-    db = SessionLocal()
-    try:
-        db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR;"))
-        db.execute(text("ALTER TABLE team_discussions ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;"))
-        db.execute(text("ALTER TABLE discussion_messages ADD COLUMN IF NOT EXISTS is_ai_message BOOLEAN DEFAULT FALSE;"))
-        db.execute(text("ALTER TABLE discussion_messages ADD COLUMN IF NOT EXISTS ai_sources JSONB;"))
-        db.execute(text("ALTER TABLE discussion_messages ADD COLUMN IF NOT EXISTS ai_chunks JSONB;"))
-        db.execute(text("ALTER TABLE discussion_messages ALTER COLUMN sender_id DROP NOT NULL;"))
-        db.execute(text("ALTER TABLE discussion_stm ADD COLUMN IF NOT EXISTS last_summarized_message_id INTEGER;"))
-        db.commit()
-    except Exception as e:
-        print(f"Schema migration error: {e}")
-        db.rollback()
-    finally:
-        db.close()
 
-    Base.metadata.create_all(bind=engine)
-    init_audit_logs_table_and_migrate()
-
-    # Async checkpointer + compile graph
     from agentic.checkpointer import init_checkpointer
     await init_checkpointer()
 
     from agentic.main_graph import build_workflow
     import agentic.main_graph as mg
+
     mg.workflow = build_workflow()
+
     print("[Startup] Async workflow compiled successfully.")
 
     yield
 
-    # ── Shutdown ─────────────────────────────────────────────────────────────
     from agentic.checkpointer import close_checkpointer
     await close_checkpointer()
-
-
 app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware

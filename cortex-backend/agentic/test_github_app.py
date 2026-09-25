@@ -52,7 +52,7 @@ def get_llm():
     if not fireworks_key:
         raise ValueError("FIREWORKS_API_KEY not found in environment (.env).")
     return ChatFireworks(
-        model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+        model=os.getenv("MAIN_MODEL"),
         api_key=fireworks_key,
         temperature=0,
     )

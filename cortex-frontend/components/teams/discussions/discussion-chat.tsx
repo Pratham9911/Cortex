@@ -5,13 +5,12 @@ import {
   CheckCircle2,
   Hash,
   Info,
-  Link2,
   Loader2,
   Pin,
-  Radio,
+  Plus,
   Send,
   Smile,
-  Sparkles,
+  X,
   XCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -24,6 +23,9 @@ import { ReactionDetailsDialog } from "./reaction-details-dialog"
 import { ReplyPreviewBar } from "./reply-preview-bar"
 import type { ChatMessage, DiscussionItem, WsChatEvent } from "./types"
 import { cn } from "@/lib/utils"
+import { getFileFormatIcon } from "@/components/agent-chat/project-document-select-modal"
+import { TeamDocumentSelectModal } from "./team-document-select-modal"
+import type { ProjectDocumentItem } from "@/lib/ai-agent"
 
 export function DiscussionChat({
   isDark,
@@ -69,7 +71,12 @@ export function DiscussionChat({
   const [socketStatus, setSocketStatus] = useState<"connecting" | "connected" | "disconnected" | "error">("connecting")
   const [inputContent, setInputContent] = useState("")
 
-  // Reply / Edit / Context Menu / Reaction Details States
+  // Document selector state
+  const [selectedDocs, setSelectedDocs] = useState<ProjectDocumentItem[]>([])
+  const [docModalOpen, setDocModalOpen] = useState(false)
+  const [teamDocs, setTeamDocs] = useState<ProjectDocumentItem[]>([])
+  const [teamDocsLoading, setTeamDocsLoading] = useState(false)
+
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null)
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -261,13 +268,39 @@ export function DiscussionChat({
   useEffect(() => {
     setCortexThinkingStatus(null)
     setCortexAgentName(null)
+    setSelectedDocs([])
     if (activeDiscussion) {
       setReplyingTo(null)
       fetchMessages()
+      fetchTeamDocs()
     } else {
       setMessages([])
     }
   }, [activeDiscussion?.id, teamId])
+
+  // Fetch team-scoped documents for the doc selector
+  const fetchTeamDocs = async () => {
+    if (!teamId) return
+    const token = getAuthToken()
+    const projectId = getProjectId()
+    if (!token) return
+
+    try {
+      setTeamDocsLoading(true)
+      const res = await fetch(
+        `${apiUrl}/projects/${projectId}/teams/${teamId}/documents`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (res.ok) {
+        const data = await res.json()
+        setTeamDocs(data || [])
+      }
+    } catch (err) {
+      console.error("Failed to fetch team documents:", err)
+    } finally {
+      setTeamDocsLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -390,6 +423,7 @@ export function DiscussionChat({
 
     const content = inputContent.trim()
     const parentId = replyingTo?.id || null
+    const docIds = selectedDocs.length > 0 ? selectedDocs.map((d) => d.document_id) : undefined
     setInputContent("")
     setReplyingTo(null)
 
@@ -404,6 +438,7 @@ export function DiscussionChat({
           action: "send_message",
           content,
           parent_message_id: parentId,
+          ...(docIds ? { selected_document_ids: docIds } : {}),
         })
       )
       return
@@ -744,6 +779,62 @@ export function DiscussionChat({
           />
         )}
 
+        {/* Selected document pills */}
+        {selectedDocs.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 mb-2 px-1">
+            {selectedDocs.slice(0, 4).map((doc) => {
+              const rawName = doc.title || doc.file_name
+              const truncName = rawName.length > 20 ? rawName.slice(0, 18) + "…" : rawName
+              return (
+                <div
+                  key={doc.document_id}
+                  className={cn(
+                    "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-all select-none",
+                    isDark
+                      ? "border-indigo-700/60 bg-indigo-950/40 text-indigo-200"
+                      : "border-indigo-200 bg-indigo-50 text-indigo-800"
+                  )}
+                >
+                  {getFileFormatIcon(doc.file_name, "size-3 shrink-0")}
+                  <span className="truncate max-w-[140px]" title={rawName}>{truncName}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDocs((prev) => prev.filter((d) => d.document_id !== doc.document_id))}
+                    className={cn(
+                      "opacity-0 group-hover:opacity-100 rounded-full p-0.5 transition-opacity cursor-pointer",
+                      isDark ? "hover:bg-red-950 hover:text-red-300 text-indigo-400" : "hover:bg-red-50 hover:text-red-600 text-indigo-500"
+                    )}
+                  >
+                    <X className="size-3 stroke-[2.5]" />
+                  </button>
+                </div>
+              )
+            })}
+            {selectedDocs.length > 4 && (
+              <button
+                type="button"
+                onClick={() => setDocModalOpen(true)}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-medium cursor-pointer transition-colors",
+                  isDark ? "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800" : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200"
+                )}
+              >
+                +{selectedDocs.length - 4} more
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectedDocs([])}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px] font-medium cursor-pointer transition-colors",
+                isDark ? "border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-red-400" : "border-slate-200 bg-slate-50 text-slate-400 hover:text-red-600"
+              )}
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSendMessage} className="flex items-end gap-2">
           <div
             className={cn(
@@ -752,13 +843,29 @@ export function DiscussionChat({
               isDark ? "border-zinc-700 bg-[#1b2024] shadow-black/20" : "border-slate-200 bg-slate-50"
             )}
           >
+            {/* + Document Selector Button */}
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              className={cn("rounded-xl mb-0.5", isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-slate-600 hover:bg-white")}
+              onClick={() => setDocModalOpen(true)}
+              title="Select documents for Cortex"
+              className={cn(
+                "rounded-xl mb-0.5 relative",
+                selectedDocs.length > 0
+                  ? isDark ? "text-indigo-400 hover:bg-indigo-950/50" : "text-indigo-600 hover:bg-indigo-50"
+                  : isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-slate-600 hover:bg-white"
+              )}
             >
-              <Link2 className="size-4" />
+              <Plus className="size-4" />
+              {selectedDocs.length > 0 && (
+                <span className={cn(
+                  "absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full text-[9px] font-bold",
+                  isDark ? "bg-indigo-600 text-white" : "bg-indigo-600 text-white"
+                )}>
+                  {selectedDocs.length}
+                </span>
+              )}
             </Button>
             <Button
               type="button"
@@ -805,6 +912,18 @@ export function DiscussionChat({
           </div>
         </form>
       </div>
+
+      {/* Team Document Selector Modal */}
+      {docModalOpen && (
+        <TeamDocumentSelectModal
+          isDark={isDark}
+          teamDocs={teamDocs}
+          loading={teamDocsLoading}
+          selectedDocs={selectedDocs}
+          onApplySelection={setSelectedDocs}
+          onClose={() => setDocModalOpen(false)}
+        />
+      )}
 
       {/* Edit Message Modal */}
       <EditMessageDialog

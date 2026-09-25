@@ -20,7 +20,7 @@ FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
 FIREWORKS_CHAT_COMPLETIONS_URL = (
     "https://api.fireworks.ai/inference/v1/chat/completions"
 )
-FIREWORKS_GENERATOR_MODEL = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
+FIREWORKS_GENERATOR_MODEL = os.getenv("MAIN_MODEL")
 
 # ==========================================================
 # Helpers

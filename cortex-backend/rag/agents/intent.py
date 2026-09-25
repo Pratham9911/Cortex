@@ -8,7 +8,7 @@ from typing import Optional
 from langchain_core.messages import BaseMessage
 
 
-MODEL = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
+MODEL = os.getenv("MAIN_MODEL")
 
 client = ChatFireworks(
     model=MODEL,

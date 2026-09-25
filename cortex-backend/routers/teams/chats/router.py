@@ -354,6 +354,8 @@ async def discussion_websocket(
                         if not cleaned_query:
                             cleaned_query = content
 
+                        selected_doc_ids = data.get("selected_document_ids") or data.get("document_ids")
+
                         import asyncio
                         asyncio.create_task(
                             _trigger_cortex_discussion_agent_ws(
@@ -364,6 +366,7 @@ async def discussion_websocket(
                                 user_role=membership.role,
                                 query_text=cleaned_query,
                                 parent_message_id=new_msg.get("id"),
+                                selected_document_ids=selected_doc_ids,
                             )
                         )
     except WebSocketDisconnect:
@@ -383,6 +386,7 @@ async def _trigger_cortex_discussion_agent_ws(
     user_role: str,
     query_text: str,
     parent_message_id: Optional[int] = None,
+    selected_document_ids: Optional[list[int]] = None,
 ):
     import asyncio
     from database import SessionLocal
@@ -444,6 +448,7 @@ async def _trigger_cortex_discussion_agent_ws(
             user_id=user_id,
             user_role=user_role,
             db=db,
+            selected_document_ids=selected_document_ids,
             event_callback=ws_event_callback,
         )
 

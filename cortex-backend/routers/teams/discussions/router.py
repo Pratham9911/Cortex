@@ -5,6 +5,9 @@ from sqlalchemy import func
 from database import SessionLocal
 from dependencies import get_current_user
 from models import (
+    Document,
+    DocumentVersion,
+    Folder,
     ProjectMember,
     Team,
     TeamDiscussion,
@@ -281,3 +284,69 @@ def _format_discussion(d: TeamDiscussion) -> dict:
         "created_at": d.created_at.isoformat() if d.created_at else None,
         "updated_at": d.updated_at.isoformat() if d.updated_at else None,
     }
+
+
+# ---------------------------------------------------
+# TEAM-SCOPED DOCUMENTS (for discussion doc-selector)
+# ---------------------------------------------------
+@router.get("/projects/{project_id}/teams/{team_id}/documents")
+def list_team_documents(
+    project_id: int,
+    team_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return documents that belong to this team and are searchable by the user."""
+    _require_project_member(db, project_id, user_id)
+
+    # Verify team belongs to project
+    team = db.query(Team).filter(
+        Team.team_id == team_id,
+        Team.project_id == project_id,
+    ).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    # All documents in this project that include team_id in allowed_team_ids
+    docs = db.query(Document).filter(
+        Document.project_id == project_id,
+    ).all()
+
+    result = []
+    for doc in docs:
+        # Must belong to this team
+        if team_id not in (doc.allowed_team_ids or []):
+            continue
+
+        # Must have an active, non-deleted version
+        active_version = db.query(DocumentVersion).filter(
+            DocumentVersion.document_id == doc.document_id,
+            DocumentVersion.is_active == True,
+            DocumentVersion.is_deleted == False,
+        ).first()
+        if not active_version:
+            continue
+
+        folder_name = None
+        if doc.folder_id:
+            folder = db.query(Folder).filter(Folder.folder_id == doc.folder_id).first()
+            if folder:
+                folder_name = folder.name
+
+        result.append({
+            "document_id": doc.document_id,
+            "title": doc.title,
+            "description": doc.description,
+            "folder_id": doc.folder_id,
+            "folder_name": folder_name,
+            "allowed_team_ids": doc.allowed_team_ids,
+            "download_access_level": doc.download_access_level,
+            "search_access_level": doc.search_access_level,
+            "active_version": active_version.version_number,
+            "active_version_id": active_version.version_id,
+            "status": active_version.status,
+            "file_name": active_version.file_name,
+            "file_size": active_version.file_size,
+        })
+
+    return result

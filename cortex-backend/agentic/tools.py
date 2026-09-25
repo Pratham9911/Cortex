@@ -334,7 +334,7 @@ async def summarize_tool_output(query: str, answer: str, threshold: int = LARGE_
         from langchain_core.messages import HumanMessage
 
         llm = ChatFireworks(
-            model="accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+            model=os.getenv("MAIN_MODEL"),
             api_key=os.getenv("FIREWORKS_API_KEY"),
             temperature=0,
         )
