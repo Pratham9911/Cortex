@@ -9,8 +9,7 @@ from sqlalchemy import (
     Boolean,
     UniqueConstraint
 )
-from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
 from database import Base
@@ -697,4 +696,66 @@ class DiscussionMessageReaction(Base):
             "emoji",
             name="uq_msg_user_emoji"
         ),
-    )
+    )
+
+
+class Decision(Base):
+    __tablename__ = "decisions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    team_id = Column(
+        Integer,
+        ForeignKey("teams.team_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    created_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+    embedding = Column(Vector(1024), nullable=True)
+    search_vector = Column(TSVECTOR, nullable=True)
+
+
+class DecisionParticipant(Base):
+    __tablename__ = "decision_participants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(
+        Integer,
+        ForeignKey("decisions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=False,
+        index=True
+    )
+    role = Column(String, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "decision_id",
+            "user_id",
+            name="uq_decision_participant"
+        ),
+    )
+

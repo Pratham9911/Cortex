@@ -37,6 +37,7 @@ def set_active_project_context(
     resume_action=None,
     resume_feedback=None,
     document_ids=None,
+    team_id=None,
 ):
     global _global_active_project_ctx
     ctx = {
@@ -48,6 +49,7 @@ def set_active_project_context(
         "resume_action": resume_action,
         "resume_feedback": resume_feedback,
         "document_ids": document_ids,
+        "team_id": team_id,
     }
     with _global_project_lock:
         _global_active_project_ctx = ctx
