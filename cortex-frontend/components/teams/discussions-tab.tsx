@@ -27,10 +27,12 @@ export function DiscussionsTab({
   isDark,
   teamId,
   userRole = "member",
+  onOpenMemberDetails,
 }: {
   isDark: boolean
   teamId?: string | number
   userRole?: "admin" | "member"
+  onOpenMemberDetails?: (member: { user_id: number; name?: string; avatar_url?: string } | number) => void
 }) {
   const { user } = useAuth()
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -325,6 +327,7 @@ export function DiscussionsTab({
         activeDiscussion={activeDiscussion}
         showDetailsPanel={showDetailsPanel}
         onToggleDetailsPanel={() => setShowDetailsPanel((prev) => !prev)}
+        onOpenMemberDetails={onOpenMemberDetails}
       />
 
       {/* PANEL 3: DETAILS DRAWER (WHATSAPP STYLE) */}

@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Brain } from "lucide-react"
 import { AssistantMessageContent, MessageSources } from "@/components/agent-chat/agent-chat-thread"
+import { DecisionProposalCard } from "./decision-proposal-card"
 import { cn } from "@/lib/utils"
 import type { ChatMessage } from "./types"
 
@@ -10,20 +11,28 @@ export function MessageItem({
   isDark,
   message,
   currentUserId,
+  userRole = "member",
+  projectId = "1",
+  teamId = "1",
   isHighlighted,
   onJumpToMessage,
   onContextMenu,
   onReact,
   onOpenReactionDetails,
+  onOpenMemberDetails,
 }: {
   isDark: boolean
   message: ChatMessage
   currentUserId: number
+  userRole?: "admin" | "member"
+  projectId?: string | number
+  teamId?: string | number
   isHighlighted?: boolean
   onJumpToMessage?: (messageId: number) => void
   onContextMenu: (e: React.MouseEvent, message: ChatMessage) => void
   onReact: (message: ChatMessage, emoji: string) => void
   onOpenReactionDetails: (message: ChatMessage) => void
+  onOpenMemberDetails?: (member: { user_id: number; name?: string; avatar_url?: string } | number) => void
 }) {
   const [imgError, setImgError] = useState(false)
   const [cortexIconError, setCortexIconError] = useState(false)
@@ -37,6 +46,16 @@ export function MessageItem({
         .toUpperCase()
         .slice(0, 2)
     : "U"
+
+  const handleSenderClick = () => {
+    if (!isAi && message.sender_id && onOpenMemberDetails) {
+      onOpenMemberDetails({
+        user_id: message.sender_id,
+        name: message.sender_name,
+        avatar_url: message.sender_avatar_url || undefined,
+      })
+    }
+  }
 
   const formatTime = (isoString?: string | null) => {
     if (!isoString) return ""
@@ -97,18 +116,13 @@ export function MessageItem({
           src={message.sender_avatar_url}
           alt={message.sender_name}
           onError={() => setImgError(true)}
-          className="size-9 shrink-0 rounded-full border object-cover shadow-sm"
+          onClick={handleSenderClick}
+          className="size-9 shrink-0 rounded-full border border-black object-cover shadow-xs cursor-pointer hover:scale-105 transition-transform"
         />
       ) : (
         <span
-          className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-full border text-xs font-bold shadow-sm",
-            isSelf
-              ? "border-violet-500 bg-violet-600 text-white"
-              : isDark
-              ? "border-zinc-700 bg-zinc-800 text-zinc-200"
-              : "border-slate-300 bg-slate-200 text-slate-800"
-          )}
+          onClick={handleSenderClick}
+          className="flex size-9 shrink-0 items-center justify-center rounded-full border border-black bg-white text-black font-extrabold text-xs shadow-xs cursor-pointer hover:scale-105 transition-transform"
         >
           {initials}
         </span>
@@ -122,7 +136,13 @@ export function MessageItem({
       )}>
         {/* Header Name & Timestamp */}
         <div className="flex items-center gap-2 text-xs mb-1 px-1">
-          <span className="font-semibold truncate flex items-center gap-1">
+          <span
+            onClick={handleSenderClick}
+            className={cn(
+              "font-semibold truncate flex items-center gap-1",
+              !isAi && "cursor-pointer hover:underline"
+            )}
+          >
             {isSelf ? "You" : isAi ? "Cortex AI" : message.sender_name}
             {isAi && (
               <span className={cn(
@@ -219,6 +239,20 @@ export function MessageItem({
                 } as any
               }
               isDark={isDark}
+            />
+          </div>
+        )}
+
+        {/* HITL Decision Proposal Card */}
+        {isAi && !message.is_deleted && message.ai_sources?.decision_proposal && (
+          <div className="mt-2 w-full">
+            <DecisionProposalCard
+              isDark={isDark}
+              proposal={message.ai_sources.decision_proposal}
+              isAdmin={userRole === "admin"}
+              projectId={projectId}
+              teamId={teamId}
+              onOpenMemberDetails={onOpenMemberDetails}
             />
           </div>
         )}

@@ -182,8 +182,8 @@ async def collect_decision_tool_results(state: DecisionAgentState) -> dict:
                     add_input_tokens += parsed["usage"].get("input_tokens", 0)
                     add_output_tokens += parsed["usage"].get("output_tokens", 0)
 
-                if "decision" in parsed:
-                    decision_result = parsed["decision"]
+                if "decision_proposal" in parsed:
+                    decision_result = parsed["decision_proposal"]
                 elif "synthesized_answer" in parsed:
                     decision_result = {
                         "synthesized_answer": parsed.get("synthesized_answer"),

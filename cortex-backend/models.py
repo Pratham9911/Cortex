@@ -720,13 +720,18 @@ class Decision(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now()
-    )
     embedding = Column(Vector(1024), nullable=True)
     search_vector = Column(TSVECTOR, nullable=True)
+    status = Column(String, default="approved", nullable=False, server_default="approved")
+    approved_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=True
+    )
+    approved_at = Column(
+        DateTime(timezone=True),
+        nullable=True
+    )
 
 
 class DecisionParticipant(Base):

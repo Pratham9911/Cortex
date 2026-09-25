@@ -60,18 +60,28 @@ def store_decision_tool(
             title=title,
             description=description,
             created_by=effective_created_by,
-            participants=participants
+            participants=participants,
+            status="pending_approval"
         )
+
+        notice = f"A decision proposal titled '{title}' has been submitted to the team for approval. Any team admin can review, approve, edit, or reject it."
+        if res.get("participant_notice"):
+            notice += f" {res['participant_notice']}"
+
         return json.dumps({
             "status": "success",
-            "message": f"Decision #{res['decision_id']} successfully recorded.",
-            "decision": {
+            "message": notice,
+            "notice": notice,
+            "decision_proposal": {
                 "id": res["decision_id"],
+                "decision_id": res["decision_id"],
                 "team_id": res["team_id"],
                 "title": res["title"],
                 "description": res["description"],
                 "created_by": res["created_by"],
+                "status": res["status"],
                 "participants": res["participants"],
+                "participant_notice": res.get("participant_notice"),
                 "created_at": str(res["created_at"])
             }
         }, default=str)

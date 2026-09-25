@@ -40,6 +40,7 @@ async def run_discussion_agent(
         project_id=project_id,
         user_id=user_id,
         user_role=user_role,
+        team_id=team_id,
         db=db,
         document_ids=target_doc_ids,
     )
@@ -67,6 +68,7 @@ async def run_discussion_agent(
         "tool_calls": [],
         "sources": [],
         "chunks": [],
+        "decision_proposal": None,
         "input_tokens": 0,
         "output_tokens": 0,
         "iterations": 0,
@@ -82,6 +84,7 @@ async def run_discussion_agent(
     final_answer = ""
     final_sources = []
     final_chunks = []
+    final_decision_proposal = None
     input_tokens = 0
     output_tokens = 0
 
@@ -112,10 +115,13 @@ async def run_discussion_agent(
             elif node_name == "collect_discussion_tool_results":
                 sources = node_update.get("sources", [])
                 chunks = node_update.get("chunks", [])
+                proposal = node_update.get("decision_proposal")
                 if sources:
                     final_sources = sources
                 if chunks:
                     final_chunks = chunks
+                if proposal:
+                    final_decision_proposal = proposal
 
     if not final_answer.strip():
         final_answer = "I've analyzed the team discussion and documents, but could not formulate a complete answer."
@@ -150,6 +156,7 @@ async def run_discussion_agent(
             agent="discussion_agent",
             answer=final_answer,
             sources=formatted_sources,
+            decision_proposal=final_decision_proposal,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
@@ -158,6 +165,7 @@ async def run_discussion_agent(
         "answer": final_answer,
         "sources": formatted_sources,
         "chunks": final_chunks,
+        "decision_proposal": final_decision_proposal,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
     }

@@ -413,7 +413,12 @@ async def _trigger_cortex_discussion_agent_ws(
             if event_type == "agent_completed" and agent == "discussion_agent":
                 return
 
-            agent_display = "Retrieval Agent" if agent == "retrieval_agent" else ("Web Agent" if agent == "web_agent" else "Cortex")
+            agent_display = (
+                "Retrieval Agent" if agent == "retrieval_agent"
+                else "Web Agent" if agent == "web_agent"
+                else "Decision Agent" if agent == "decision_agent"
+                else "Cortex"
+            )
 
             status_text = f"{agent_display} is working..."
             if event_type == "agent_started":
@@ -424,6 +429,8 @@ async def _trigger_cortex_discussion_agent_ws(
                     status_text = "Retrieval Agent: Searching team documents..."
                 elif tool in ("web_search", "discussion_web_agent"):
                     status_text = "Web Agent: Searching web..."
+                elif tool in ("discussion_decision_agent",):
+                    status_text = "Decision Agent: Processing team decision..."
                 else:
                     status_text = f"{agent_display}: Executing {tool}..."
             elif event_type == "agent_completed":
@@ -452,12 +459,18 @@ async def _trigger_cortex_discussion_agent_ws(
             event_callback=ws_event_callback,
         )
 
+        # Inject decision_proposal into ai_sources so it persists with the message
+        ai_sources = result.get("sources") or {}
+        decision_proposal = result.get("decision_proposal")
+        if decision_proposal:
+            ai_sources["decision_proposal"] = decision_proposal
+
         ai_msg = create_ai_message(
             db,
             discussion_id=discussion_id,
             content=result.get("answer", ""),
             parent_message_id=parent_message_id,
-            ai_sources=result.get("sources"),
+            ai_sources=ai_sources,
             ai_chunks=result.get("chunks"),
         )
 

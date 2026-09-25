@@ -62,6 +62,62 @@ type MemberDetails = TeamMember & {
   can_remove: boolean
 }
 
+function PageUserAvatar({
+  name,
+  avatarUrl,
+  size = "sm",
+  onClick,
+  className,
+}: {
+  name: string
+  avatarUrl?: string
+  size?: "xs" | "sm" | "md" | "lg" | "xl"
+  onClick?: () => void
+  className?: string
+}) {
+  const [imgError, setImgError] = useState(false)
+
+  const initials = (() => {
+    if (!name || name.startsWith("User #")) return "U"
+    const parts = name.trim().split(/\s+/).filter(Boolean)
+    if (!parts.length) return "U"
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+  })()
+
+  const sizeMap: Record<string, string> = {
+    xs: "size-5 text-[8px]",
+    sm: "size-7 text-[9px]",
+    md: "size-10 text-xs",
+    lg: "size-12 text-xs",
+    xl: "size-14 text-base",
+  }
+
+  return (
+    <span
+      title={name}
+      onClick={onClick}
+      className={cn(
+        sizeMap[size],
+        "flex items-center justify-center overflow-hidden rounded-full border border-black bg-white text-black font-extrabold shrink-0 shadow-xs",
+        onClick && "cursor-pointer hover:scale-105 transition-transform",
+        className
+      )}
+    >
+      {avatarUrl && !imgError ? (
+        <img
+          src={avatarUrl}
+          alt={name}
+          onError={() => setImgError(true)}
+          className="size-full object-cover"
+        />
+      ) : (
+        initials
+      )}
+    </span>
+  )
+}
+
 export default function TeamDetailPage() {
   const params = useParams<{ teamId: string }>()
   const { user } = useAuth()
@@ -97,10 +153,11 @@ export default function TeamDetailPage() {
   const [activeTab, setActiveTab] = useState<TeamTabName>("Tasks")
 
   const getInitials = (name: string) => {
+    if (!name || name.startsWith("User #")) return "U"
     const parts = name.trim().split(/\s+/).filter(Boolean)
-    if (!parts.length) return "CX"
+    if (!parts.length) return "U"
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-    return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
   }
 
   const formatDate = (value?: string) => {
@@ -426,21 +483,14 @@ export default function TeamDetailPage() {
           <div className="flex shrink-0 items-center gap-2">
             <div className="hidden items-center sm:flex">
               {headerMembers.map((member) => (
-                <span
+                <PageUserAvatar
                   key={member.user_id}
-                  title={member.name}
+                  name={member.name}
+                  avatarUrl={member.avatar_url}
+                  size="sm"
                   onClick={() => openMemberDetails(member)}
-                  className={cn(
-                    "flex size-7 items-center justify-center overflow-hidden rounded-full border-2 text-[9px] font-bold text-white -ml-1.5 first:ml-0 cursor-pointer hover:scale-105 transition-transform",
-                    isDark ? "border-[#0d0f10] bg-zinc-700" : "border-white bg-zinc-700"
-                  )}
-                >
-                  {member.avatar_url ? (
-                    <img src={member.avatar_url} alt={member.name} className="size-full object-cover" />
-                  ) : (
-                    getInitials(member.name)
-                  )}
-                </span>
+                  className="-ml-1.5 first:ml-0"
+                />
               ))}
               {extraMemberCount > 0 && (
                 <span
@@ -490,6 +540,9 @@ export default function TeamDetailPage() {
             isDark={isDark}
             teamId={params.teamId}
             userRole={currentUserRole}
+            onOpenMemberDetails={(member) =>
+              openMemberDetails(typeof member === "number" ? { user_id: member } : member)
+            }
           />
         )}
         {activeTab === "Timelines" && <TimelinesTab isDark={isDark} />}
@@ -560,9 +613,7 @@ export default function TeamDetailPage() {
                       : "border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50/50"
                   )}
                 >
-                  <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-violet-500 text-xs font-bold text-white">
-                    {person.avatar_url ? <img src={person.avatar_url} alt={person.name} className="h-full w-full object-cover" /> : getInitials(person.name)}
-                  </span>
+                  <PageUserAvatar name={person.name} avatarUrl={person.avatar_url} size="md" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold">{person.name}</span>
                     <span className="block truncate text-xs text-zinc-500">{person.email}</span>
@@ -621,13 +672,7 @@ export default function TeamDetailPage() {
           {selectedInviteUser ? (
             <div className="flex min-h-0 flex-1 flex-col justify-center px-6 py-6">
               <div className={cn("rounded-2xl border p-5 text-center", isDark ? "border-zinc-700 bg-zinc-900/50" : "border-slate-200 bg-slate-50")}>
-                <span className="mx-auto flex size-14 items-center justify-center overflow-hidden rounded-full bg-violet-500 text-sm font-bold text-white">
-                  {selectedInviteUser.avatar_url ? (
-                    <img src={selectedInviteUser.avatar_url} alt={selectedInviteUser.name} className="h-full w-full object-cover" />
-                  ) : (
-                    getInitials(selectedInviteUser.name)
-                  )}
-                </span>
+                <PageUserAvatar name={selectedInviteUser.name} avatarUrl={selectedInviteUser.avatar_url} size="xl" className="mx-auto" />
                 <h3 className="mt-3 text-base font-semibold">{selectedInviteUser.name}</h3>
                 <p className="mt-1 text-xs text-zinc-500">{selectedInviteUser.email}</p>
               </div>
@@ -689,13 +734,7 @@ export default function TeamDetailPage() {
                           : "border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50/50"
                     )}
                   >
-                    <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-violet-500 text-xs font-bold text-white">
-                      {person.avatar_url ? (
-                        <img src={person.avatar_url} alt={person.name} className="h-full w-full object-cover" />
-                      ) : (
-                        getInitials(person.name)
-                      )}
-                    </span>
+                    <PageUserAvatar name={person.name} avatarUrl={person.avatar_url} size="md" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold">{person.name}</span>
                       <span className="block truncate text-xs text-zinc-500">{person.email}</span>
@@ -755,13 +794,7 @@ export default function TeamDetailPage() {
             <div className="space-y-4">
               <div className={cn("rounded-2xl border p-4", isDark ? "border-zinc-700 bg-zinc-900/40" : "border-slate-200 bg-slate-50")}>
                 <div className="flex items-center gap-3">
-                  <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-sky-500 text-xs font-bold text-white">
-                    {memberDetails.avatar_url ? (
-                      <img src={memberDetails.avatar_url} alt={memberDetails.name} className="h-full w-full object-cover" />
-                    ) : (
-                      getInitials(memberDetails.name)
-                    )}
-                  </span>
+                  <PageUserAvatar name={memberDetails.name} avatarUrl={memberDetails.avatar_url} size="lg" />
                   <div className="min-w-0">
                     <p className="truncate text-base font-bold">{memberDetails.name}</p>
                     <p className="truncate text-xs text-zinc-500">{memberDetails.email}</p>

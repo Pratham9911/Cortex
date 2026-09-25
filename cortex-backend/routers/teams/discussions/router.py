@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from database import SessionLocal
 from dependencies import get_current_user
@@ -12,6 +12,8 @@ from models import (
     Team,
     TeamDiscussion,
     User,
+    Decision,
+    DecisionParticipant,
 )
 from routers.teams.discussions.models_schemas import (
     CreateDiscussionRequest,
@@ -350,3 +352,206 @@ def list_team_documents(
         })
 
     return result
+
+
+# ---------------------------------------------------
+# DECISION HITL APPROVAL ENDPOINTS
+# ---------------------------------------------------
+
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+
+class EditApproveDecisionRequest(BaseModel):
+    title: str
+    description: str
+    participants: Optional[List[Dict[str, Any]]] = None
+
+
+@router.get("/projects/{project_id}/teams/{team_id}/decisions/{decision_id}/status")
+def get_decision_status(
+    project_id: int,
+    team_id: int,
+    decision_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get the current status of a decision (lightweight check for UI sync)."""
+    _require_project_member(db, project_id, user_id)
+
+    decision = db.query(Decision).filter(
+        Decision.id == decision_id,
+        Decision.team_id == team_id
+    ).first()
+
+    if not decision:
+        raise HTTPException(status_code=404, detail="Decision not found")
+
+    approved_by_name = None
+    rejected_by_name = None
+    if decision.approved_by:
+        approver = db.query(User).filter(User.user_id == decision.approved_by).first()
+        name = approver.name if approver else "Admin"
+        if decision.status == "approved":
+            approved_by_name = name
+        elif decision.status == "rejected":
+            rejected_by_name = name
+
+    return {
+        "decision_id": decision.id,
+        "status": decision.status,
+        "approved_by_name": approved_by_name,
+        "rejected_by_name": rejected_by_name,
+    }
+
+
+@router.post("/projects/{project_id}/teams/{team_id}/decisions/{decision_id}/approve")
+def approve_decision(
+    project_id: int,
+    team_id: int,
+    decision_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Approve a pending decision proposal. Requires project member access."""
+    membership = _require_project_member(db, project_id, user_id)
+    _require_team(db, project_id, team_id)
+
+    decision = db.query(Decision).filter(
+        Decision.id == decision_id,
+        Decision.team_id == team_id
+    ).first()
+
+    if not decision:
+        raise HTTPException(status_code=404, detail="Decision not found")
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    user_name = user.name if user else "Admin"
+
+    decision.status = "approved"
+    decision.approved_by = user_id
+    decision.approved_at = func.now()
+    db.commit()
+    db.refresh(decision)
+
+    return {
+        "status": "success",
+        "message": f"Decision '{decision.title}' approved by {user_name}",
+        "decision_id": decision.id,
+        "decision_status": decision.status,
+        "approved_by_name": user_name
+    }
+
+
+@router.post("/projects/{project_id}/teams/{team_id}/decisions/{decision_id}/reject")
+def reject_decision(
+    project_id: int,
+    team_id: int,
+    decision_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Reject a pending decision proposal. Requires project member access."""
+    membership = _require_project_member(db, project_id, user_id)
+    _require_team(db, project_id, team_id)
+
+    decision = db.query(Decision).filter(
+        Decision.id == decision_id,
+        Decision.team_id == team_id
+    ).first()
+
+    if not decision:
+        raise HTTPException(status_code=404, detail="Decision not found")
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    user_name = user.name if user else "Admin"
+
+    decision.status = "rejected"
+    decision.approved_by = user_id
+    decision.approved_at = func.now()
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Decision '{decision.title}' rejected by {user_name}",
+        "decision_id": decision.id,
+        "decision_status": decision.status,
+        "rejected_by_name": user_name
+    }
+
+
+@router.put("/projects/{project_id}/teams/{team_id}/decisions/{decision_id}/edit-approve")
+def edit_and_approve_decision(
+    project_id: int,
+    team_id: int,
+    decision_id: int,
+    body: EditApproveDecisionRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Edit fields/participants and approve a decision proposal."""
+    membership = _require_project_member(db, project_id, user_id)
+    _require_team(db, project_id, team_id)
+
+    decision = db.query(Decision).filter(
+        Decision.id == decision_id,
+        Decision.team_id == team_id
+    ).first()
+
+    if not decision:
+        raise HTTPException(status_code=404, detail="Decision not found")
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    user_name = user.name if user else "Admin"
+
+    decision.title = body.title
+    decision.description = body.description
+    decision.status = "approved"
+    decision.approved_by = user_id
+    decision.approved_at = func.now()
+
+    # Regenerate search vector & embedding for updated title/description
+    from agentic.teams.decisions.store import generate_embedding
+    combined_text = f"{body.title}\n\n{body.description}"
+    embedding_vector = generate_embedding(combined_text)
+    vector_str = "[" + ",".join(map(str, embedding_vector)) + "]"
+
+    db.execute(
+        text("""
+            UPDATE decisions
+            SET title = :title,
+                description = :description,
+                status = 'approved',
+                approved_by = :approved_by,
+                approved_at = NOW(),
+                embedding = CAST(:vector_str AS vector),
+                search_vector = to_tsvector('english', :title || ' ' || :description)
+            WHERE id = :decision_id;
+        """),
+        {
+            "title": body.title,
+            "description": body.description,
+            "approved_by": user_id,
+            "vector_str": vector_str,
+            "decision_id": decision_id
+        }
+    )
+
+    # Update participants if provided
+    if body.participants is not None:
+        db.query(DecisionParticipant).filter(DecisionParticipant.decision_id == decision_id).delete()
+        for item in body.participants:
+            uid = item.get("user_id")
+            role = item.get("role", "participant")
+            if uid:
+                db.add(DecisionParticipant(decision_id=decision_id, user_id=uid, role=role))
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Decision '{body.title}' edited and approved by {user_name}",
+        "decision_id": decision_id,
+        "decision_status": "approved",
+        "approved_by_name": user_name
+    }
+

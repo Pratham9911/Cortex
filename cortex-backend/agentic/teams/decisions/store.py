@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 
-from models import Decision, DecisionParticipant, User
+from models import Decision, DecisionParticipant, User, TeamMember
 
 load_dotenv()
 
@@ -47,7 +47,8 @@ def store_decision(
     title: str,
     description: str,
     created_by: int,
-    participants: Optional[List[Union[int, Dict[str, Any]]]] = None
+    participants: Optional[List[Union[int, Dict[str, Any]]]] = None,
+    status: str = "approved"
 ) -> Dict[str, Any]:
     """
     Store a complete decision for a team without chunking.
@@ -67,23 +68,26 @@ def store_decision(
     participants : List[int | Dict], optional
         Users involved in the decision. Can be list of user_ids [1, 2]
         or list of dicts [{"user_id": 1, "role": "approver"}].
+    status : str, default "approved"
+        Approval status ("pending_approval", "approved", "rejected").
     """
     # 1. Form text for embedding (title + description)
     combined_text = f"{title}\n\n{description}"
     embedding_vector = generate_embedding(combined_text)
     vector_str = "[" + ",".join(map(str, embedding_vector)) + "]"
 
-    # 2. Insert decision record using raw SQL to populate search_vector and embedding cleanly
+    # 2. Insert decision record using raw SQL to populate search_vector, embedding, and status cleanly
     sql_insert = text("""
         INSERT INTO decisions (
-            team_id, title, description, created_by, embedding, search_vector
+            team_id, title, description, created_by, embedding, search_vector, status
         ) VALUES (
             :team_id,
             :title,
             :description,
             :created_by,
             CAST(:vector_str AS vector),
-            to_tsvector('english', :title || ' ' || :description)
+            to_tsvector('english', :title || ' ' || :description),
+            :status
         )
         RETURNING id, created_at, updated_at;
     """)
@@ -96,6 +100,7 @@ def store_decision(
             "description": description,
             "created_by": created_by,
             "vector_str": vector_str,
+            "status": status,
         }
     ).fetchone()
 
@@ -105,6 +110,7 @@ def store_decision(
 
     # 3. Process and insert participants
     added_participants = []
+    invalid_participants = []
     if participants:
         for item in participants:
             if isinstance(item, int):
@@ -117,6 +123,16 @@ def store_decision(
                 continue
 
             if not user_id:
+                continue
+
+            # Verify if user_id is actually a member of team_id
+            is_team_member = db.query(TeamMember).filter(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == user_id
+            ).first()
+
+            if not is_team_member:
+                invalid_participants.append(user_id)
                 continue
 
             # Check if participant already inserted to avoid duplicate constraint error
@@ -136,13 +152,20 @@ def store_decision(
 
     db.commit()
 
+    participant_notice = ""
+    if invalid_participants:
+        invalid_str = ", ".join(f"User #{uid}" for uid in invalid_participants)
+        participant_notice = f"Note: {invalid_str} is/are not member(s) of team #{team_id} and could not be added as decision participant(s)."
+
     return {
         "decision_id": decision_id,
         "team_id": team_id,
         "title": title,
         "description": description,
         "created_by": created_by,
+        "status": status,
         "participants": added_participants,
+        "participant_notice": participant_notice,
         "created_at": created_at,
         "updated_at": updated_at
     }

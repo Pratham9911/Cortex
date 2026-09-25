@@ -35,6 +35,7 @@ export function DiscussionChat({
   activeDiscussion,
   showDetailsPanel,
   onToggleDetailsPanel,
+  onOpenMemberDetails,
 }: {
   isDark: boolean
   teamId?: string | number
@@ -43,6 +44,7 @@ export function DiscussionChat({
   activeDiscussion: DiscussionItem | null
   showDetailsPanel: boolean
   onToggleDetailsPanel: () => void
+  onOpenMemberDetails?: (member: { user_id: number; name?: string; avatar_url?: string } | number) => void
 }) {
   const { user } = useAuth()
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -730,6 +732,9 @@ export function DiscussionChat({
                   isDark={isDark}
                   message={msg}
                   currentUserId={currentUserId}
+                  userRole={userRole}
+                  projectId={getProjectId()}
+                  teamId={teamId || 1}
                   isHighlighted={highlightedMsgId === msg.id}
                   onJumpToMessage={handleJumpToMessage}
                   onContextMenu={handleContextMenu}
@@ -738,6 +743,7 @@ export function DiscussionChat({
                     setReactionDetailsMsg(m)
                     setIsReactionDetailsOpen(true)
                   }}
+                  onOpenMemberDetails={onOpenMemberDetails}
                 />
               )
             })
@@ -764,7 +770,7 @@ export function DiscussionChat({
               className="size-4 object-contain animate-spin shrink-0"
             />
             <span className="font-bold text-violet-400 shrink-0">
-              ✦ {cortexAgentName === "retrieval_agent" ? "Retrieval Agent" : cortexAgentName === "web_agent" ? "Web Agent" : "Cortex AI"}:
+              ✦ {cortexAgentName === "retrieval_agent" ? "Retrieval Agent" : cortexAgentName === "web_agent" ? "Web Agent" : cortexAgentName === "decision_agent" ? "Decision Agent" : "Cortex AI"}:
             </span>
             <span className="truncate">{cortexThinkingStatus}</span>
           </div>

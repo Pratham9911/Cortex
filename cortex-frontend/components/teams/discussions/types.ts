@@ -45,6 +45,7 @@ export type AiDocSource = {
 export type AiSources = {
   web?: AiWebSource[]
   documents?: AiDocSource[]
+  decision_proposal?: any
 }
 
 export type ChatMessage = {

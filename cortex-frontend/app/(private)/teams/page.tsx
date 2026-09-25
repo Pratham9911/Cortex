@@ -185,10 +185,11 @@ export default function TeamsPage() {
   }, [teams, query, sortBy])
 
   const getInitials = (name: string) => {
+    if (!name || name.startsWith("User #")) return "U"
     const parts = name.trim().split(/\s+/).filter(Boolean)
-    if (!parts.length) return "CX"
+    if (!parts.length) return "U"
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-    return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
   }
 
   const colorTagClass = (tag: string) => {
@@ -330,9 +331,7 @@ export default function TeamsPage() {
                       <span
                         key={member.user_id}
                         className={cn(
-                          "w-8 h-8 rounded-full border text-[10px] font-bold flex items-center justify-center uppercase overflow-hidden",
-                          idx === 0 ? "z-10 bg-emerald-500 text-white" : "z-20 bg-fuchsia-500 text-white",
-                          isDark ? "border-[#181a20]" : "border-white"
+                          "w-8 h-8 rounded-full border border-black bg-white text-black text-[10px] font-extrabold flex items-center justify-center uppercase overflow-hidden shadow-xs -ml-1.5 first:ml-0"
                         )}
                         title={member.name}
                       >

@@ -7,7 +7,11 @@ from langchain_fireworks import ChatFireworks
 from langgraph.graph import END
 from langgraph.prebuilt import ToolNode
 
-from agentic.teams.discussion_agent.tools import discussion_retrieval_agent_tool, discussion_web_agent_tool
+from agentic.teams.discussion_agent.tools import (
+    discussion_retrieval_agent_tool,
+    discussion_web_agent_tool,
+    discussion_decision_agent_tool,
+)
 from agentic.teams.discussion_agent.state import DiscussionAgentState
 
 load_dotenv()
@@ -18,20 +22,25 @@ DISCUSSION_SYSTEM_PROMPT = SystemMessage(
     content=(
         "You are Cortex AI, an intelligent, team-aware assistant operating inside team discussions.\n"
         "You have access to specialized sub-agents:\n"
-        "1. discussion_retrieval_agent: Only Use When user asks for internal Team Knowlegde , ask it exact what to get \n"
-        "2. discussion_web_agent: Only Use When user asks for External Web Knowlegde \n"
-        "USE Sub-Agent only when really needed and tell then properly what to look , use them as search bar with clear query"
-        
+        "1. discussion_retrieval_agent: Only Use When user asks for internal Team Knowledge, ask it exact what to get\n"
+        "2. discussion_web_agent: Only Use When user asks for External Web Knowledge\n"
+        "3. discussion_decision_agent: Only Use When user asks to store/record a new team decision or search past team decisions (action='store' or action='search'). When storing a decision, pass participants list if specified in context (e.g. participants=[{'user_id': 1, 'role': 'Lead'}] or list of user IDs).\n"
+        "USE Sub-Agents only when really needed and tell them properly what to look, use them as search bar with clear query.\n"
+
         "Citation Rule only for Project Knowledge: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
         "- CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine \n."
-        "Place every citation at the end of it's relevent paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line character ."
-        
-        "Now important : Never search in web or Kb unless unless user asks , understand the conversation and answer based on it (NEVER ASSUME ANYTHING , ASK USER IF UNSURE).\n"
-        "Your main task is to be an Assistent to Team and handle decisions"
+        "Place every citation at the end of it's relevent paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line character .\n"
+
+        "Now important: Never search in web or Kb unless user asks, understand the conversation and answer based on it (NEVER ASSUME ANYTHING, ASK USER IF UNSURE).\n"
+        "Your main task is to be an Assistant to Team and handle decisions."
     )
 )
 
-discussion_tools = [discussion_retrieval_agent_tool, discussion_web_agent_tool]
+discussion_tools = [
+    discussion_retrieval_agent_tool,
+    discussion_web_agent_tool,
+    discussion_decision_agent_tool,
+]
 
 discussion_llm_base = ChatFireworks(
     model=os.getenv("MAIN_MODEL"),
@@ -142,6 +151,7 @@ async def collect_discussion_tool_results(state: DiscussionAgentState) -> dict:
         if isinstance(c, dict)
     }
 
+    decision_proposal = state.get("decision_proposal")
     additional_input_tokens = 0
     additional_output_tokens = 0
     updated_messages = []
@@ -161,6 +171,9 @@ async def collect_discussion_tool_results(state: DiscussionAgentState) -> dict:
             if isinstance(parsed, dict):
                 additional_input_tokens += parsed.get("input_tokens", 0)
                 additional_output_tokens += parsed.get("output_tokens", 0)
+
+                if parsed.get("decision_proposal"):
+                    decision_proposal = parsed["decision_proposal"]
 
                 new_sources = parsed.get("sources", [])
                 if isinstance(new_sources, list):
@@ -208,6 +221,7 @@ async def collect_discussion_tool_results(state: DiscussionAgentState) -> dict:
     res = {
         "sources": sources,
         "chunks": chunks,
+        "decision_proposal": decision_proposal,
         "input_tokens": state.get("input_tokens", 0) + additional_input_tokens,
         "output_tokens": state.get("output_tokens", 0) + additional_output_tokens,
     }
