@@ -547,7 +547,7 @@ export default function TeamDetailPage() {
       {error && <p className="shrink-0 px-5 pt-4 text-sm text-red-400 sm:px-8">{error}</p>}
 
       <div className={cn("min-h-0 flex-1 overflow-y-auto", activeTab === "Discussions" ? "p-0" : "p-5 sm:p-8")}>
-        {activeTab === "Tasks" && <TasksTab isDark={isDark} members={members} />}
+        {activeTab === "Tasks" && <TasksTab isDark={isDark} members={members} teamId={Number(params.teamId)} canManage={currentUserRole === "admin"} />}
         {activeTab === "Discussions" && (
           <DiscussionsTab
             isDark={isDark}

@@ -7,7 +7,10 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Boolean,
-    UniqueConstraint
+    UniqueConstraint,
+    CheckConstraint,
+    Index,
+    Date,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.sql import func
@@ -482,6 +485,59 @@ class TeamMember(Base):
     )
 
 
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    team_id = Column(Integer, ForeignKey("teams.team_id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(50), nullable=False)
+    description = Column(String(150), nullable=False, default="")
+    status = Column(String(20), nullable=False, default="TODO", index=True)
+    due_date = Column(Date, nullable=False, index=True)
+    priority = Column(String(20), nullable=False, default="MEDIUM", index=True)
+    tags = Column(ARRAY(String(24)), nullable=False, default=list)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('TODO', 'IN_PROGRESS', 'DONE')", name="ck_tasks_status"),
+        CheckConstraint("priority IN ('LOW', 'MEDIUM', 'HIGH')", name="ck_tasks_priority"),
+        CheckConstraint("char_length(title) BETWEEN 1 AND 50", name="ck_tasks_title_length"),
+        CheckConstraint("char_length(description) <= 150", name="ck_tasks_description_length"),
+        CheckConstraint("cardinality(tags) <= 3", name="ck_tasks_tag_count"),
+        Index("ix_tasks_team_status_due_date", "team_id", "status", "due_date"),
+    )
+
+
+class TaskAssignee(Base):
+    __tablename__ = "task_assignees"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "user_id", name="uq_task_assignee"),
+    )
+
+
+class Subtask(Base):
+    __tablename__ = "subtasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(80), nullable=False)
+    is_completed = Column(Boolean, nullable=False, default=False)
+    position = Column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "position", name="uq_subtask_position"),
+        CheckConstraint("position >= 1", name="ck_subtask_position"),
+        CheckConstraint("char_length(title) BETWEEN 1 AND 80", name="ck_subtask_title_length"),
+    )
+
+
 class TeamDiscussion(Base):
     __tablename__ = "team_discussions"
 
@@ -763,4 +819,4 @@ class DecisionParticipant(Base):
             name="uq_decision_participant"
         ),
     )
-
+

@@ -7,13 +7,18 @@ from database import SessionLocal, engine
 from models import Base, User
 from dependencies import get_current_user
 from routers import auth, projects, documents, teams, folder, inbox, user_profiles, agents, chats_messages, audit, integrations
+from routers.tasks.router import router as tasks_router
 from routers.teams.discussions.router import router as discussions_router
 from routers.teams.chats.router import router as discussion_chats_router
 from migrations.migrate_audit_logs import init_audit_logs_table_and_migrate
+from migrations.migrate_tasks import init_tasks_tables
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
+    init_audit_logs_table_and_migrate()
+    init_tasks_tables()
 
     from agentic.checkpointer import init_checkpointer
     await init_checkpointer()
@@ -52,6 +57,7 @@ app.include_router(chats_messages.router)
 app.include_router(agents.router)
 app.include_router(audit.router)
 app.include_router(integrations.router)
+app.include_router(tasks_router)
 app.include_router(discussions_router)
 app.include_router(discussion_chats_router)
 
