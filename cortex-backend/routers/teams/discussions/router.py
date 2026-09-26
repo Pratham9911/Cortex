@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
+from routers.teams.chats.connection_manager import manager as ws_manager
+from routers.teams.chats.service import format_message
 
 from database import SessionLocal
 from dependencies import get_current_user
@@ -11,6 +13,7 @@ from models import (
     ProjectMember,
     Team,
     TeamDiscussion,
+    DiscussionMessage,
     User,
     Decision,
     DecisionParticipant,
@@ -113,7 +116,6 @@ def create_discussion(
     db: Session = Depends(get_db),
 ):
     membership = _require_project_member(db, project_id, user_id)
-    _require_admin(membership)
     _require_team(db, project_id, team_id)
 
     # Prevent duplicate names within the same team (case-insensitive)
@@ -210,7 +212,6 @@ def update_discussion(
     db: Session = Depends(get_db),
 ):
     membership = _require_project_member(db, project_id, user_id)
-    _require_admin(membership)
     _require_team(db, project_id, team_id)
     discussion = _require_discussion(db, team_id, discussion_id)
 
@@ -375,7 +376,7 @@ def get_decision_status(
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get the current status of a decision (lightweight check for UI sync)."""
+    """Get the current status and full details of a decision (for UI sync)."""
     _require_project_member(db, project_id, user_id)
 
     decision = db.query(Decision).filter(
@@ -396,12 +397,66 @@ def get_decision_status(
         elif decision.status == "rejected":
             rejected_by_name = name
 
+    # Retrieve participants
+    participants_rows = db.query(DecisionParticipant, User).join(
+        User, DecisionParticipant.user_id == User.user_id
+    ).filter(DecisionParticipant.decision_id == decision_id).all()
+
+    participants = [
+        {
+            "user_id": p.user_id,
+            "name": u.name,
+            "role": p.role or "Participant",
+            "avatar_url": u.avatar_url,
+        }
+        for p, u in participants_rows
+    ]
+
     return {
         "decision_id": decision.id,
+        "title": decision.title,
+        "description": decision.description,
         "status": decision.status,
         "approved_by_name": approved_by_name,
         "rejected_by_name": rejected_by_name,
+        "participants": participants,
     }
+
+
+def _sync_decision_in_discussions(
+    db: Session,
+    team_id: int,
+    decision_id: int,
+    title: str,
+    description: str,
+    status: str,
+    participants: list,
+    approved_by_name: str = None,
+    rejected_by_name: str = None,
+):
+    """Sync decision details inside DiscussionMessage ai_sources JSON field in Postgres."""
+    from sqlalchemy.orm.attributes import flag_modified
+    from models import DiscussionMessage, TeamDiscussion
+    
+    # Query messages in discussions for this team
+    messages = db.query(DiscussionMessage).join(
+        TeamDiscussion, DiscussionMessage.discussion_id == TeamDiscussion.id
+    ).filter(TeamDiscussion.team_id == team_id).all()
+
+    for msg in messages:
+        if msg.ai_sources and isinstance(msg.ai_sources, dict):
+            dp = msg.ai_sources.get("decision_proposal")
+            if dp and (dp.get("id") == decision_id or dp.get("decision_id") == decision_id):
+                dp["title"] = title
+                dp["description"] = description
+                dp["status"] = status
+                dp["participants"] = participants
+                if approved_by_name:
+                    dp["approved_by_name"] = approved_by_name
+                if rejected_by_name:
+                    dp["rejected_by_name"] = rejected_by_name
+                msg.ai_sources = dict(msg.ai_sources)
+                flag_modified(msg, "ai_sources")
 
 
 @router.post("/projects/{project_id}/teams/{team_id}/decisions/{decision_id}/approve")
@@ -414,6 +469,7 @@ def approve_decision(
 ):
     """Approve a pending decision proposal. Requires project member access."""
     membership = _require_project_member(db, project_id, user_id)
+    _require_admin(membership)
     _require_team(db, project_id, team_id)
 
     decision = db.query(Decision).filter(
@@ -430,6 +486,33 @@ def approve_decision(
     decision.status = "approved"
     decision.approved_by = user_id
     decision.approved_at = func.now()
+
+    # Retrieve current participants list
+    participants_rows = db.query(DecisionParticipant, User).join(
+        User, DecisionParticipant.user_id == User.user_id
+    ).filter(DecisionParticipant.decision_id == decision_id).all()
+
+    participants_list = [
+        {
+            "user_id": p.user_id,
+            "name": u.name,
+            "role": p.role or "Participant",
+            "avatar_url": u.avatar_url,
+        }
+        for p, u in participants_rows
+    ]
+
+    _sync_decision_in_discussions(
+        db=db,
+        team_id=team_id,
+        decision_id=decision_id,
+        title=decision.title,
+        description=decision.description,
+        status="approved",
+        participants=participants_list,
+        approved_by_name=user_name,
+    )
+
     db.commit()
     db.refresh(decision)
 
@@ -452,6 +535,7 @@ def reject_decision(
 ):
     """Reject a pending decision proposal. Requires project member access."""
     membership = _require_project_member(db, project_id, user_id)
+    _require_admin(membership)
     _require_team(db, project_id, team_id)
 
     decision = db.query(Decision).filter(
@@ -468,6 +552,33 @@ def reject_decision(
     decision.status = "rejected"
     decision.approved_by = user_id
     decision.approved_at = func.now()
+
+    # Retrieve current participants list
+    participants_rows = db.query(DecisionParticipant, User).join(
+        User, DecisionParticipant.user_id == User.user_id
+    ).filter(DecisionParticipant.decision_id == decision_id).all()
+
+    participants_list = [
+        {
+            "user_id": p.user_id,
+            "name": u.name,
+            "role": p.role or "Participant",
+            "avatar_url": u.avatar_url,
+        }
+        for p, u in participants_rows
+    ]
+
+    _sync_decision_in_discussions(
+        db=db,
+        team_id=team_id,
+        decision_id=decision_id,
+        title=decision.title,
+        description=decision.description,
+        status="rejected",
+        participants=participants_list,
+        rejected_by_name=user_name,
+    )
+
     db.commit()
 
     return {
@@ -476,6 +587,98 @@ def reject_decision(
         "decision_id": decision.id,
         "decision_status": decision.status,
         "rejected_by_name": user_name
+    }
+
+
+@router.put("/projects/{project_id}/teams/{team_id}/decisions/{decision_id}")
+def edit_decision(
+    project_id: int,
+    team_id: int,
+    decision_id: int,
+    body: EditApproveDecisionRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Edit title, description, and participants of a decision proposal without changing its approval status."""
+    membership = _require_project_member(db, project_id, user_id)
+    _require_team(db, project_id, team_id)
+
+    decision = db.query(Decision).filter(
+        Decision.id == decision_id,
+        Decision.team_id == team_id
+    ).first()
+
+    if not decision:
+        raise HTTPException(status_code=404, detail="Decision not found")
+
+    decision.title = body.title
+    decision.description = body.description
+
+    from agentic.teams.decisions.store import generate_embedding
+    combined_text = f"{body.title}\n\n{body.description}"
+    embedding_vector = generate_embedding(combined_text)
+    vector_str = "[" + ",".join(map(str, embedding_vector)) + "]"
+    db.execute(
+        text("""
+            UPDATE decisions
+            SET title = :title, description = :description,
+                embedding = CAST(:vector_str AS vector),
+                search_vector = to_tsvector('english', :title || ' ' || :description)
+            WHERE id = :decision_id
+        """),
+        {"title": body.title, "description": body.description, "vector_str": vector_str, "decision_id": decision_id},
+    )
+    if body.participants is not None:
+        db.query(DecisionParticipant).filter(DecisionParticipant.decision_id == decision_id).delete()
+        seen_uids = set()
+        for item in body.participants:
+            uid = item.get("user_id")
+            if uid is not None:
+                try:
+                    uid = int(uid)
+                except (ValueError, TypeError):
+                    continue
+                if uid not in seen_uids:
+                    seen_uids.add(uid)
+                    role = item.get("role") or "Participant"
+                    db.add(DecisionParticipant(decision_id=decision_id, user_id=uid, role=role))
+    
+    db.flush()
+    # Retrieve updated participants list
+    participants_rows = db.query(DecisionParticipant, User).join(
+        User, DecisionParticipant.user_id == User.user_id
+    ).filter(DecisionParticipant.decision_id == decision_id).all()
+
+    participants_list = [
+        {
+            "user_id": p.user_id,
+            "name": u.name,
+            "role": p.role or "Participant",
+            "avatar_url": u.avatar_url,
+        }
+        for p, u in participants_rows
+    ]
+
+    _sync_decision_in_discussions(
+        db=db,
+        team_id=team_id,
+        decision_id=decision_id,
+        title=body.title,
+        description=body.description,
+        status=decision.status,
+        participants=participants_list,
+    )
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Decision '{body.title}' updated successfully",
+        "decision_id": decision_id,
+        "title": body.title,
+        "description": body.description,
+        "decision_status": decision.status,
+        "participants": participants_list,
     }
 
 
@@ -502,48 +705,68 @@ def edit_and_approve_decision(
 
     user = db.query(User).filter(User.user_id == user_id).first()
     user_name = user.name if user else "Admin"
-
     decision.title = body.title
     decision.description = body.description
     decision.status = "approved"
     decision.approved_by = user_id
     decision.approved_at = func.now()
 
-    # Regenerate search vector & embedding for updated title/description
     from agentic.teams.decisions.store import generate_embedding
     combined_text = f"{body.title}\n\n{body.description}"
     embedding_vector = generate_embedding(combined_text)
     vector_str = "[" + ",".join(map(str, embedding_vector)) + "]"
-
     db.execute(
         text("""
             UPDATE decisions
-            SET title = :title,
-                description = :description,
-                status = 'approved',
-                approved_by = :approved_by,
-                approved_at = NOW(),
+            SET title = :title, description = :description, status = 'approved',
+                approved_by = :approved_by, approved_at = NOW(),
                 embedding = CAST(:vector_str AS vector),
                 search_vector = to_tsvector('english', :title || ' ' || :description)
-            WHERE id = :decision_id;
+            WHERE id = :decision_id
         """),
-        {
-            "title": body.title,
-            "description": body.description,
-            "approved_by": user_id,
-            "vector_str": vector_str,
-            "decision_id": decision_id
-        }
+        {"title": body.title, "description": body.description, "approved_by": user_id,
+         "vector_str": vector_str, "decision_id": decision_id},
     )
-
-    # Update participants if provided
     if body.participants is not None:
         db.query(DecisionParticipant).filter(DecisionParticipant.decision_id == decision_id).delete()
+        seen_uids = set()
         for item in body.participants:
             uid = item.get("user_id")
-            role = item.get("role", "participant")
-            if uid:
-                db.add(DecisionParticipant(decision_id=decision_id, user_id=uid, role=role))
+            if uid is not None:
+                try:
+                    uid = int(uid)
+                except (ValueError, TypeError):
+                    continue
+                if uid not in seen_uids:
+                    seen_uids.add(uid)
+                    role = item.get("role") or "Participant"
+                    db.add(DecisionParticipant(decision_id=decision_id, user_id=uid, role=role))
+    db.flush()
+    # Retrieve updated participants list
+    participants_rows = db.query(DecisionParticipant, User).join(
+        User, DecisionParticipant.user_id == User.user_id
+    ).filter(DecisionParticipant.decision_id == decision_id).all()
+
+    participants_list = [
+        {
+            "user_id": p.user_id,
+            "name": u.name,
+            "role": p.role or "Participant",
+            "avatar_url": u.avatar_url,
+        }
+        for p, u in participants_rows
+    ]
+
+    _sync_decision_in_discussions(
+        db=db,
+        team_id=team_id,
+        decision_id=decision_id,
+        title=body.title,
+        description=body.description,
+        status="approved",
+        participants=participants_list,
+        approved_by_name=user_name,
+    )
 
     db.commit()
 
@@ -551,7 +774,229 @@ def edit_and_approve_decision(
         "status": "success",
         "message": f"Decision '{body.title}' edited and approved by {user_name}",
         "decision_id": decision_id,
+        "title": body.title,
+        "description": body.description,
         "decision_status": "approved",
-        "approved_by_name": user_name
+        "approved_by_name": user_name,
+        "participants": participants_list,
+    }
+
+
+# ---------------------------------------------------
+# CHAT-SCOPED DECISION PROPOSAL ENDPOINTS
+# ---------------------------------------------------
+
+@router.put("/projects/{project_id}/teams/{team_id}/discussions/{discussion_id}/messages/{message_id}/proposal")
+async def edit_message_decision_proposal(
+    project_id: int,
+    team_id: int,
+    discussion_id: int,
+    message_id: int,
+    body: EditApproveDecisionRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Edit proposal fields (title, description, participants) stored in DiscussionMessage.ai_sources."""
+    membership = _require_project_member(db, project_id, user_id)
+    _require_team(db, project_id, team_id)
+
+    msg = db.query(DiscussionMessage).filter(
+        DiscussionMessage.id == message_id,
+        DiscussionMessage.discussion_id == discussion_id
+    ).first()
+
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if not msg.ai_sources or not isinstance(msg.ai_sources, dict) or "decision_proposal" not in msg.ai_sources:
+        raise HTTPException(status_code=404, detail="No decision proposal attached to this message")
+
+    dp = dict(msg.ai_sources["decision_proposal"])
+    dp["title"] = body.title
+    dp["description"] = body.description
+
+    if body.participants is not None:
+        validated_parts = []
+        seen_uids = set()
+        for item in body.participants:
+            uid = item.get("user_id")
+            if uid is not None:
+                try:
+                    uid = int(uid)
+                except (ValueError, TypeError):
+                    continue
+                if uid not in seen_uids:
+                    seen_uids.add(uid)
+                    user = db.query(User).filter(User.user_id == uid).first()
+                    validated_parts.append({
+                        "user_id": uid,
+                        "name": user.name if user else item.get("name") or f"User #{uid}",
+                        "role": item.get("role") or "Participant",
+                        "avatar_url": user.avatar_url if user else item.get("avatar_url"),
+                    })
+        dp["participants"] = validated_parts
+
+    ai_sources = dict(msg.ai_sources)
+    ai_sources["decision_proposal"] = dp
+    msg.ai_sources = ai_sources
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(msg, "ai_sources")
+    db.commit()
+    db.refresh(msg)
+
+    # Real-time broadcast to all connected clients in this discussion
+    serialized = format_message(msg, db, current_user_id=user_id)
+    await ws_manager.broadcast(
+        discussion_id,
+        {"event": "proposal_updated", "message": serialized},
+    )
+
+    return {
+        "status": "success",
+        "message": f"Proposal '{body.title}' updated",
+        "decision_proposal": dp,
+    }
+
+
+@router.post("/projects/{project_id}/teams/{team_id}/discussions/{discussion_id}/messages/{message_id}/proposal/reject")
+async def reject_message_decision_proposal(
+    project_id: int,
+    team_id: int,
+    discussion_id: int,
+    message_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Reject proposal stored in DiscussionMessage.ai_sources without creating a DB decision row."""
+    membership = _require_project_member(db, project_id, user_id)
+    _require_admin(membership)
+    _require_team(db, project_id, team_id)
+
+    msg = db.query(DiscussionMessage).filter(
+        DiscussionMessage.id == message_id,
+        DiscussionMessage.discussion_id == discussion_id
+    ).first()
+
+    if not msg or not msg.ai_sources or not isinstance(msg.ai_sources, dict) or "decision_proposal" not in msg.ai_sources:
+        raise HTTPException(status_code=404, detail="Decision proposal not found")
+
+    dp = dict(msg.ai_sources["decision_proposal"])
+
+    # Integrity guard: cannot reject an already-approved decision
+    if dp.get("status") == "approved":
+        raise HTTPException(
+            status_code=409,
+            detail="This decision has already been approved and cannot be rejected.",
+        )
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    user_name = user.name if user else "Admin"
+
+    dp["status"] = "rejected"
+    dp["rejected_by_name"] = user_name
+
+    ai_sources = dict(msg.ai_sources)
+    ai_sources["decision_proposal"] = dp
+    msg.ai_sources = ai_sources
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(msg, "ai_sources")
+    db.commit()
+    db.refresh(msg)
+
+    # Real-time broadcast
+    serialized = format_message(msg, db, current_user_id=user_id)
+    await ws_manager.broadcast(
+        discussion_id,
+        {"event": "proposal_updated", "message": serialized},
+    )
+
+    return {
+        "status": "success",
+        "message": f"Proposal '{dp.get('title', 'Decision')}' rejected by {user_name}",
+        "decision_proposal": dp,
+    }
+
+
+@router.post("/projects/{project_id}/teams/{team_id}/discussions/{discussion_id}/messages/{message_id}/proposal/approve")
+async def approve_message_decision_proposal(
+    project_id: int,
+    team_id: int,
+    discussion_id: int,
+    message_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Approve decision proposal: Convert proposal into official team decision in 'decisions' DB table,
+    generate Fireworks 1024-dim embeddings, insert participants, and update DiscussionMessage.ai_sources.
+    """
+    membership = _require_project_member(db, project_id, user_id)
+    _require_admin(membership)
+    _require_team(db, project_id, team_id)
+
+    msg = db.query(DiscussionMessage).filter(
+        DiscussionMessage.id == message_id,
+        DiscussionMessage.discussion_id == discussion_id
+    ).first()
+
+    if not msg or not msg.ai_sources or not isinstance(msg.ai_sources, dict) or "decision_proposal" not in msg.ai_sources:
+        raise HTTPException(status_code=404, detail="Decision proposal not found")
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    user_name = user.name if user else "Admin"
+
+    dp = dict(msg.ai_sources["decision_proposal"])
+    title = dp.get("title", "Untitled Decision")
+    description = dp.get("description", "")
+    created_by = dp.get("created_by") or user_id
+    participants = dp.get("participants") or []
+
+    # Store in decisions DB table (generates Fireworks embedding & search vector)
+    from agentic.teams.decisions.store import store_decision
+    res = store_decision(
+        db=db,
+        team_id=team_id,
+        title=title,
+        description=description,
+        created_by=created_by,
+        participants=participants,
+        status="approved"
+    )
+
+    decision_id = res["decision_id"]
+
+    # Mark as approved by admin in DB
+    decision_row = db.query(Decision).filter(Decision.id == decision_id).first()
+    if decision_row:
+        decision_row.approved_by = user_id
+        decision_row.approved_at = func.now()
+
+    # Update proposal payload with decision_id and approved status
+    dp["id"] = decision_id
+    dp["decision_id"] = decision_id
+    dp["status"] = "approved"
+    dp["approved_by_name"] = user_name
+
+    ai_sources = dict(msg.ai_sources)
+    ai_sources["decision_proposal"] = dp
+    msg.ai_sources = ai_sources
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(msg, "ai_sources")
+
+    db.commit()
+    db.refresh(msg)
+
+    # Real-time broadcast
+    serialized = format_message(msg, db, current_user_id=user_id)
+    await ws_manager.broadcast(
+        discussion_id,
+        {"event": "proposal_updated", "message": serialized},
+    )
+
+    return {
+        "status": "success",
+        "message": f"Decision '{title}' approved and persisted to decisions database by {user_name}",
+        "decision_id": decision_id,
+        "decision_proposal": dp,
     }
 

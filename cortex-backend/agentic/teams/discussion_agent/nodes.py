@@ -120,6 +120,10 @@ async def discussion_chat_node(state: DiscussionAgentState) -> dict:
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
 
+    # Enforce strictly ONE tool call per turn for subagent to prevent context overflow
+    if getattr(response, "tool_calls", None) and len(response.tool_calls) > 1:
+        response.tool_calls = response.tool_calls[:1]
+
     tool_calls = [
         {
             "id": call["id"],

@@ -360,9 +360,22 @@ export default function TeamDetailPage() {
   const isGeneralTeam = teamName.trim().toLowerCase() === "general"
   const headerMembers = members.slice(0, 2)
   const extraMemberCount = members.length > 2 ? members.length - 2 : 0
-  const openMemberDetails = async (member: TeamMember) => {
+  const openMemberDetails = async (member: Pick<TeamMember, "user_id"> & Partial<TeamMember>) => {
     setMemberDetailsOpen(true)
-    setMemberDetails(member.role && member.joined_at ? { ...member, role: member.role, joined_at: member.joined_at, teams: [], can_remove: false } : null)
+    setMemberDetails(
+      member.role && member.joined_at
+        ? {
+            user_id: member.user_id,
+            name: member.name || "Member",
+            email: member.email || "",
+            avatar_url: member.avatar_url,
+            role: member.role,
+            joined_at: member.joined_at,
+            teams: [],
+            can_remove: false,
+          }
+        : null
+    )
     setMemberDetailsLoading(true)
     setMemberDetailsError("")
     setConfirmRemove(false)
@@ -796,7 +809,17 @@ export default function TeamDetailPage() {
                 <div className="flex items-center gap-3">
                   <PageUserAvatar name={memberDetails.name} avatarUrl={memberDetails.avatar_url} size="lg" />
                   <div className="min-w-0">
-                    <p className="truncate text-base font-bold">{memberDetails.name}</p>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="truncate text-base font-bold">{memberDetails.name}</p>
+                      <span
+                        className={cn(
+                          "shrink-0 px-2 py-0.5 text-[10px] font-bold tracking-wide",
+                          isDark ? "bg-zinc-700 text-zinc-200" : "bg-slate-200 text-slate-700"
+                        )}
+                      >
+                        {memberDetails.user_id}
+                      </span>
+                    </div>
                     <p className="truncate text-xs text-zinc-500">{memberDetails.email}</p>
                   </div>
                 </div>
@@ -819,7 +842,7 @@ export default function TeamDetailPage() {
                   {memberDetails.teams.map((team) => (
                     <span
                       key={team.team_id}
-                      className={cn("rounded-full px-3 py-1 text-xs font-semibold", isDark ? "bg-zinc-800 text-zinc-300" : "bg-slate-100 text-slate-700")}
+                      className={cn("px-3 py-1 text-xs font-semibold", isDark ? "bg-zinc-800 text-zinc-300" : "bg-slate-100 text-slate-700")}
                     >
                       {team.name}
                     </span>

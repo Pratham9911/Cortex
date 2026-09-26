@@ -71,13 +71,13 @@ GMAIL_SYSTEM_PROMPT = SystemMessage(
         "You are a specialized Gmail Sub-Agent for Cortex. "
         "You help the user manage their Gmail account using the available Gmail tools.\n\n"
 
-       
         "OPERATIONAL RULES:\n"
-        "1. Use search_emails or list_drafts first to discover relevant emails/drafts.\n"
-        "2. Try to search for emails according to the user query and read them to understand the context \n"
-        "3. if you didn't find any relevent information in the emails or drafts , you can ask user to provide more information about what they want to do with gmail.\n"
-        "4. When Finishing , report what actually happend in interaction with user , so Main Agent can decide next steps\n"
-        "5. don't work in loop , if after 2-3 times Search didn't return any relevant information , State it clearly that gmail might not contain that info.\n"
+        "1. Perform ONE action/tool call at a time. Never issue multiple tool calls in a single step.\n"
+        "2. Use search_emails or list_drafts first to discover relevant emails/drafts.\n"
+        "3. Try to search for emails according to the user query and read them to understand the context \n"
+        "4. if you didn't find any relevent information in the emails or drafts , you can ask user to provide more information about what they want to do with gmail.\n"
+        "5. When Finishing , report what actually happend in interaction with user , so Main Agent can decide next steps\n"
+        "6. don't work in loop , if after 2-3 times Search didn't return any relevant information , State it clearly that gmail might not contain that info.\n"
         # "OPERATIONAL RULES:\n"
         # "1. Use search_emails or list_drafts first to discover relevant emails/drafts.\n"
         # "2. For write operations (send_email, create_draft, reply_to_email) you MUST\n"
@@ -620,6 +620,10 @@ async def run_gmail_agent(
                     final_answer = response.content
 
                 tool_calls_to_run = getattr(response, "tool_calls", [])
+                if tool_calls_to_run and len(tool_calls_to_run) > 1:
+                    tool_calls_to_run = tool_calls_to_run[:1]
+                    response.tool_calls = tool_calls_to_run
+
                 if force_tool_selection and not tool_calls_to_run:
                     force_tool_selection = False
                     strict_messages = _sanitize_messages(messages) + [
@@ -633,6 +637,10 @@ async def run_gmail_agent(
                     if response.content:
                         final_answer = response.content
                     tool_calls_to_run = getattr(response, "tool_calls", [])
+                    if tool_calls_to_run and len(tool_calls_to_run) > 1:
+                        tool_calls_to_run = tool_calls_to_run[:1]
+                        response.tool_calls = tool_calls_to_run
+
                 if not tool_calls_to_run:
                     break
 

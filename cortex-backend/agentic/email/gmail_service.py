@@ -3,6 +3,7 @@ import json
 import base64
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 from google.oauth2.credentials import Credentials
@@ -12,17 +13,10 @@ from googleapiclient.discovery import build
 from database import SessionLocal
 from models import UserIntegration
 from agentic.email.encryption import encrypt_string, decrypt_string
+from agentic.email.gmail_oauth import SCOPES
 
-CLIENT_SECRET_FILE = os.path.join("credentials", "client_secret.json")
-
-SCOPES = [
-    "openid",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.compose",
-    "https://www.googleapis.com/auth/gmail.send",
-]
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+CLIENT_SECRET_FILE = BACKEND_DIR / "credentials" / "client_secret.json"
 
 
 def _get_client_info():
@@ -33,9 +27,9 @@ def _get_client_info():
     if client_id and client_secret:
         return client_id, client_secret
 
-    if os.path.exists(CLIENT_SECRET_FILE):
+    if CLIENT_SECRET_FILE.exists():
         try:
-            with open(CLIENT_SECRET_FILE, "r") as f:
+            with CLIENT_SECRET_FILE.open("r", encoding="utf-8") as f:
                 data = json.load(f)
                 web = data.get("web") or data.get("installed") or {}
                 return web.get("client_id"), web.get("client_secret")

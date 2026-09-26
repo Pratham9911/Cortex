@@ -20,10 +20,11 @@ SYSTEM_PROMPT = SystemMessage(
         "You are a specialized Web Search Sub-Agent. Your task is to perform targeted web searches "
         "using the web_search tool to answer all parts of the user's research query efficiently.\n\n"
         "RULES:\n"
-        "1. Use Web Search with clear sentence and not just simple keywords.\n"
-        "2. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately.\n"
+        "1. Perform ONE targeted search at a time. Never issue multiple tool calls in a single step.\n"
+        "2. Use Web Search with clear sentence and not just simple keywords.\n"
+        "3. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately.\n"
         "HOW TO ANSWER:\n"
-        " - Only use the information gathered without adding any external knowledge.\n" \
+        " - Only use the information gathered without adding any external knowledge.\n"
         " - Only answer what is important to the user's query. Do not include irrelevant information.\n"
         "Rejection Rules: If the context is insufficient to answer the question or Not Matching, respond with: The provided context does not contain enough information to answer the question."
     )
@@ -139,6 +140,10 @@ async def web_chat_node(state: WebSearchState) -> dict:
     response = await web_llm.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
+
+    # Enforce strictly ONE tool call per turn for subagent to prevent context overflow
+    if getattr(response, "tool_calls", None) and len(response.tool_calls) > 1:
+        response.tool_calls = response.tool_calls[:1]
 
     tool_calls = [
         {

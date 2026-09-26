@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Check, Loader2, UserPlus, X, Search, Users } from "lucide-react"
+import { Check, Loader2, UserPlus, X, Search, Users, Save } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -62,6 +62,8 @@ function UserAvatar({
 export function EditDecisionModal({
   isDark,
   decisionId,
+  messageId,
+  discussionId,
   initialTitle,
   initialDescription,
   initialParticipants,
@@ -72,28 +74,33 @@ export function EditDecisionModal({
   onOpenMemberDetails,
 }: {
   isDark: boolean
-  decisionId: number
+  decisionId?: number
+  messageId?: number
+  discussionId?: number
   initialTitle: string
   initialDescription: string
   initialParticipants: Array<{ user_id: number; name?: string; role?: string; avatar_url?: string }>
   projectId: string | number
   teamId: string | number
   onClose: () => void
-  onSuccess: (updatedTitle: string, updatedDesc: string, status: "approved", approvedByName: string) => void
+  onSuccess: (
+    updatedTitle: string,
+    updatedDesc: string,
+    updatedParticipants: Array<{ user_id: number; name?: string; role?: string; avatar_url?: string }>,
+    status: "pending_approval" | "approved" | "rejected",
+    approvedByName?: string
+  ) => void
   onOpenMemberDetails?: (member: { user_id: number; name?: string; avatar_url?: string } | number) => void
 }) {
   const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState(initialDescription)
   const [participants, setParticipants] = useState(initialParticipants)
-  const [loading, setLoading] = useState(false)
+  const [loadingAction, setLoadingAction] = useState<"save" | "approve" | null>(null)
   const [teamMembers, setTeamMembers] = useState<TeamMemberItem[]>([])
   
   // Teammates Search Pop-up State
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
-
-  // Confirmation Step State
-  const [confirmSave, setConfirmSave] = useState(false)
 
   useEffect(() => {
     // Fetch team members for participant selection
@@ -136,10 +143,58 @@ export function EditDecisionModal({
     )
   }
 
-  const handleExecuteSave = async () => {
+  const handleSaveOnly = async () => {
     if (!title.trim() || !description.trim()) return
 
-    setLoading(true)
+    setLoadingAction("save")
+    try {
+      const token = localStorage.getItem("access_token") || localStorage.getItem("token")
+      const url = messageId && discussionId
+        ? `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal`
+        : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${decisionId}`
+
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          description,
+          participants,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        const dp = data.decision_proposal || data
+        const returnedParts = Array.isArray(dp.participants) ? dp.participants : participants
+        const mergedParts = returnedParts.map((rp: any) => {
+          const match = participants.find((p) => p.user_id === rp.user_id)
+          return match
+            ? { ...rp, name: rp.name || match.name, avatar_url: rp.avatar_url || match.avatar_url }
+            : rp
+        })
+        onSuccess(
+          title,
+          description,
+          mergedParts,
+          dp.status || dp.decision_status || "pending_approval"
+        )
+        onClose()
+      }
+    } catch (err) {
+      console.error("Save decision failed:", err)
+    } finally {
+      setLoadingAction(null)
+    }
+  }
+
+  const handleSaveAndApprove = async () => {
+    if (!title.trim() || !description.trim()) return
+
+    setLoadingAction("approve")
     try {
       const token = localStorage.getItem("access_token") || localStorage.getItem("token")
       const res = await fetch(
@@ -160,13 +215,19 @@ export function EditDecisionModal({
 
       if (res.ok) {
         const data = await res.json()
-        onSuccess(title, description, "approved", data.approved_by_name || "Admin")
+        onSuccess(
+          title,
+          description,
+          data.participants || participants,
+          "approved",
+          data.approved_by_name || "Admin"
+        )
         onClose()
       }
     } catch (err) {
-      console.error("Edit and approve failed:", err)
+      console.error("Save and approve decision failed:", err)
     } finally {
-      setLoading(false)
+      setLoadingAction(null)
     }
   }
 
@@ -188,7 +249,7 @@ export function EditDecisionModal({
         )}
       >
         <div className="flex items-center justify-between border-b pb-3 mb-4 border-black/10 dark:border-zinc-800">
-          <h3 className="font-bold text-base sm:text-lg">Edit & Approve Decision Proposal</h3>
+          <h3 className="font-bold text-base sm:text-lg">Edit Decision Proposal</h3>
           <button
             type="button"
             onClick={onClose}
@@ -346,8 +407,13 @@ export function EditDecisionModal({
                           >
                             {displayName}
                           </span>
-                          <span className="inline-flex items-center px-1 py-0.2 rounded text-[10px] font-mono font-extrabold bg-black text-white dark:bg-white dark:text-black border border-black dark:border-white shrink-0">
-                            [{p.user_id}]
+                          <span
+                            className={cn(
+                              "inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-extrabold shrink-0",
+                              isDark ? "bg-zinc-700 text-zinc-200" : "bg-slate-200 text-slate-700"
+                            )}
+                          >
+                            {p.user_id}
                           </span>
                         </div>
                       </div>
@@ -383,57 +449,30 @@ export function EditDecisionModal({
             )}
           </div>
 
-          {/* Confirmation Prompt / Action Footer */}
-          <div className="pt-4 border-t border-black/10 dark:border-zinc-800 flex justify-end gap-2">
-            {confirmSave ? (
-              <div className="flex items-center justify-between w-full gap-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs">
-                <span className="font-semibold text-emerald-700 dark:text-emerald-300">
-                  Confirm saving edits and approving this decision?
-                </span>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    type="button"
-                    disabled={loading}
-                    onClick={handleExecuteSave}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3.5 py-1.5 h-8 font-semibold rounded-lg"
-                  >
-                    {loading ? <Loader2 className="size-3.5 animate-spin" /> : "Confirm & Approve"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={loading}
-                    onClick={() => setConfirmSave(false)}
-                    className="text-xs px-3 py-1.5 h-8 rounded-lg"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={onClose}
-                  className="text-xs rounded-xl h-9"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  disabled={loading || !title.trim() || !description.trim()}
-                  onClick={() => setConfirmSave(true)}
-                  className={cn(
-                    "text-xs font-semibold px-4 h-9 rounded-xl transition-all shadow-sm",
-                    isDark ? "bg-white text-zinc-900 hover:bg-emerald-600 hover:text-white" : "bg-zinc-900 text-white hover:bg-emerald-600 hover:text-white"
-                  )}
-                >
-                  {loading ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4 mr-1.5" />}
-                  Save & Approve Decision
-                </Button>
-              </>
-            )}
+          {/* Action Footer */}
+          <div className="pt-4 border-t border-black/10 dark:border-zinc-800 flex items-center justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose} className="text-xs rounded-xl h-9">
+              Cancel
+            </Button>
+
+            <Button
+              type="button"
+              disabled={loadingAction !== null || !title.trim() || !description.trim()}
+              onClick={handleSaveOnly}
+              className={cn(
+                "text-xs font-semibold px-4 h-9 rounded-xl transition-all shadow-sm",
+                isDark
+                  ? "bg-white text-zinc-900 hover:bg-zinc-200"
+                  : "bg-zinc-900 text-white hover:bg-zinc-800"
+              )}
+            >
+              {loadingAction === "save" ? (
+                <Loader2 className="size-4 animate-spin mr-1.5" />
+              ) : (
+                <Save className="size-4 mr-1.5" />
+              )}
+              Save
+            </Button>
           </div>
         </div>
       </div>
@@ -525,8 +564,13 @@ export function EditDecisionModal({
                             >
                               {m.name}
                             </p>
-                            <span className="inline-flex items-center px-1 py-0.2 rounded text-[10px] font-mono font-extrabold bg-black text-white dark:bg-white dark:text-black border border-black dark:border-white shrink-0">
-                              [{m.user_id}]
+                            <span
+                              className={cn(
+                                "inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-extrabold shrink-0",
+                                isDark ? "bg-zinc-700 text-zinc-200" : "bg-slate-200 text-slate-700"
+                              )}
+                            >
+                              {m.user_id}
                             </span>
                           </div>
                           <p className="text-[11px] text-zinc-400 truncate">{m.email}</p>

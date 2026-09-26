@@ -1,22 +1,25 @@
 # gmail_oauth.py
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
-from google.auth.transport.requests import Request
 
 load_dotenv()
 
-SCOPES = [
+SCOPES = (
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/gmail.send",
-]
+)
 
-CLIENT_SECRET_FILE = os.path.join("credentials", "client_secret.json")
+GMAIL_SCOPES = frozenset(scope for scope in SCOPES if "/auth/gmail." in scope)
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+CLIENT_SECRET_FILE = BACKEND_DIR / "credentials" / "client_secret.json"
 
 REDIRECT_URI = os.getenv(
     "GOOGLE_REDIRECT_URI",
@@ -26,9 +29,9 @@ REDIRECT_URI = os.getenv(
 
 def create_google_flow(state: str = None) -> Flow:
     """Create Google OAuth Flow object using client secret file or env vars."""
-    if os.path.exists(CLIENT_SECRET_FILE):
+    if CLIENT_SECRET_FILE.exists():
         flow = Flow.from_client_secrets_file(
-            CLIENT_SECRET_FILE,
+            str(CLIENT_SECRET_FILE),
             scopes=SCOPES,
             state=state,
         )
@@ -78,5 +81,26 @@ def exchange_code_for_credentials(code: str, state: str = None, code_verifier: s
     flow = create_google_flow(state=state)
     if code_verifier:
         flow.code_verifier = code_verifier
-    flow.fetch_token(code=code, include_client_id=True)
+    try:
+        flow.fetch_token(code=code, include_client_id=True)
+    except Exception as exc:
+        # Google returns this when the consent screen did not grant the Gmail
+        # scopes requested in SCOPES. Keep the actionable cause for the UI.
+        if "Scope has changed" in str(exc):
+            raise ValueError(
+                "Google did not grant the required Gmail permissions. In Google Cloud, "
+                "enable the Gmail API and add Gmail modify, compose, and send scopes "
+                "to the OAuth consent screen; add this account as a test user if the app "
+                "is in Testing, then reconnect Gmail."
+            ) from exc
+        raise
+
+    granted_scopes = set(flow.credentials.scopes or ())
+    missing_scopes = GMAIL_SCOPES - granted_scopes
+    if missing_scopes:
+        raise ValueError(
+            "Google connected the account without the required Gmail permissions. "
+            "Enable the Gmail API and grant Gmail modify, compose, and send scopes in "
+            "the Google OAuth consent screen, then reconnect Gmail."
+        )
     return flow.credentials

@@ -34,6 +34,7 @@ def store_decision_tool(
     - description: Comprehensive decision content including context, reasoning, and technical specifications.
     - created_by: User ID of the person recording/creating the decision.
     - participants: List of participant user IDs or dicts with role info (e.g. [{"user_id": 9, "role": "Developer"}]).
+      Each user id must be unique
     """
     ctx = get_active_project_context()
     db = ctx.get("db")
@@ -54,41 +55,76 @@ def store_decision_tool(
         })
 
     try:
-        res = store_decision(
-            db=db,
-            team_id=team_id,
-            title=title,
-            description=description,
-            created_by=effective_created_by,
-            participants=participants,
-            status="pending_approval"
-        )
+        # Validate and format participants list without writing to decisions DB table
+        added_participants = []
+        invalid_participants = []
+        if participants:
+            from models import TeamMember, User
+            for item in participants:
+                if isinstance(item, int):
+                    uid = item
+                    role = "Participant"
+                elif isinstance(item, dict):
+                    uid = item.get("user_id")
+                    role = item.get("role") or "Participant"
+                else:
+                    continue
+                if not uid:
+                    continue
+
+                if db and team_id:
+                    is_member = db.query(TeamMember).filter(
+                        TeamMember.team_id == team_id,
+                        TeamMember.user_id == uid
+                    ).first()
+                    if not is_member:
+                        invalid_participants.append(uid)
+                        continue
+                    
+                    user = db.query(User).filter(User.user_id == uid).first()
+                    name = user.name if user else f"User #{uid}"
+                    avatar_url = user.avatar_url if user else None
+                else:
+                    name = f"User #{uid}"
+                    avatar_url = None
+
+                if not any(p["user_id"] == uid for p in added_participants):
+                    added_participants.append({
+                        "user_id": uid,
+                        "name": name,
+                        "role": role,
+                        "avatar_url": avatar_url
+                    })
+
+        participant_notice = ""
+        if invalid_participants:
+            invalid_str = ", ".join(f"User #{uid}" for uid in invalid_participants)
+            participant_notice = f"Note: {invalid_str} is/are not member(s) of team #{team_id} and were not added."
 
         notice = f"A decision proposal titled '{title}' has been submitted to the team for approval. Any team admin can review, approve, edit, or reject it."
-        if res.get("participant_notice"):
-            notice += f" {res['participant_notice']}"
+        if participant_notice:
+            notice += f" {participant_notice}"
 
         return json.dumps({
             "status": "success",
             "message": notice,
             "notice": notice,
             "decision_proposal": {
-                "id": res["decision_id"],
-                "decision_id": res["decision_id"],
-                "team_id": res["team_id"],
-                "title": res["title"],
-                "description": res["description"],
-                "created_by": res["created_by"],
-                "status": res["status"],
-                "participants": res["participants"],
-                "participant_notice": res.get("participant_notice"),
-                "created_at": str(res["created_at"])
+                "id": None,
+                "decision_id": None,
+                "team_id": team_id,
+                "title": title,
+                "description": description,
+                "created_by": effective_created_by,
+                "status": "pending_approval",
+                "participants": added_participants,
+                "participant_notice": participant_notice,
             }
         }, default=str)
     except Exception as exc:
         return json.dumps({
             "status": "error",
-            "message": f"Failed to store decision: {str(exc)}"
+            "message": f"Failed to propose decision: {str(exc)}"
         })
 
 

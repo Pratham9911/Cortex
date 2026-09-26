@@ -70,7 +70,7 @@ export type WsMessage = ChatMessage
 
 export type WsChatEvent =
   | {
-      event: "new_message" | "edit_message" | "delete_message" | "reaction_update"
+      event: "new_message" | "edit_message" | "delete_message" | "reaction_update" | "proposal_updated"
       message: ChatMessage
     }
   | {

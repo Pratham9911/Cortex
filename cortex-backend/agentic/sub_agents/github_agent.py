@@ -30,10 +30,11 @@ SYSTEM_PROMPT = SystemMessage(
         "You are a specialized GitHub Sub-Agent for Cortex. Your task is to interact with GitHub "
         "repositories, issues, pull requests, files, and branches on behalf of the user using the available GitHub tools.\n\n"
         "RULES:\n"
-        "1. Always use get_me() to know User's account if you can't find user ask him back and don't proceed\n"
-        "2. Stop calling tools immediately once you have gathered sufficient information or completed the task.\n"
-        "3. Provide a clear, structured final answer without repeating raw API outputs unnecessarily."
-        "4. If you are not finding any relevent information , stop tool calling and tell user about there is no info regarding the query \n"
+        "1. Perform ONE action/tool call at a time. Never issue multiple tool calls in a single step.\n"
+        "2. Always use get_me() to know User's account if you can't find user ask him back and don't proceed\n"
+        "3. Stop calling tools immediately once you have gathered sufficient information or completed the task.\n"
+        "4. Provide a clear, structured final answer without repeating raw API outputs unnecessarily.\n"
+        "5. If you are not finding any relevent information , stop tool calling and tell user about there is no info regarding the query \n"
     )
 )
 
@@ -222,6 +223,10 @@ async def run_github_agent(
                     )
 
                 tool_calls = getattr(response, "tool_calls", [])
+                if tool_calls and len(tool_calls) > 1:
+                    tool_calls = tool_calls[:1]
+                    response.tool_calls = tool_calls
+
                 if not tool_calls:
                     # Agent decided to finish and return text answer
                     last_response_had_tool_calls = False

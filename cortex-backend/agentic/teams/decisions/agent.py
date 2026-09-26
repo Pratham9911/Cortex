@@ -33,13 +33,13 @@ DECISION_SYSTEM_PROMPT = SystemMessage(
         "   - Use when user/caller wants to record/store a decision.\n"
         "   - Format a clear, searchable, concise title.\n"
         "   - Write a rich, detailed description containing the full decision context, rationale, and scope.\n"
-        "   - Pass created_by user_id and participants list if provided.\n\n"
+        "   - Pass created_by user_id and unique id's participants list if provided , ensure it contains unique id's.\n\n"
         "2. search_decisions_tool:\n"
         "   - Use when user/caller wants to query/find past team decisions.\n"
         "   - Formulate a clear search query representing what decision to retrieve , Don't just use keywords for searching.\n\n"
         "=== RULES ===\n"
         "- ALWAYS use one of your tools to execute the requested action.\n"
-        "- Do NOT invent decisions or assume facts not present in the input.\n"
+        "- Do NOT invent decisions , user ids or assume facts not present in the input.\n"
         "- If Tool repeatedly failed to get relevent info stop calling it and return \"No information found\"\n"
         "- After tool execution, provide a clear, user-friendly summary of the action result."
     )
@@ -138,6 +138,10 @@ async def decision_chat_node(state: DecisionAgentState) -> dict:
     response = await decision_llm.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
+
+    # Enforce strictly ONE tool call per turn for subagent to prevent context overflow
+    if getattr(response, "tool_calls", None) and len(response.tool_calls) > 1:
+        response.tool_calls = response.tool_calls[:1]
 
     tool_calls = [
         {

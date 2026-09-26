@@ -361,7 +361,7 @@ export function DiscussionChat({
                 if (prev.some((m) => m.id === incoming.id)) return prev
                 return [...prev, incoming]
               }
-              if (payload.event === "edit_message" || payload.event === "delete_message" || payload.event === "reaction_update") {
+              if (payload.event === "edit_message" || payload.event === "delete_message" || payload.event === "reaction_update" || payload.event === "proposal_updated") {
                 return prev.map((m) => (m.id === incoming.id ? incoming : m))
               }
               return prev

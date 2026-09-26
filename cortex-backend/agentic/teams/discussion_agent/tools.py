@@ -43,7 +43,8 @@ async def discussion_decision_agent_tool(
     Parameters:
     - action: Use "store" when recording a new decision, or "search" when looking up past team decisions.
     - query_or_overview: Comprehensive overview/context of the decision to store, or query text to search for.
-    - participants: Optional list of team members involved as participants/approvers with their user_id and optional role.
+    - participants: Optional list of Unique team members involved as participants/approvers with their user_id and optional role (always mention a user id once).
+    - For adding Participants or in the descision if any user Id is not known , ask to user to provide or to continue without his id but name.
       Examples:
       [{"user_id": 5, "role": "Lead Architect"}, {"user_id": 9, "role": "Reviewer"}]
       or simple list of user IDs: [5, 9]

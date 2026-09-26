@@ -252,6 +252,8 @@ export function MessageItem({
               isAdmin={userRole === "admin"}
               projectId={projectId}
               teamId={teamId}
+              messageId={message.id}
+              discussionId={message.discussion_id}
               onOpenMemberDetails={onOpenMemberDetails}
             />
           </div>

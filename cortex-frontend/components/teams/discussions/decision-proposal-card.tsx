@@ -72,6 +72,8 @@ export function DecisionProposalCard({
   isAdmin,
   projectId,
   teamId,
+  messageId,
+  discussionId,
   onOpenMemberDetails,
 }: {
   isDark: boolean
@@ -79,14 +81,22 @@ export function DecisionProposalCard({
   isAdmin: boolean
   projectId: string | number
   teamId: string | number
+  messageId?: number
+  discussionId?: number
   onOpenMemberDetails?: (member: { user_id: number; name?: string; avatar_url?: string } | number) => void
 }) {
   const [proposal, setProposal] = useState<DecisionProposalPayload>(initialProposal)
   const [loadingAction, setLoadingAction] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<"approve" | "reject" | null>(null)
   const [isEditOpen, setIsEditOpen] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const decisionId = proposal.id || proposal.decision_id
+  // Sync local proposal state whenever the parent updates (via WebSocket proposal_updated events)
+  useEffect(() => {
+    setProposal(initialProposal)
+  }, [initialProposal])
+
+  const realDecisionId = proposal.id || proposal.decision_id
 
   // Fetch real user names & avatars for participants
   useEffect(() => {
@@ -128,55 +138,59 @@ export function DecisionProposalCard({
     fetchTeamMembers()
   }, [projectId, teamId])
 
-  // Fetch the real decision status from DB on mount so the card survives page reloads
+  // Fetch status ONLY if it's already an approved decision in the decisions table
   useEffect(() => {
-    if (!decisionId) return
+    if (!realDecisionId || proposal.status !== "approved") return
     const fetchStatus = async () => {
       try {
         const token = localStorage.getItem("access_token") || localStorage.getItem("token")
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${decisionId}/status`,
+          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/status`,
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if (res.ok) {
           const data = await res.json()
-          if (data.status && data.status !== proposal.status) {
-            setProposal((prev) => ({
-              ...prev,
-              status: data.status,
-              approved_by_name: data.approved_by_name || prev.approved_by_name,
-              rejected_by_name: data.rejected_by_name || prev.rejected_by_name,
-            }))
-          }
+          setProposal((prev) => ({
+            ...prev,
+            title: data.title || prev.title,
+            description: data.description || prev.description,
+            status: data.status || prev.status,
+            approved_by_name: data.approved_by_name || prev.approved_by_name,
+            rejected_by_name: data.rejected_by_name || prev.rejected_by_name,
+            participants: data.participants && data.participants.length > 0 ? data.participants : prev.participants,
+          }))
         }
       } catch {
         // Silently fail — card will show the stored status
       }
     }
     fetchStatus()
-  }, [decisionId])
+  }, [realDecisionId, proposal.status])
 
   const handleApprove = async () => {
-    if (!decisionId) return
     setLoadingAction("approve")
     try {
       const token = localStorage.getItem("access_token") || localStorage.getItem("token")
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${decisionId}/approve`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      )
+      const url = messageId && discussionId
+        ? `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal/approve`
+        : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/approve`
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
       if (res.ok) {
         const data = await res.json()
+        const dp = data.decision_proposal || {}
         setProposal((prev) => ({
           ...prev,
+          id: data.decision_id || dp.id || prev.id,
+          decision_id: data.decision_id || dp.decision_id || prev.decision_id,
           status: "approved",
-          approved_by_name: data.approved_by_name || "Admin",
+          approved_by_name: dp.approved_by_name || data.approved_by_name || "Admin",
         }))
         setConfirmAction(null)
       }
@@ -188,26 +202,34 @@ export function DecisionProposalCard({
   }
 
   const handleReject = async () => {
-    if (!decisionId) return
     setLoadingAction("reject")
+    setActionError(null)
     try {
       const token = localStorage.getItem("access_token") || localStorage.getItem("token")
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${decisionId}/reject`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      )
+      const url = messageId && discussionId
+        ? `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal/reject`
+        : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/reject`
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
+      if (res.status === 409) {
+        const errData = await res.json()
+        setActionError(errData.detail || "This decision has already been approved and cannot be rejected.")
+        setConfirmAction(null)
+        return
+      }
       if (res.ok) {
         const data = await res.json()
+        const dp = data.decision_proposal || {}
         setProposal((prev) => ({
           ...prev,
           status: "rejected",
-          rejected_by_name: data.rejected_by_name || "Admin",
+          rejected_by_name: dp.rejected_by_name || data.rejected_by_name || "Admin",
         }))
         setConfirmAction(null)
       }
@@ -218,13 +240,20 @@ export function DecisionProposalCard({
     }
   }
 
-  const handleEditSave = (updatedTitle: string, updatedDesc: string, updatedStatus: "approved", approvedByName: string) => {
+  const handleEditSave = (
+    updatedTitle: string,
+    updatedDesc: string,
+    updatedParticipants: Array<{ user_id: number; name?: string; role?: string; avatar_url?: string }>,
+    updatedStatus?: "pending_approval" | "approved" | "rejected",
+    approvedByName?: string
+  ) => {
     setProposal((prev) => ({
       ...prev,
       title: updatedTitle,
       description: updatedDesc,
-      status: "approved",
-      approved_by_name: approvedByName,
+      participants: updatedParticipants,
+      status: updatedStatus || prev.status,
+      approved_by_name: approvedByName || prev.approved_by_name,
     }))
   }
 
@@ -280,7 +309,7 @@ export function DecisionProposalCard({
           {proposal.description}
         </p>
 
-        {/* Participants Avatar Stack & User ID Chips */}
+        {/* Participants are represented by avatars in the proposal preview. */}
         {participants.length > 0 && (
           <div className="pt-2 flex flex-col gap-2">
             <div className="flex items-center gap-3">
@@ -296,9 +325,9 @@ export function DecisionProposalCard({
                       })
                     }
                     className="relative z-10 transition-all hover:scale-110 cursor-pointer"
-                    title={`View ${p.name || `User #${p.user_id}`} details`}
+                    title={`View ${p.name || "participant"} details`}
                   >
-                    <UserAvatar name={p.name || `User #${p.user_id}`} avatarUrl={p.avatar_url} size="sm" />
+                    <UserAvatar name={p.name || "Participant"} avatarUrl={p.avatar_url} size="sm" />
                   </div>
                 ))}
                 {extraParticipantCount > 0 && (
@@ -323,34 +352,6 @@ export function DecisionProposalCard({
               </div>
             </div>
 
-            {/* Participant Chips with Name and [user_id] Badge */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              {participants.map((p, idx) => (
-                <div
-                  key={idx}
-                  onClick={() =>
-                    onOpenMemberDetails?.({
-                      user_id: p.user_id,
-                      name: p.name,
-                      avatar_url: p.avatar_url,
-                    })
-                  }
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-xs cursor-pointer hover:border-black dark:hover:border-white transition-all shadow-2xs",
-                    isDark ? "border-zinc-800 bg-zinc-950 text-zinc-200" : "border-slate-200 bg-slate-50 text-slate-800"
-                  )}
-                  title="Click to view member details"
-                >
-                  <span className="font-semibold">{p.name || `User #${p.user_id}`}</span>
-                  <span className="inline-flex items-center px-1 py-0.2 rounded text-[10px] font-mono font-extrabold bg-black text-white dark:bg-white dark:text-black border border-black dark:border-white shrink-0">
-                    [{p.user_id}]
-                  </span>
-                  {p.role && (
-                    <span className="text-[10px] opacity-75 font-medium">({p.role})</span>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
         )}
       </div>
@@ -358,6 +359,19 @@ export function DecisionProposalCard({
       {/* Action Buttons for Pending Proposal */}
       {proposal.status === "pending_approval" && (
         <div className="mt-4 pt-3 border-t border-black/10 dark:border-zinc-800">
+          {/* Integrity error banner */}
+          {actionError && (
+            <div className={cn(
+              "mb-3 flex items-start gap-2 rounded-xl border px-3 py-2 text-xs font-medium animate-in fade-in duration-150",
+              isDark
+                ? "bg-rose-950/30 border-rose-500/30 text-rose-300"
+                : "bg-rose-50 border-rose-200 text-rose-700"
+            )}>
+              <ShieldAlert className="size-3.5 mt-0.5 shrink-0" />
+              <span className="flex-1">{actionError}</span>
+              <button onClick={() => setActionError(null)} className="shrink-0 opacity-70 hover:opacity-100">✕</button>
+            </div>
+          )}
           {isAdmin ? (
             confirmAction !== null ? (
               /* Confirmation Prompt Step */
@@ -431,7 +445,7 @@ export function DecisionProposalCard({
                     Approve
                   </Button>
 
-                  {/* Edit & Approve Button */}
+                  {/* Edit Button */}
                   <Button
                     size="sm"
                     variant="outline"
@@ -445,7 +459,7 @@ export function DecisionProposalCard({
                     )}
                   >
                     <Edit3 className="size-4 mr-1.5" />
-                    Edit & Approve
+                    Edit
                   </Button>
 
                   {/* Reject Button — Turns RED on Hover */}
@@ -476,11 +490,13 @@ export function DecisionProposalCard({
         </div>
       )}
 
-      {/* Edit & Approve Modal */}
+      {/* Edit Decision Modal */}
       {isEditOpen && (
         <EditDecisionModal
           isDark={isDark}
-          decisionId={decisionId!}
+          decisionId={realDecisionId!}
+          messageId={messageId}
+          discussionId={discussionId}
           initialTitle={proposal.title}
           initialDescription={proposal.description}
           initialParticipants={proposal.participants || []}

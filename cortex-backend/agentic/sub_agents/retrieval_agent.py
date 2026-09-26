@@ -20,12 +20,13 @@ SYSTEM_PROMPT = SystemMessage(
         "You are a specialized Retrieval Sub-Agent. Your task is to search internal project documents "
         "using the project_search tool to answer all parts of the user's project research query efficiently.\n\n"
         "RULES:\n"
-        "You will get a sentence which may contains seperate Topics like find A and B , Identify them and use Search for Individual Topics don't mix.\n"
-        "As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and answer in clear and facts only text.\n"
-        "if Searching Fails to retreive relevent info , more then once for a Query, STOP calling tools and answer the query with the information you have gathered so far as Info may not be present in Project.\n"
-        "Output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it\n"
-        "Citation Rule: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
-        "CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine "
+        "1. Perform ONE targeted search at a time. Never issue multiple tool calls in a single step.\n"
+        "2. You will get a sentence which may contains seperate Topics like find A and B , Identify them and use Search for Individual Topics don't mix.\n"
+        "3. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and answer in clear and facts only text.\n"
+        "4. If Searching Fails to retreive relevent info , more then once for a Query, STOP calling tools and answer the query with the information you have gathered so far as Info may not be present in Project.\n"
+        "5. Output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it\n"
+        "6. Citation Rule: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
+        "CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine \n"
         "Always use Project_search with clear query with sentence which make sense like sending task and not just simple keywords.\n"
 
     )
@@ -138,6 +139,10 @@ async def retrieval_chat_node(state: RetrievalState) -> dict:
     response = await retrieval_llm.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
+
+    # Enforce strictly ONE tool call per turn for subagent to prevent context overflow
+    if getattr(response, "tool_calls", None) and len(response.tool_calls) > 1:
+        response.tool_calls = response.tool_calls[:1]
 
     tool_calls = [
         {
