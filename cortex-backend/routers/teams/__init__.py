@@ -617,6 +617,54 @@ def get_team_members(
 
 
 # ---------------------------------------------------
+# GET PROJECT MEMBER DETAILS
+# ---------------------------------------------------
+@router.get("/projects/{project_id}/members/{target_user_id}/details")
+def get_project_member_details(
+    project_id: int,
+    target_user_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Read-only member profile for any project surface, including tasks."""
+    requester_membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id
+    ).first()
+    if not requester_membership:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    target_user = db.query(User).filter(User.user_id == target_user_id).first()
+    target_membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == target_user_id
+    ).first()
+    if not target_user or not target_membership:
+        raise HTTPException(status_code=404, detail="User is not part of this project")
+
+    team_rows = db.query(Team, TeamMember).join(
+        TeamMember,
+        TeamMember.team_id == Team.team_id
+    ).filter(
+        Team.project_id == project_id,
+        TeamMember.user_id == target_user_id
+    ).order_by(Team.name.asc()).all()
+
+    return {
+        "user_id": target_user.user_id,
+        "name": target_user.name,
+        "email": target_user.email,
+        "avatar_url": target_user.avatar_url,
+        "role": target_membership.role,
+        "joined_at": target_membership.joined_at,
+        "teams": [
+            {"team_id": team.team_id, "name": team.name, "added_at": team_member.added_at}
+            for team, team_member in team_rows
+        ],
+    }
+
+
+# ---------------------------------------------------
 # GET PROJECT MEMBER DETAILS FROM GENERAL TEAM
 # ---------------------------------------------------
 @router.get("/projects/{project_id}/teams/{team_id}/members/{target_user_id}/details")
