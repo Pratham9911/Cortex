@@ -6,12 +6,15 @@ from routers.teams.chats.service import format_message
 
 from database import SessionLocal
 from dependencies import get_current_user
+from document_acl import can_download_document, can_search_document
 from models import (
     Document,
     DocumentVersion,
     Folder,
+    Project,
     ProjectMember,
     Team,
+    TeamMember,
     TeamDiscussion,
     DiscussionMessage,
     User,
@@ -299,57 +302,101 @@ def list_team_documents(
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Return documents that belong to this team and are searchable by the user."""
-    _require_project_member(db, project_id, user_id)
+    """Return readable documents shared with this team, with download permissions."""
+    membership = _require_project_member(db, project_id, user_id)
 
-    # Verify team belongs to project
-    team = db.query(Team).filter(
-        Team.team_id == team_id,
-        Team.project_id == project_id,
+    project = db.query(Project).filter(
+        Project.project_id == project_id,
     ).first()
-    if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
 
-    # All documents in this project that include team_id in allowed_team_ids
+    _require_team(db, project_id, team_id)
+    is_project_owner = project.created_by == user_id
+    team_membership = db.query(TeamMember).filter(
+        TeamMember.team_id == team_id,
+        TeamMember.user_id == user_id,
+    ).first()
+    if not team_membership and membership.role != "admin" and not is_project_owner:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    user_team_ids = {
+        row[0]
+        for row in db.query(TeamMember.team_id).join(
+            Team,
+            Team.team_id == TeamMember.team_id,
+        ).filter(
+            Team.project_id == project_id,
+            TeamMember.user_id == user_id,
+        ).all()
+    }
+
     docs = db.query(Document).filter(
         Document.project_id == project_id,
     ).all()
 
     result = []
     for doc in docs:
-        # Must belong to this team
         if team_id not in (doc.allowed_team_ids or []):
             continue
 
-        # Must have an active, non-deleted version
+        if not can_search_document(
+            project=project,
+            membership=membership,
+            document=doc,
+            user_id=user_id,
+            user_team_ids=user_team_ids,
+        ):
+            continue
+
         active_version = db.query(DocumentVersion).filter(
             DocumentVersion.document_id == doc.document_id,
-            DocumentVersion.is_active == True,
-            DocumentVersion.is_deleted == False,
+            DocumentVersion.is_active.is_(True),
+            DocumentVersion.is_deleted.is_(False),
         ).first()
         if not active_version:
             continue
 
-        folder_name = None
+        folder = None
         if doc.folder_id:
-            folder = db.query(Folder).filter(Folder.folder_id == doc.folder_id).first()
-            if folder:
-                folder_name = folder.name
+            folder = db.query(Folder).filter(
+                Folder.folder_id == doc.folder_id,
+                Folder.project_id == project_id,
+            ).first()
+
+        uploader = db.query(User).filter(
+            User.user_id == active_version.uploaded_by,
+        ).first()
+
+        can_download = can_download_document(
+            project=project,
+            membership=membership,
+            document=doc,
+            user_id=user_id,
+            user_team_ids=user_team_ids,
+        )
 
         result.append({
             "document_id": doc.document_id,
             "title": doc.title,
             "description": doc.description,
             "folder_id": doc.folder_id,
-            "folder_name": folder_name,
+            "folder_name": folder.name if folder else None,
             "allowed_team_ids": doc.allowed_team_ids,
             "download_access_level": doc.download_access_level,
             "search_access_level": doc.search_access_level,
+            "path": f"/{folder.name + '/' if folder else ''}{active_version.file_name}",
+            "last_modified": doc.last_modified or doc.created_at,
+            "modified_by": doc.modified_by,
             "active_version": active_version.version_number,
             "active_version_id": active_version.version_id,
             "status": active_version.status,
             "file_name": active_version.file_name,
             "file_size": active_version.file_size,
+            "uploaded_by": active_version.uploaded_by,
+            "uploader_name": uploader.name if uploader else None,
+            "uploader_avatar_url": uploader.avatar_url if uploader else None,
+            "can_download": can_download,
         })
 
     return result
@@ -999,4 +1046,3 @@ async def approve_message_decision_proposal(
         "decision_id": decision_id,
         "decision_proposal": dp,
     }
-

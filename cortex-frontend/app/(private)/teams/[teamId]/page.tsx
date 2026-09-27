@@ -546,7 +546,7 @@ export default function TeamDetailPage() {
 
       {error && <p className="shrink-0 px-5 pt-4 text-sm text-red-400 sm:px-8">{error}</p>}
 
-      <div className={cn("relative min-h-0 min-w-0 w-full flex-1 overflow-hidden", activeTab === "Discussions" || activeTab === "Timelines" ? "p-0" : "overflow-y-auto p-5 sm:p-8")}>
+      <div className={cn("relative min-h-0 min-w-0 w-full flex-1 overflow-hidden", activeTab === "Discussions" || activeTab === "Timelines" || activeTab === "Files" ? "p-0" : "overflow-y-auto p-5 sm:p-8")}>
         {activeTab === "Tasks" && <TasksTab isDark={isDark} members={members} teamId={Number(params.teamId)} canManage={currentUserRole === "admin"} />}
         {activeTab === "Discussions" && (
           <DiscussionsTab
@@ -567,7 +567,13 @@ export default function TeamDetailPage() {
             onOpenMemberDetails={openMemberDetails}
           />
         )}
-        {activeTab === "Files" && <FilesTab isDark={isDark} />}
+        {activeTab === "Files" && (
+          <FilesTab
+            isDark={isDark}
+            teamId={Number(params.teamId)}
+            onOpenMemberDetails={openMemberDetails}
+          />
+        )}
         {activeTab === "Overview" && <OverviewTab isDark={isDark} />}
       </div>
 
