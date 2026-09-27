@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from dependencies import get_current_user
 from models import ProjectMember, Subtask, Task, TaskAssignee, Team, TeamMember, User
-from routers.audit import create_audit_log
 
 
 router = APIRouter(prefix="/projects/{project_id}/teams/{team_id}/tasks", tags=["tasks"])
@@ -242,7 +241,6 @@ def create_task(project_id: int, team_id: int, payload: TaskInput, user_id: int 
         _replace_task_relations(db, task, payload)
         if task.status == "DONE" and not _all_subtasks_complete(db, task.id):
             raise HTTPException(status_code=422, detail="Complete every subtask before marking a task done")
-        create_audit_log(db, project_id, user_id, "create", f"Created task '{task.title}'")
         db.commit()
         db.refresh(task)
         return {"task": _serialize_task(db, task)}
@@ -273,7 +271,6 @@ def update_task(project_id: int, team_id: int, task_id: int, payload: TaskInput,
         db.flush()
         if task.status == "DONE" and not _all_subtasks_complete(db, task.id):
             raise HTTPException(status_code=422, detail="Complete every subtask before marking a task done")
-        create_audit_log(db, project_id, user_id, "update", f"Updated task '{task.title}'")
         db.commit()
         db.refresh(task)
         return {"task": _serialize_task(db, task)}
@@ -289,9 +286,7 @@ def update_task(project_id: int, team_id: int, task_id: int, payload: TaskInput,
 def delete_task(project_id: int, team_id: int, task_id: int, user_id: int = Depends(get_current_user), db: Session = Depends(get_db)):
     _require_admin(db, project_id, team_id, user_id)
     task = _task_or_404(db, team_id, task_id)
-    title = task.title
     db.delete(task)
-    create_audit_log(db, project_id, user_id, "delete", f"Deleted task '{title}'")
     db.commit()
 
 
@@ -303,7 +298,6 @@ def update_task_status(project_id: int, team_id: int, task_id: int, payload: Sta
     if payload.status == "DONE" and not _all_subtasks_complete(db, task.id):
         raise HTTPException(status_code=422, detail="Complete every subtask before marking a task done")
     task.status = payload.status
-    create_audit_log(db, project_id, user_id, "update", f"Updated status for task '{task.title}'")
     db.commit()
     db.refresh(task)
     return {"task": _serialize_task(db, task)}
@@ -320,7 +314,6 @@ def update_subtask_completion(project_id: int, team_id: int, task_id: int, subta
     subtask.is_completed = payload.is_completed
     if task.status == "DONE" and not payload.is_completed:
         task.status = "IN_PROGRESS"
-    create_audit_log(db, project_id, user_id, "update", f"Updated a subtask on '{task.title}'")
     db.commit()
     db.refresh(task)
     return {"task": _serialize_task(db, task)}

@@ -5,11 +5,9 @@ import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
 import {
   CalendarDays,
-  MessageCircle,
   Plus,
   Search,
   SlidersHorizontal,
-  Link2,
 } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -24,6 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/components/auth/protected-route"
+import { UserAvatarContents } from "@/components/teams/user-avatar-contents"
 
 type Team = {
   team_id: number
@@ -32,12 +31,13 @@ type Team = {
   tags?: string[]
   member_count: number
   created_at?: string
+  is_member: boolean
+  members: TeamMember[]
 }
 
 type TeamMember = {
   user_id: number
   name: string
-  email: string
   avatar_url?: string
 }
 
@@ -91,13 +91,14 @@ export default function TeamsPage() {
   const [sortBy, setSortBy] = useState<"name" | "recent">("name")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const [restrictedTeam, setRestrictedTeam] = useState<Team | null>(null)
   
   const [openCreate, setOpenCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [teamName, setTeamName] = useState("")
   const [teamDescription, setTeamDescription] = useState("")
   const [teamTags, setTeamTags] = useState("")
-  
   const [teamMembersMap, setTeamMembersMap] = useState<Record<number, TeamMember[]>>({})
 
   const panel = isDark ? "bg-[#181a20] border-zinc-800" : "bg-white border-zinc-200"
@@ -121,8 +122,25 @@ export default function TeamsPage() {
       const list = Array.isArray(data) ? data : []
       setTeams(list)
 
+      const projectsResponse = await fetch(`${apiUrl}/getprojects`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (projectsResponse.ok) {
+        const projects = await projectsResponse.json()
+        const project = Array.isArray(projects)
+          ? projects.find((item: { project_id: number }) => item.project_id === Number(projectId))
+          : null
+        setCurrentUserRole(project?.current_user_role || null)
+      } else {
+        setCurrentUserRole(null)
+        setError("Could not verify project permissions. Team creation is unavailable.")
+      }
+
       const membersEntries = await Promise.all(
         list.map(async (team: Team) => {
+          if (Array.isArray(team.members)) {
+            return [team.team_id, team.members] as const
+          }
           try {
             const membersRes = await fetch(`${apiUrl}/projects/${projectId}/teams/${team.team_id}/members`, {
               headers: { Authorization: `Bearer ${token}` },
@@ -184,14 +202,6 @@ export default function TeamsPage() {
     return [...list].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
   }, [teams, query, sortBy])
 
-  const getInitials = (name: string) => {
-    if (!name || name.startsWith("User #")) return "U"
-    const parts = name.trim().split(/\s+/).filter(Boolean)
-    if (!parts.length) return "U"
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-  }
-
   const colorTagClass = (tag: string) => {
     const tagStyles = isDark
       ? ["bg-pink-500/10 text-pink-400", "bg-amber-500/10 text-amber-400", "bg-violet-500/10 text-violet-400", "bg-blue-500/10 text-blue-400", "bg-emerald-500/10 text-emerald-400", "bg-rose-500/10 text-rose-400"]
@@ -250,7 +260,7 @@ export default function TeamsPage() {
 
   return (
     <section className="w-full">
-      <h1 className={cn("text-3xl font-semibold tracking-tight", strong)}>My Teams</h1>
+      <h1 className={cn("text-3xl font-semibold tracking-tight", strong)}>Cortex Teams</h1>
 
       <div className="mt-4 md:mt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full md:w-auto">
@@ -276,11 +286,13 @@ export default function TeamsPage() {
           </Button>
         </div>
 
-        <div className="flex items-center gap-3 md:ml-47 w-full md:w-auto justify-end">
-          <Button onClick={() => setOpenCreate(true)} className="h-10 rounded-xl bg-[#009f5c] px-4 md:px-6 text-sm font-semibold text-white hover:bg-[#00b166]">
-            <Plus className="mr-2 h-4 w-4" /> Create team
-          </Button>
-        </div>
+        {currentUserRole === "admin" && (
+          <div className="flex items-center gap-3 md:ml-47 w-full md:w-auto justify-end">
+            <Button onClick={() => setOpenCreate(true)} className="h-10 rounded-xl bg-[#009f5c] px-4 md:px-6 text-sm font-semibold text-white hover:bg-[#00b166]">
+              <Plus className="mr-2 h-4 w-4" /> Create team
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 min-h-[28px]">
@@ -300,7 +312,16 @@ export default function TeamsPage() {
               {filteredTeams.map((team) => (
                 <Card
                   key={team.team_id}
-                  onClick={() => router.push(`/teams/${team.team_id}`)}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => team.is_member ? router.push(`/teams/${team.team_id}`) : setRestrictedTeam(team)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      if (team.is_member) router.push(`/teams/${team.team_id}`)
+                      else setRestrictedTeam(team)
+                    }
+                  }}
                   className={cn("border rounded-2xl p-0 cursor-pointer transition-all hover:-translate-y-0.5 overflow-hidden", panel)}
                 >
                 <div className="p-4 md:p-5">
@@ -325,40 +346,23 @@ export default function TeamsPage() {
                     {team.created_at ? new Date(team.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : "No date"}
                   </div>
                 </div>
-                <div className={cn("px-4 md:px-5 py-3 border-t flex items-center justify-between", isDark ? "border-zinc-800" : "border-zinc-200")}>
+                <div className={cn("px-4 md:px-5 py-3 border-t flex items-center", isDark ? "border-zinc-800" : "border-zinc-200")}>
                   <div className="flex items-center -space-x-2">
-                    {(teamMembersMap[team.team_id] || []).slice(0, 2).map((member, idx) => (
+                    {(teamMembersMap[team.team_id] || []).slice(0, 2).map((member) => (
                       <span
                         key={member.user_id}
                         className={cn(
-                          "w-8 h-8 rounded-full border border-black bg-white text-black text-[10px] font-extrabold flex items-center justify-center uppercase overflow-hidden shadow-xs -ml-1.5 first:ml-0"
+                          "w-6 h-6 rounded-full border border-black bg-white text-black text-[9px] font-extrabold flex items-center justify-center uppercase overflow-hidden shadow-xs -ml-1.5 first:ml-0"
                         )}
                         title={member.name}
                       >
-                        {member.avatar_url ? (
-                          <img
-                            src={member.avatar_url}
-                            alt={member.name}
-                            className="h-full w-full object-cover"
-                            onError={(e) => {
-                              e.currentTarget.style.display = "none"
-                              const fallback = e.currentTarget.nextElementSibling as HTMLElement
-                              if (fallback) fallback.style.display = "flex"
-                            }}
-                          />
-                        ) : null}
-                        <span
-                          className="h-full w-full items-center justify-center flex"
-                          style={member.avatar_url ? { display: "none" } : {}}
-                        >
-                          {getInitials(member.name)}
-                        </span>
+                        <UserAvatarContents name={member.name} avatarUrl={member.avatar_url} />
                       </span>
                     ))}
                     {(teamMembersMap[team.team_id] || []).length > 2 && (
                       <span
                         className={cn(
-                          "w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center z-30 shrink-0",
+                          "w-6 h-6 rounded-full border text-[9px] font-bold flex items-center justify-center z-30 shrink-0",
                           isDark ? "bg-white text-black border-[#181a20]" : "bg-black text-white border-white"
                         )}
                         title={`${(teamMembersMap[team.team_id] || []).length - 2} more members`}
@@ -366,18 +370,6 @@ export default function TeamsPage() {
                         +{(teamMembersMap[team.team_id] || []).length - 2}
                       </span>
                     )}
-                    {(teamMembersMap[team.team_id] || []).length === 0 && (
-                      <span className={cn("text-xs", muted)}>No members</span>
-                    )}
-                  </div>
-
-                  <div className={cn("flex items-center gap-3 text-sm", muted)}>
-                    <span className="inline-flex items-center gap-1">
-                      <MessageCircle className="w-4 h-4" /> {team.member_count ?? 0}
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <Link2 className="w-4 h-4" /> {team.tags?.length ?? 0}
-                    </span>
                   </div>
                 </div>
                 </Card>
@@ -397,6 +389,22 @@ export default function TeamsPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={!!restrictedTeam} onOpenChange={(open) => !open && setRestrictedTeam(null)}>
+        <DialogContent className={cn("sm:max-w-sm", isDark ? "border-zinc-700 bg-[#171920] text-white" : "")}>
+          <DialogHeader>
+            <DialogTitle>You are not a member of this team</DialogTitle>
+            <DialogDescription className={isDark ? "text-zinc-400" : ""}>
+              {restrictedTeam
+                ? `You can see this team in Cortex Teams, but you cannot open “${restrictedTeam.name}” because you are not a member.`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setRestrictedTeam(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>
         <DialogContent className={cn("sm:max-w-lg", isDark ? "border-zinc-700 bg-[#171920] text-white" : "")}>

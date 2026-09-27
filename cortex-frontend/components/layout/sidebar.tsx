@@ -8,9 +8,10 @@ import { useAuth } from "@/components/auth/protected-route"
 import { cn } from "@/lib/utils"
 import {
   Search, Inbox, Bell, LayoutGrid, BarChart3, LineChart,
-  Bot, FileText, Receipt, Building2, Trash2, Sparkles,
+  Bot, FileText, Building2, Trash2, Sparkles,
   Sliders, Moon, Sun, Palette, HelpCircle, ChevronsUpDown,
-  PanelLeftClose, PanelLeftOpen, LogOut, User, X, Settings, ClipboardList
+  PanelLeftClose, PanelLeftOpen, LogOut, User, X, Settings, ClipboardList,
+  ChevronRight,
 } from "lucide-react"
 
 interface SidebarProps {
@@ -26,14 +27,18 @@ const MENU_ITEMS = [
   { id: "Analytics", label: "Analytics", icon: BarChart3 },
   { id: "Reporting", label: "Reporting", icon: LineChart },
   { id: "Agent", label: "AI Agent", icon: Bot },
-  { id: "AgentInspector", label: "Agent Inspector", icon: Sparkles },
   { id: "Documents", label: "Documents", icon: FileText },
-  { id: "Projects", label: "Projects", icon: Receipt },
-  { id: "Settings", label: "Settings", icon: Settings },
   { id: "Teams", label: "Teams", icon: Building2 },
   { id: "AuditLogs", label: "Audit logs", icon: ClipboardList },
   { id: "Trash", label: "Trash", icon: Trash2 },
+  { id: "Settings", label: "Settings", icon: Settings },
 ]
+
+interface SidebarTeam {
+  team_id: number
+  name: string
+  is_member: boolean
+}
 
 /* ─── Shared inner content used by both desktop & mobile ─── */
 function SidebarContent({
@@ -52,6 +57,9 @@ function SidebarContent({
   const [mounted, setMounted] = useState(false)
   const [active, setActive] = useState("Dashboard")
   const [profileOpen, setProfileOpen] = useState(false)
+  const [teamsExpanded, setTeamsExpanded] = useState(false)
+  const [sidebarTeams, setSidebarTeams] = useState<SidebarTeam[]>([])
+  const [teamsLoadError, setTeamsLoadError] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setMounted(true) }, [])
@@ -72,6 +80,63 @@ function SidebarContent({
   }, [isCollapsed])
 
   const isDark = mounted && theme === "dark"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadSidebarTeams = async () => {
+      const token = localStorage.getItem("access_token")
+      const projectId = localStorage.getItem("selected_project_id")
+      if (!token || !projectId) {
+        setSidebarTeams([])
+        setTeamsLoadError(false)
+        return
+      }
+
+      try {
+        const headers = { Authorization: `Bearer ${token}` }
+        const [teamsResponse, projectsResponse] = await Promise.all([
+          fetch(`${apiUrl}/projects/${projectId}/teams`, { headers }),
+          fetch(`${apiUrl}/getprojects`, { headers }),
+        ])
+        if (!teamsResponse.ok || !projectsResponse.ok) {
+          throw new Error("Failed to load sidebar teams")
+        }
+
+        const [teamsData, projectsData] = await Promise.all([
+          teamsResponse.json(),
+          projectsResponse.json(),
+        ])
+        const project = Array.isArray(projectsData)
+          ? projectsData.find((item: { project_id: number }) => item.project_id === Number(projectId))
+          : null
+        const isProjectAdmin = project?.current_user_role === "admin"
+          || project?.created_by?.user_id === user?.user_id
+        const accessibleTeams = (Array.isArray(teamsData) ? teamsData : [])
+          .filter((team: SidebarTeam) => isProjectAdmin || team.is_member)
+          .map((team: SidebarTeam) => ({
+            team_id: team.team_id,
+            name: team.name,
+            is_member: team.is_member,
+          }))
+
+        if (!cancelled) {
+          setSidebarTeams(accessibleTeams)
+          setTeamsLoadError(false)
+        }
+      } catch (error) {
+        console.error("Could not load teams in the sidebar:", error)
+        if (!cancelled) {
+          setSidebarTeams([])
+          setTeamsLoadError(true)
+        }
+      }
+    }
+
+    void loadSidebarTeams()
+    return () => { cancelled = true }
+  }, [apiUrl, pathname, user?.user_id])
 
   const divider = isDark ? "bg-zinc-800" : "bg-zinc-200"
   const navText = isDark ? "text-zinc-300" : "text-zinc-600"
@@ -195,6 +260,80 @@ function SidebarContent({
     )
   }
 
+  const TeamsNavRow = () => {
+    const isActive = active === "Teams"
+    return (
+      <div>
+        <div className={cn(
+          "group flex h-9 w-full items-center rounded-lg text-xs font-semibold transition-colors duration-150",
+          isActive ? activeCard : cn(navText, hoverRow)
+        )}>
+          <button
+            type="button"
+            onClick={() => {
+              if (isCollapsed) setIsCollapsed(false)
+              setTeamsExpanded((expanded) => !expanded)
+            }}
+            title={isCollapsed ? "Expand teams" : teamsExpanded ? "Collapse teams" : "Expand teams"}
+            aria-label={teamsExpanded ? "Collapse teams" : "Expand teams"}
+            aria-expanded={teamsExpanded}
+            className="flex h-full w-9 shrink-0 items-center justify-center rounded-l-lg outline-none"
+          >
+            <Building2 className="h-4 w-4 group-hover:hidden" />
+            <ChevronRight className={cn(
+              "hidden h-4 w-4 transition-transform group-hover:block",
+              teamsExpanded && "rotate-90"
+            )} />
+          </button>
+          {!isCollapsed && (
+            <button
+              type="button"
+              onClick={() => handleNav("Teams")}
+              className="h-full min-w-0 flex-1 truncate pr-2 text-left outline-none"
+            >
+              Teams
+            </button>
+          )}
+        </div>
+
+        {!isCollapsed && teamsExpanded && (
+          <div className={cn(
+            "ml-[18px] mt-1 max-h-[184px] overflow-y-auto overflow-x-hidden border-l pl-2 sidebar-scroll",
+            isDark ? "border-zinc-800" : "border-zinc-200"
+          )}>
+            {teamsLoadError ? (
+              <p className={cn("px-2 py-2 text-[10px]", navText)}>Could not load teams.</p>
+            ) : sidebarTeams.length ? (
+              <div className="flex flex-col gap-0.5">
+                {sidebarTeams.map((team) => (
+                  <button
+                    key={team.team_id}
+                    type="button"
+                    onClick={() => {
+                      router.push(`/teams/${team.team_id}`)
+                      setIsMobileOpen(false)
+                    }}
+                    title={team.name}
+                    className={cn(
+                      "h-8 w-full truncate rounded-md px-2 text-left text-xs font-medium transition-colors",
+                      pathname === `/teams/${team.team_id}`
+                        ? activeCard
+                        : cn(navText, hoverRow)
+                    )}
+                  >
+                    {team.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className={cn("px-2 py-2 text-[10px]", navText)}>No teams available.</p>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="h-full flex flex-col min-h-0">
 
@@ -282,7 +421,10 @@ function SidebarContent({
         )}
       >
         <div className={cn("flex flex-col gap-0.5 pb-1", !isCollapsed && "pr-2")}>
-          {MENU_ITEMS.map(item => <NavRow key={item.id} {...item} />)}
+          {MENU_ITEMS.map(item => item.id === "Teams"
+            ? <TeamsNavRow key={item.id} />
+            : <NavRow key={item.id} {...item} />
+          )}
         </div>
       </div>
 

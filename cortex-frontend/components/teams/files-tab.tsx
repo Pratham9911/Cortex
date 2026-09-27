@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react"
 import { getFileFormatIcon } from "@/components/agent-chat/project-document-select-modal"
+import { UserAvatarContents } from "@/components/teams/user-avatar-contents"
 import { cn } from "@/lib/utils"
 
 type TeamDocument = {
@@ -64,14 +65,6 @@ function formatDate(value: string | null) {
     day: "numeric",
     year: "numeric",
   }).format(date)
-}
-
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return "?"
-  return parts.length > 1
-    ? `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-    : parts[0].slice(0, 2).toUpperCase()
 }
 
 export function FilesTab({
@@ -429,21 +422,13 @@ export function FilesTab({
                       aria-label={`View ${uploader}'s member details`}
                       title={`View ${uploader}'s member details`}
                       className={cn(
-                        "flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-black text-[10px] font-semibold transition-transform hover:z-10 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black",
-                        isDark
-                          ? "bg-zinc-800 text-zinc-100"
-                          : "bg-slate-200 text-slate-700",
+                        "flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-black bg-white text-[10px] font-semibold text-black transition-transform hover:z-10 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black",
                       )}
                     >
-                      {file.uploader_avatar_url ? (
-                        <img
-                          src={file.uploader_avatar_url}
-                          alt=""
-                          className="size-full object-cover"
-                        />
-                      ) : (
-                        initials(uploader)
-                      )}
+                      <UserAvatarContents
+                        name={uploader}
+                        avatarUrl={file.uploader_avatar_url || undefined}
+                      />
                     </button>
                     <span className="truncate text-xs font-medium">{uploader}</span>
                   </div>

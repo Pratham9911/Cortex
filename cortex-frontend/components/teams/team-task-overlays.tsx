@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
+import { UserAvatarContents } from "@/components/teams/user-avatar-contents"
 
 export type TaskStatus = "TODO" | "IN_PROGRESS" | "DONE"
 export type Priority = "LOW" | "MEDIUM" | "HIGH"
@@ -95,20 +96,17 @@ export function AvatarStack({
 
   return (
     <div className="flex items-center -space-x-2">
-      {visible.map((person, index) => (
+      {visible.map((person) => (
         <AvatarElement
           key={person.user_id}
           title={person.name}
           {...(interactive ? { type: "button" as const, onClick: (event: MouseEvent) => { event.stopPropagation(); onMemberClick?.(person) } } : {})}
           className={cn(
-            "flex size-7 items-center justify-center overflow-hidden rounded-full border-2 text-[9px] font-bold shadow-sm",
+            "flex size-7 items-center justify-center overflow-hidden rounded-full border-2 border-black bg-white text-[9px] font-bold text-black shadow-sm",
             interactive && "cursor-pointer transition-transform hover:z-10 hover:scale-110 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
-            isDark ? "border-[#191919] bg-zinc-100 text-black" : "border-black bg-white text-black",
-            index === 1 && isDark && "bg-sky-200",
-            index === 2 && isDark && "bg-amber-200"
           )}
         >
-          {person.avatar_url ? <img src={person.avatar_url} alt={person.name} className="size-full object-cover" /> : initials(person.name)}
+          <UserAvatarContents name={person.name} avatarUrl={person.avatar_url} />
         </AvatarElement>
       ))}
       {remaining > 0 && (
@@ -448,8 +446,8 @@ export function TeamTaskOverlays({
                   }}
                   className={cn("flex w-full items-center gap-3 rounded-md px-2 py-2 text-left", isDark ? "hover:bg-zinc-800" : "hover:bg-slate-100")}
                 >
-                  <span className={cn("flex size-8 items-center justify-center overflow-hidden rounded-full border text-[10px] font-bold", isDark ? "border-white bg-zinc-100 text-black" : "border-black bg-white text-black")}>
-                    {person.avatar_url ? <img src={person.avatar_url} alt="" className="size-full object-cover" /> : initials(person.name)}
+                  <span className="flex size-8 items-center justify-center overflow-hidden rounded-full border-2 border-black bg-white text-[10px] font-bold text-black">
+                    <UserAvatarContents name={person.name} avatarUrl={person.avatar_url} />
                   </span>
                   <span className="truncate text-sm font-medium">{person.name}</span>
                 </button>
@@ -528,8 +526,8 @@ export function TeamTaskOverlays({
                       const selected = draftAssignees.includes(person.user_id)
                       return (
                         <button key={person.user_id} type="button" onClick={() => setDraftAssignees(selected ? draftAssignees.filter((id) => id !== person.user_id) : [...draftAssignees, person.user_id])} className={cn("flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm", selected ? (isDark ? "bg-white text-black" : "bg-slate-900 text-white") : isDark ? "hover:bg-zinc-800" : "hover:bg-slate-100")}>
-                          <span className={cn("flex size-7 items-center justify-center overflow-hidden rounded-full text-[9px] font-bold", selected ? "bg-black text-white" : "bg-slate-200 text-slate-700")}>
-                            {person.avatar_url ? <img src={person.avatar_url} alt="" className="size-full object-cover" /> : initials(person.name)}
+                          <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-black bg-white text-[9px] font-bold text-black">
+                            <UserAvatarContents name={person.name} avatarUrl={person.avatar_url} />
                           </span>
                           <span className="min-w-0 flex-1 truncate">{person.name}</span>
                           {selected && <CheckCircle2 className="size-4" />}

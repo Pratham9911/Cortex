@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import {
   Check,
@@ -123,6 +123,7 @@ function PageUserAvatar({
 
 export default function TeamDetailPage() {
   const params = useParams<{ teamId: string }>()
+  const router = useRouter()
   const { user } = useAuth()
   const { theme } = useTheme()
   const isDark = theme === "dark"
@@ -371,6 +372,62 @@ export default function TeamDetailPage() {
     } finally {
       setSendingInvite(false)
     }
+  }
+
+  const updateTeamSettings = async (name: string, description: string, tags: string[]) => {
+    const token = localStorage.getItem("access_token")
+    const projectId = localStorage.getItem("selected_project_id")
+    if (!token || !projectId || !params?.teamId) {
+      throw new Error("Project context is missing.")
+    }
+
+    const response = await fetch(
+      `${apiUrl}/projects/${projectId}/teams/${params.teamId}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name, description, tags }),
+      },
+    )
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      const detail = Array.isArray(data?.detail)
+        ? data.detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(" ")
+        : data?.detail
+      throw new Error(detail || "Could not update team settings.")
+    }
+
+    setTeamName(data?.team?.name || name)
+    setTeamDescription(data?.team?.description || description)
+    setTeamTags(Array.isArray(data?.team?.tags) ? data.team.tags : tags)
+  }
+
+  const deleteCurrentTeam = async () => {
+    const token = localStorage.getItem("access_token")
+    const projectId = localStorage.getItem("selected_project_id")
+    if (!token || !projectId || !params?.teamId) {
+      throw new Error("Project context is missing.")
+    }
+
+    const response = await fetch(
+      `${apiUrl}/projects/${projectId}/teams/${params.teamId}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    )
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      const detail = Array.isArray(data?.detail)
+        ? data.detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(" ")
+        : data?.detail
+      throw new Error(detail || "Could not delete this team.")
+    }
+
+    router.replace("/teams")
   }
 
   const canInvite = teamName.trim().toLowerCase() === "general" && currentUserRole === "admin"
@@ -650,6 +707,8 @@ export default function TeamDetailPage() {
             canManage={currentUserRole === "admin" || isProjectOwner}
             isGeneralTeam={isGeneralTeam}
             onOpenMemberDetails={openMemberDetails}
+            onUpdateTeam={updateTeamSettings}
+            onDeleteTeam={deleteCurrentTeam}
           />
         )}
       </div>

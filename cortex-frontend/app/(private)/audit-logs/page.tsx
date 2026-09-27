@@ -11,6 +11,18 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip
 } from "recharts"
 import { cn } from "@/lib/utils"
+import { UserAvatarContents } from "@/components/teams/user-avatar-contents"
+
+function ActorAvatar({ name, avatarUrl, size = "sm" }: { name?: string | null; avatarUrl?: string | null; size?: "sm" | "md" }) {
+  return (
+    <span className={cn(
+      "flex shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-black bg-white font-bold text-black",
+      size === "md" ? "size-7 text-[10px]" : "size-5 text-[8px]"
+    )}>
+      <UserAvatarContents name={name} avatarUrl={avatarUrl || undefined} />
+    </span>
+  )
+}
 
 // ─── FileIcon Helper (matches public /icons/ asset paths) ──────────────────────
 function FileIcon({ fileName, size = "sm" }: { fileName?: string; size?: "sm" | "lg" }) {
@@ -45,8 +57,8 @@ function ParsedDescription({ text, isDark, maxChars }: { text: string; isDark: b
               className={cn(
                 "inline-flex items-center px-1.5 py-0.5 rounded font-mono font-bold text-[11px] mx-0.5 border",
                 isDark
-                  ? "bg-violet-500/10 text-violet-300 border-violet-500/30"
-                  : "bg-violet-50 text-violet-700 border-violet-200"
+                  ? "bg-zinc-500/10 text-zinc-300 border-zinc-500/30"
+                  : "bg-zinc-50 text-zinc-700 border-zinc-200"
               )}
             >
               {inner}
@@ -324,6 +336,7 @@ export default function AuditLogsPage() {
   }
 
   const totalPages = Math.max(1, Math.ceil(totalLogs / pageSize))
+  const chartColor = isDark ? "#f4f4f5" : "#18181b"
 
   return (
     <div className="flex flex-col flex-1 min-w-0 space-y-6 pb-12">
@@ -331,7 +344,7 @@ export default function AuditLogsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-violet-500 bg-violet-500/10 px-2 py-0.5 rounded border border-violet-500/20">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 bg-zinc-500/10 px-2 py-0.5 rounded border border-zinc-500/20">
               System Audit
             </span>
           </div>
@@ -347,10 +360,10 @@ export default function AuditLogsPage() {
           onClick={handleExportCSV}
           disabled={exporting}
           className={cn(
-            "h-9 px-4 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all shadow-sm shrink-0",
+            "h-9 px-4 rounded-md text-xs font-semibold flex items-center gap-2 transition-all shadow-sm shrink-0",
             isDark
-              ? "bg-violet-600 hover:bg-violet-500 text-white"
-              : "bg-violet-600 hover:bg-violet-700 text-white"
+              ? "bg-white hover:bg-zinc-200 text-black"
+              : "bg-black hover:bg-zinc-800 text-white"
           )}
         >
           {exporting ? <RotateCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
@@ -361,10 +374,10 @@ export default function AuditLogsPage() {
       {/* ── 2. KPI METRICS CARDS ────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Events */}
-        <div className={cn("p-4 rounded-2xl border transition-all", isDark ? "bg-[#151518] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
+        <div className={cn("p-4 rounded-lg border transition-all", isDark ? "bg-[#191919] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Total Events</span>
-            <div className="p-2 rounded-xl bg-violet-500/10 text-violet-400">
+            <div className="p-2 rounded-md bg-zinc-500/10 text-zinc-400">
               <Layers className="w-4 h-4" />
             </div>
           </div>
@@ -375,10 +388,10 @@ export default function AuditLogsPage() {
         </div>
 
         {/* Successful Events */}
-        <div className={cn("p-4 rounded-2xl border transition-all", isDark ? "bg-[#151518] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
+        <div className={cn("p-4 rounded-lg border transition-all", isDark ? "bg-[#191919] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">Successful</span>
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+            <div className="p-2 rounded-md bg-emerald-500/10 text-emerald-400">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
@@ -391,7 +404,7 @@ export default function AuditLogsPage() {
         </div>
 
         {/* Action Toggle Card (Create, Update, Delete, System) */}
-        <div className={cn("p-4 rounded-2xl border transition-all relative", isDark ? "bg-[#151518] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
+        <div className={cn("p-4 rounded-lg border transition-all relative", isDark ? "bg-[#191919] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
           <div className="flex items-center justify-between">
             <select
               value={actionCardMetric}
@@ -403,7 +416,7 @@ export default function AuditLogsPage() {
               <option value="delete">Deletes</option>
               <option value="system">System</option>
             </select>
-            <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+            <div className="p-2 rounded-md bg-blue-500/10 text-blue-400">
               <Activity className="w-4 h-4" />
             </div>
           </div>
@@ -419,10 +432,10 @@ export default function AuditLogsPage() {
         </div>
 
         {/* Failed Events */}
-        <div className={cn("p-4 rounded-2xl border transition-all", isDark ? "bg-[#151518] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
+        <div className={cn("p-4 rounded-lg border transition-all", isDark ? "bg-[#191919] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-rose-400 uppercase tracking-wider">Failed Events</span>
-            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400">
+            <div className="p-2 rounded-md bg-rose-500/10 text-rose-400">
               <XCircle className="w-4 h-4" />
             </div>
           </div>
@@ -434,7 +447,7 @@ export default function AuditLogsPage() {
       </div>
 
       {/* ── 3. ACTIVITY AREA GRAPH (RECHARTS) ────────────────────────────────── */}
-      <div className={cn("p-5 rounded-2xl border transition-all space-y-4", isDark ? "bg-[#151518] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
+      <div className={cn("p-5 rounded-lg border transition-all space-y-4", isDark ? "bg-[#191919] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className={cn("text-sm font-bold", isDark ? "text-white" : "text-slate-900")}>Event Activity Trend</h3>
@@ -443,16 +456,16 @@ export default function AuditLogsPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-zinc-800/40 p-1 rounded-xl border border-zinc-700/40 text-xs font-semibold shrink-0">
+          <div className={cn("flex items-center gap-1.5 rounded-md border p-1 text-xs font-semibold shrink-0", isDark ? "border-zinc-700 bg-zinc-900" : "border-slate-200 bg-slate-100")}>
             {[7, 30, 90].map((d) => (
               <button
                 key={d}
                 onClick={() => { setDays(d); setSelectedDate(null); }}
                 className={cn(
-                  "px-3 py-1 rounded-lg transition-all",
+                  "rounded px-3 py-1 transition-colors",
                   days === d && !selectedDate
-                    ? "bg-violet-600 text-white shadow-sm"
-                    : "text-zinc-400 hover:text-white"
+                    ? (isDark ? "bg-white text-black shadow-sm" : "bg-black text-white shadow-sm")
+                    : (isDark ? "text-zinc-400 hover:bg-zinc-800 hover:text-white" : "text-slate-500 hover:bg-white hover:text-black")
                 )}
               >
                 {d} days
@@ -461,7 +474,7 @@ export default function AuditLogsPage() {
             {selectedDate && (
               <button
                 onClick={() => setSelectedDate(null)}
-                className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1"
+                className={cn("flex items-center gap-1 rounded px-2.5 py-1 border", isDark ? "border-amber-400/30 bg-amber-400/15 text-amber-200" : "border-amber-300 bg-amber-50 text-amber-700")}
               >
                 <span>{selectedDate}</span>
                 <X className="w-3 h-3" />
@@ -487,8 +500,8 @@ export default function AuditLogsPage() {
               >
                 <defs>
                   <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.0} />
+                    <stop offset="5%" stopColor={chartColor} stopOpacity={isDark ? 0.32 : 0.16} />
+                    <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis dataKey="date" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
@@ -498,11 +511,11 @@ export default function AuditLogsPage() {
                     if (active && payload && payload.length) {
                       const data = payload[0].payload
                       return (
-                        <div className={cn("p-3 rounded-xl border text-xs shadow-2xl space-y-1.5 min-w-[160px]", isDark ? "bg-zinc-900/95 border-zinc-700 text-white" : "bg-white border-slate-200 text-slate-900")}>
+                        <div className={cn("p-3 rounded-md border text-xs shadow-2xl space-y-1.5 min-w-[160px]", isDark ? "bg-zinc-900/95 border-zinc-700 text-white" : "bg-white border-slate-200 text-slate-900")}>
                           <p className="font-bold text-[11px] border-b border-zinc-700/40 pb-1">{data.date}</p>
                           <div className="flex items-center justify-between text-zinc-300">
                             <span>Total Events:</span>
-                            <span className="font-bold text-violet-400">{data.total}</span>
+                            <span className="font-bold text-zinc-400">{data.total}</span>
                           </div>
                           <div className="flex items-center justify-between text-[11px]">
                             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Creates:</span>
@@ -532,7 +545,7 @@ export default function AuditLogsPage() {
                     return null
                   }}
                 />
-                <Area type="monotone" dataKey="total" stroke="#8b5cf6" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" cursor="pointer" />
+                <Area type="monotone" dataKey="total" stroke={chartColor} strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" cursor="pointer" />
               </AreaChart>
             </ResponsiveContainer>
           )}
@@ -540,7 +553,7 @@ export default function AuditLogsPage() {
       </div>
 
       {/* ── 4. SEARCH & MULTI-FILTER CONTROL BAR ────────────────────────────── */}
-      <div className={cn("p-4 rounded-2xl border space-y-3", isDark ? "bg-[#151518] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
+      <div className={cn("p-4 rounded-lg border space-y-3", isDark ? "bg-[#191919] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Search Input */}
           <div className="lg:col-span-2 relative">
@@ -551,8 +564,8 @@ export default function AuditLogsPage() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by description, actor, resource ID, filename..."
               className={cn(
-                "w-full h-9 pl-9 pr-3 rounded-xl text-xs font-medium border outline-none transition-colors",
-                isDark ? "bg-zinc-900 border-zinc-700/80 text-white focus:border-violet-500" : "bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500"
+                "w-full h-9 pl-9 pr-3 rounded-md text-xs font-medium border outline-none transition-colors",
+                isDark ? "bg-zinc-900 border-zinc-700/80 text-white focus:border-zinc-500" : "bg-slate-50 border-slate-200 text-slate-900 focus:border-zinc-500"
               )}
             />
           </div>
@@ -563,7 +576,7 @@ export default function AuditLogsPage() {
               value={actionFilter}
               onChange={(e) => setActionFilter(e.target.value)}
               className={cn(
-                "w-full h-9 pl-3 pr-8 rounded-xl text-xs font-semibold border outline-none appearance-none cursor-pointer",
+                "w-full h-9 pl-3 pr-8 rounded-md text-xs font-semibold border outline-none appearance-none cursor-pointer",
                 isDark ? "bg-zinc-900 border-zinc-700/80 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
               )}
             >
@@ -582,7 +595,7 @@ export default function AuditLogsPage() {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className={cn(
-                "w-full h-9 pl-3 pr-8 rounded-xl text-xs font-semibold border outline-none appearance-none cursor-pointer",
+                "w-full h-9 pl-3 pr-8 rounded-md text-xs font-semibold border outline-none appearance-none cursor-pointer",
                 isDark ? "bg-zinc-900 border-zinc-700/80 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
               )}
             >
@@ -599,7 +612,7 @@ export default function AuditLogsPage() {
               value={resourceFilter}
               onChange={(e) => setResourceFilter(e.target.value)}
               className={cn(
-                "w-full h-9 pl-3 pr-8 rounded-xl text-xs font-semibold border outline-none appearance-none cursor-pointer",
+                "w-full h-9 pl-3 pr-8 rounded-md text-xs font-semibold border outline-none appearance-none cursor-pointer",
                 isDark ? "bg-zinc-900 border-zinc-700/80 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
               )}
             >
@@ -617,22 +630,22 @@ export default function AuditLogsPage() {
           <div className="flex items-center gap-2 pt-1 flex-wrap text-xs">
             <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Active Filters:</span>
             {query && (
-              <span className="px-2.5 py-0.5 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20 flex items-center gap-1">
+              <span className={cn("flex items-center gap-1 rounded border px-2.5 py-0.5", isDark ? "border-zinc-700 bg-zinc-800 text-zinc-300" : "border-slate-200 bg-slate-100 text-slate-700")}>
                 Query: "{query}" <X className="w-3 h-3 cursor-pointer" onClick={() => setQuery("")} />
               </span>
             )}
             {actionFilter !== "all" && (
-              <span className="px-2.5 py-0.5 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20 flex items-center gap-1">
+              <span className={cn("flex items-center gap-1 rounded border px-2.5 py-0.5", isDark ? "border-zinc-700 bg-zinc-800 text-zinc-300" : "border-slate-200 bg-slate-100 text-slate-700")}>
                 Action: {actionFilter} <X className="w-3 h-3 cursor-pointer" onClick={() => setActionFilter("all")} />
               </span>
             )}
             {statusFilter !== "all" && (
-              <span className="px-2.5 py-0.5 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20 flex items-center gap-1">
+              <span className={cn("flex items-center gap-1 rounded border px-2.5 py-0.5", isDark ? "border-zinc-700 bg-zinc-800 text-zinc-300" : "border-slate-200 bg-slate-100 text-slate-700")}>
                 Status: {statusFilter} <X className="w-3 h-3 cursor-pointer" onClick={() => setStatusFilter("all")} />
               </span>
             )}
             {resourceFilter !== "all" && (
-              <span className="px-2.5 py-0.5 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20 flex items-center gap-1">
+              <span className={cn("flex items-center gap-1 rounded border px-2.5 py-0.5", isDark ? "border-zinc-700 bg-zinc-800 text-zinc-300" : "border-slate-200 bg-slate-100 text-slate-700")}>
                 Resource: {resourceFilter} <X className="w-3 h-3 cursor-pointer" onClick={() => setResourceFilter("all")} />
               </span>
             )}
@@ -647,7 +660,7 @@ export default function AuditLogsPage() {
       </div>
 
       {/* ── 5. MAIN AUDIT LOG TABLE (NEW COLUMN ORDER: Timestamp 1st, Action 2nd Last) ────── */}
-      <div className={cn("rounded-2xl border overflow-hidden flex flex-col transition-all", isDark ? "bg-[#151518] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
+      <div className={cn("rounded-lg border overflow-hidden flex flex-col transition-all", isDark ? "bg-[#191919] border-zinc-800" : "bg-white border-slate-200 shadow-sm")}>
         <div className={cn("flex items-center h-10 text-[11px] font-semibold uppercase tracking-wider shrink-0 border-b px-4 select-none", isDark ? "text-zinc-400 border-zinc-800 bg-[#0f0f12]" : "text-slate-500 border-slate-200 bg-slate-50")}>
           <div className="w-32 text-left">Timestamp</div>
           <div className="w-44 text-left">Actor</div>
@@ -689,13 +702,7 @@ export default function AuditLogsPage() {
 
                   {/* Column 2: Actor Avatar + Name */}
                   <div className="w-44 flex items-center gap-2 shrink-0 truncate pr-2">
-                    {actorAvatar ? (
-                      <img src={actorAvatar} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <div className="w-5 h-5 rounded-full bg-violet-600/20 text-violet-400 text-[9px] font-bold flex items-center justify-center shrink-0 border border-violet-500/30 uppercase">
-                        {item.actor?.name ? item.actor.name.slice(0, 2) : "SY"}
-                      </div>
-                    )}
+                    <ActorAvatar name={item.actor?.name || "System"} avatarUrl={actorAvatar} />
                     <span className={cn("truncate font-medium text-xs", isDark ? "text-zinc-200" : "text-slate-900")}>
                       {item.actor?.name || "System"}
                     </span>
@@ -706,7 +713,7 @@ export default function AuditLogsPage() {
                     {item.resource.type === "document" || item.resource.type === "version" ? (
                       <FileIcon fileName={resourceName} />
                     ) : item.resource.type === "project" ? (
-                      <Briefcase className="w-4 h-4 text-violet-400 shrink-0" />
+                      <Briefcase className="w-4 h-4 text-zinc-400 shrink-0" />
                     ) : (
                       <Folder className="w-4 h-4 text-amber-400 shrink-0" />
                     )}
@@ -714,7 +721,7 @@ export default function AuditLogsPage() {
                       <span className={cn("truncate font-semibold text-xs", isDark ? "text-zinc-200" : "text-slate-900")} title={resourceName}>
                         {resourceName}
                       </span>
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 bg-zinc-800/60 px-1.5 py-0.5 rounded shrink-0">
+                      <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", isDark ? "border-zinc-700 bg-zinc-800 text-zinc-300" : "border-slate-200 bg-slate-100 text-slate-600")}>
                         {item.resource.type}
                       </span>
                     </div>
@@ -790,7 +797,7 @@ export default function AuditLogsPage() {
               {/* Header */}
               <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono font-bold text-violet-400 bg-violet-500/10 px-2.5 py-1 rounded-lg border border-violet-500/20">
+                  <span className="text-xs font-mono font-bold text-zinc-400 bg-zinc-500/10 px-2.5 py-1 rounded-lg border border-zinc-500/20">
                     LOG #{selectedLog.log_id}
                   </span>
                   <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
@@ -808,16 +815,10 @@ export default function AuditLogsPage() {
               {/* Actor & Resource Cards */}
               <div className="grid grid-cols-2 gap-3">
                 {/* Actor Card */}
-                <div className={cn("p-3.5 rounded-xl border space-y-1.5", isDark ? "bg-zinc-900/60 border-zinc-800" : "bg-slate-50 border-slate-200")}>
+                <div className={cn("p-3.5 rounded-md border space-y-1.5", isDark ? "bg-zinc-900/60 border-zinc-800" : "bg-slate-50 border-slate-200")}>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Actor</span>
                   <div className="flex items-center gap-2.5">
-                    {selectedLog.actor?.user_id && avatars[selectedLog.actor.user_id.toString()] ? (
-                      <img src={avatars[selectedLog.actor.user_id.toString()]!} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 border border-violet-500/30" />
-                    ) : (
-                      <div className="w-7 h-7 rounded-full bg-violet-600/20 text-violet-400 text-[10px] font-bold flex items-center justify-center shrink-0 border border-violet-500/30 uppercase">
-                        {selectedLog.actor?.name ? selectedLog.actor.name.slice(0, 2) : "SY"}
-                      </div>
-                    )}
+                    <ActorAvatar name={selectedLog.actor?.name || "System"} avatarUrl={selectedLog.actor?.user_id ? avatars[selectedLog.actor.user_id.toString()] : null} size="md" />
                     <div className="min-w-0">
                       <p className="text-xs font-bold truncate">{selectedLog.actor?.name || "System"}</p>
                       <p className="text-[10px] text-zinc-500 font-mono">ID: {selectedLog.actor?.user_id || "System"}</p>
@@ -826,13 +827,13 @@ export default function AuditLogsPage() {
                 </div>
 
                 {/* Resource Card */}
-                <div className={cn("p-3.5 rounded-xl border space-y-1.5", isDark ? "bg-zinc-900/60 border-zinc-800" : "bg-slate-50 border-slate-200")}>
+                <div className={cn("p-3.5 rounded-md border space-y-1.5", isDark ? "bg-zinc-900/60 border-zinc-800" : "bg-slate-50 border-slate-200")}>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Resource</span>
                   <div className="flex items-center gap-2.5">
                     {selectedLog.resource.type === "document" || selectedLog.resource.type === "version" ? (
                       <FileIcon fileName={selectedLog.resource.name || selectedLog.metadata?.filename || selectedLog.metadata?.file_name} size="sm" />
                     ) : selectedLog.resource.type === "project" ? (
-                      <Briefcase className="w-4 h-4 text-violet-400 shrink-0" />
+                      <Briefcase className="w-4 h-4 text-zinc-400 shrink-0" />
                     ) : (
                       <Folder className="w-4 h-4 text-amber-400 shrink-0" />
                     )}
@@ -845,7 +846,7 @@ export default function AuditLogsPage() {
               </div>
 
               {/* Description Narrative Card */}
-              <div className={cn("p-4 rounded-xl border space-y-2", isDark ? "bg-zinc-900/60 border-zinc-800" : "bg-slate-50 border-slate-200")}>
+              <div className={cn("p-4 rounded-md border space-y-2", isDark ? "bg-zinc-900/60 border-zinc-800" : "bg-slate-50 border-slate-200")}>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Description Narrative</span>
                 <p className="text-xs leading-relaxed font-medium text-zinc-200">
                   <ParsedDescription text={selectedLog.description} isDark={isDark} />
@@ -856,7 +857,7 @@ export default function AuditLogsPage() {
               {(selectedLog.before || selectedLog.after) && (
                 <div className="space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">State Delta Comparison</span>
-                  <div className={cn("rounded-xl border overflow-hidden text-xs", isDark ? "border-zinc-800" : "border-slate-200")}>
+                  <div className={cn("rounded-md border overflow-hidden text-xs", isDark ? "border-zinc-800" : "border-slate-200")}>
                     <div className={cn("grid grid-cols-3 h-8 items-center px-3 font-semibold uppercase text-[10px] tracking-wider border-b", isDark ? "bg-zinc-900 text-zinc-400 border-zinc-800" : "bg-slate-100 text-slate-600 border-slate-200")}>
                       <div>Field</div>
                       <div>Before</div>
@@ -865,7 +866,7 @@ export default function AuditLogsPage() {
                     <div className="divide-y divide-zinc-800/40">
                       {Array.from(new Set([...Object.keys(selectedLog.before || {}), ...Object.keys(selectedLog.after || {})])).map((key) => (
                         <div key={key} className="grid grid-cols-3 p-3 items-center text-xs">
-                          <span className="font-mono font-bold text-violet-400">{key}</span>
+                          <span className="font-mono font-bold text-zinc-400">{key}</span>
                           <span className="font-mono text-rose-400/90 truncate pr-2">
                             {JSON.stringify(selectedLog.before?.[key] ?? "—")}
                           </span>
@@ -883,7 +884,7 @@ export default function AuditLogsPage() {
               {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
                 <div className="space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Technical Context / Metadata</span>
-                  <pre className={cn("p-3 rounded-xl border font-mono text-[11px] overflow-x-auto leading-relaxed", isDark ? "bg-zinc-950 border-zinc-800 text-zinc-300" : "bg-slate-900 text-slate-100")}>
+                  <pre className={cn("p-3 rounded-md border font-mono text-[11px] overflow-x-auto leading-relaxed", isDark ? "bg-zinc-950 border-zinc-800 text-zinc-300" : "bg-slate-900 text-slate-100")}>
                     {JSON.stringify(selectedLog.metadata, null, 2)}
                   </pre>
                 </div>
@@ -895,7 +896,7 @@ export default function AuditLogsPage() {
               <span>Timestamp: {selectedLog.created_at}</span>
               <button
                 onClick={() => setSelectedLog(null)}
-                className="px-4 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold transition-colors"
+                className="px-4 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-white font-semibold transition-colors"
               >
                 Close Drawer
               </button>

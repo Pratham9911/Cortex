@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, validator
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
 from dependencies import get_current_user
@@ -13,10 +14,20 @@ from models import (
     User,
     Team,
     TeamMember,
-    InboxMessage
+    InboxMessage,
+    Document,
+    Folder,
+    Task,
+    TaskAssignee,
+    Subtask,
+    Decision,
+    DecisionParticipant,
+    DiscussionSTM,
+    TeamDiscussion,
 )
 
 from routers.audit import create_audit_log
+from routers.teams.discussions.service import delete_team_discussions
 
 
 router = APIRouter()
@@ -61,6 +72,45 @@ class CreateTeamRequest(BaseModel):
 
 class AddTeamMemberRequest(BaseModel):
     user_id: int
+
+
+class UpdateTeamRequest(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=50)
+    description: Optional[str] = Field(default=None, max_length=300)
+    tags: Optional[List[str]] = None
+
+    @validator("name")
+    def validate_name(cls, name: Optional[str]):
+        if name is None:
+            return name
+        normalized = name.strip()
+        if len(normalized) < 2:
+            raise ValueError("Team name must be at least 2 characters")
+        return normalized
+
+    @validator("description")
+    def validate_description(cls, description: Optional[str]):
+        if description is None:
+            return description
+        normalized = description.strip()
+        if len(normalized) < 5:
+            raise ValueError("Team description must be at least 5 characters")
+        return normalized
+
+    @validator("tags", each_item=True)
+    def validate_tag_item(cls, tag: str):
+        normalized = tag.strip()
+        if not normalized:
+            raise ValueError("Tags cannot be empty")
+        if len(normalized) > 30:
+            raise ValueError("Each tag must be 30 characters or fewer")
+        return normalized
+
+    @validator("tags")
+    def validate_tag_count(cls, tags: Optional[List[str]]):
+        if tags is not None and len(tags) > 3:
+            raise ValueError("A team can have at most 3 tags")
+        return tags
 
 
 class UpdateProjectMemberRoleRequest(BaseModel):
@@ -519,21 +569,270 @@ def get_teams(
     result = []
 
     for team in teams:
-
-        member_count = db.query(TeamMember).filter(
-            TeamMember.team_id == team.team_id
-        ).count()
+        member_rows = db.query(
+            TeamMember.user_id,
+            User.name,
+            User.avatar_url,
+        ).join(
+            User,
+            User.user_id == TeamMember.user_id,
+        ).filter(
+            TeamMember.team_id == team.team_id,
+        ).order_by(
+            User.name.asc(),
+        ).all()
 
         result.append({
             "team_id": team.team_id,
             "name": team.name,
             "description": team.description,
             "tags": team.tags,
-            "member_count": member_count,
-            "created_at": team.created_at
+            "member_count": len(member_rows),
+            "created_at": team.created_at,
+            "is_member": any(member.user_id == user_id for member in member_rows),
+            "members": [
+                {
+                    "user_id": member.user_id,
+                    "name": member.name,
+                    "avatar_url": member.avatar_url,
+                }
+                for member in member_rows
+            ],
         })
 
     return result
+
+
+# ---------------------------------------------------
+# UPDATE TEAM DETAILS
+# ---------------------------------------------------
+@router.patch("/projects/{project_id}/teams/{team_id}")
+def update_team(
+    project_id: int,
+    team_id: int,
+    request: UpdateTeamRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id,
+    ).first()
+    if project.created_by != user_id and (
+        not membership or membership.role != "admin"
+    ):
+        raise HTTPException(status_code=403, detail="Only project admins can update a team")
+
+    team = db.query(Team).filter(
+        Team.team_id == team_id,
+        Team.project_id == project_id,
+    ).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    changed_fields = request.model_fields_set
+    if not changed_fields:
+        raise HTTPException(status_code=400, detail="No team changes were provided")
+
+    is_general_team = team.name.strip().lower() == "general"
+    audit_changes: List[str] = []
+    if "description" in changed_fields:
+        if request.description is None:
+            raise HTTPException(status_code=400, detail="Team description cannot be empty")
+        if request.description != team.description:
+            audit_changes.append(
+                f"description changed from '{team.description}' to '{request.description}'"
+            )
+            team.description = request.description
+
+    if "name" in changed_fields:
+        if request.name is None:
+            raise HTTPException(status_code=400, detail="Team name cannot be empty")
+        new_name = request.name
+        if is_general_team and new_name.lower() != "general":
+            raise HTTPException(status_code=400, detail="The General team cannot be renamed")
+        if not is_general_team and new_name.lower() == "general":
+            raise HTTPException(status_code=400, detail="The General team name is reserved")
+        conflict = db.query(Team.team_id).filter(
+            Team.project_id == project_id,
+            Team.team_id != team_id,
+            func.lower(Team.name) == new_name.lower(),
+        ).first()
+        if conflict:
+            raise HTTPException(status_code=409, detail="A team with this name already exists")
+        if new_name != team.name:
+            audit_changes.append(f"name changed from '{team.name}' to '{new_name}'")
+            team.name = new_name
+
+    if "tags" in changed_fields:
+        new_tags = request.tags or []
+        old_tags = team.tags or []
+        if new_tags != old_tags:
+            audit_changes.append(f"tags changed from {old_tags} to {new_tags}")
+            team.tags = new_tags or None
+
+    if not audit_changes:
+        return {
+            "message": "Team settings are unchanged",
+            "team": {
+                "team_id": team.team_id,
+                "name": team.name,
+                "description": team.description,
+                "tags": team.tags or [],
+                "created_at": team.created_at,
+            },
+        }
+
+    actor = db.query(User).filter(User.user_id == user_id).first()
+    actor_name = actor.name if actor else "A project admin"
+    create_audit_log(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        action="update",
+        detail=f"{actor_name} updated team '{team.name}': {'; '.join(audit_changes)}",
+    )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if "name" in changed_fields and request.name and db.query(Team.team_id).filter(
+            Team.project_id == project_id,
+            Team.team_id != team_id,
+            func.lower(Team.name) == request.name.lower(),
+        ).first():
+            raise HTTPException(
+                status_code=409,
+                detail="A team with this name already exists",
+            ) from exc
+        raise
+    db.refresh(team)
+    return {
+        "message": "Team updated successfully",
+        "team": {
+            "team_id": team.team_id,
+            "name": team.name,
+            "description": team.description,
+            "tags": team.tags or [],
+            "created_at": team.created_at,
+        },
+    }
+
+
+# ---------------------------------------------------
+# DELETE TEAM
+# ---------------------------------------------------
+@router.delete("/projects/{project_id}/teams/{team_id}")
+def delete_team(
+    project_id: int,
+    team_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id,
+    ).first()
+    if project.created_by != user_id and (
+        not membership or membership.role != "admin"
+    ):
+        raise HTTPException(status_code=403, detail="Only project admins can delete a team")
+
+    team = db.query(Team).filter(
+        Team.team_id == team_id,
+        Team.project_id == project_id,
+    ).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    if team.name.strip().lower() == "general":
+        raise HTTPException(status_code=400, detail="The General team cannot be deleted")
+
+    team_name = team.name
+    actor = db.query(User).filter(User.user_id == user_id).first()
+    actor_name = actor.name if actor else "A project admin"
+
+    discussion_ids = [
+        row[0]
+        for row in db.query(TeamDiscussion.id).filter(
+            TeamDiscussion.team_id == team_id
+        ).all()
+    ]
+    if discussion_ids:
+        db.query(DiscussionSTM).filter(
+            DiscussionSTM.discussion_id.in_(discussion_ids)
+        ).delete(synchronize_session=False)
+    delete_team_discussions(db, team_id)
+
+    db.query(TeamMember).filter(TeamMember.team_id == team_id).delete(
+        synchronize_session=False
+    )
+
+    task_ids = [
+        row[0]
+        for row in db.query(Task.id).filter(Task.team_id == team_id).all()
+    ]
+    if task_ids:
+        db.query(TaskAssignee).filter(TaskAssignee.task_id.in_(task_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Subtask).filter(Subtask.task_id.in_(task_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Task).filter(Task.id.in_(task_ids)).delete(
+            synchronize_session=False
+        )
+
+    decision_ids = [
+        row[0]
+        for row in db.query(Decision.id).filter(Decision.team_id == team_id).all()
+    ]
+    if decision_ids:
+        db.query(DecisionParticipant).filter(
+            DecisionParticipant.decision_id.in_(decision_ids)
+        ).delete(synchronize_session=False)
+        db.query(Decision).filter(Decision.id.in_(decision_ids)).delete(
+            synchronize_session=False
+        )
+
+    db.query(Document).filter(
+        Document.project_id == project_id,
+        Document.allowed_team_ids.contains([team_id]),
+    ).update(
+        {Document.allowed_team_ids: func.array_remove(Document.allowed_team_ids, team_id)},
+        synchronize_session=False,
+    )
+    db.query(Folder).filter(
+        Folder.project_id == project_id,
+        Folder.allowed_team_ids.contains([team_id]),
+    ).update(
+        {Folder.allowed_team_ids: func.array_remove(Folder.allowed_team_ids, team_id)},
+        synchronize_session=False,
+    )
+
+    create_audit_log(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        action="delete",
+        detail=f"{actor_name} deleted team '{team_name}' and its team-scoped data",
+    )
+    db.delete(team)
+    db.commit()
+
+    return {"message": "Team deleted successfully"}
 
 
 # ---------------------------------------------------

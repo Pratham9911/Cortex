@@ -12,13 +12,25 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { UserAvatarContents } from "@/components/teams/user-avatar-contents"
 
 type OverviewMember = {
   user_id: number
@@ -42,14 +54,6 @@ function formatDate(value?: string) {
   }).format(date)
 }
 
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return "?"
-  return parts.length > 1
-    ? `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-    : parts[0].slice(0, 2).toUpperCase()
-}
-
 export function OverviewTab({
   isDark,
   teamName,
@@ -62,6 +66,8 @@ export function OverviewTab({
   canManage,
   isGeneralTeam,
   onOpenMemberDetails,
+  onUpdateTeam,
+  onDeleteTeam,
 }: {
   isDark: boolean
   teamName: string
@@ -74,11 +80,74 @@ export function OverviewTab({
   canManage: boolean
   isGeneralTeam: boolean
   onOpenMemberDetails: (member: OverviewMember) => void
+  onUpdateTeam: (name: string, description: string, tags: string[]) => Promise<void>
+  onDeleteTeam: () => Promise<void>
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [draftTeamName, setDraftTeamName] = useState(teamName)
+  const [draftDescription, setDraftDescription] = useState(description)
+  const [draftTags, setDraftTags] = useState(tags.join(", "))
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [deletingTeam, setDeletingTeam] = useState(false)
+  const [settingsError, setSettingsError] = useState("")
+  const parsedTagCount = draftTags
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean).length
   const adminCount = members.filter(
     (member) => member.role === "admin" || member.is_project_owner,
   ).length
+
+  const openSettings = () => {
+    setDraftTeamName(teamName)
+    setDraftDescription(description)
+    setDraftTags(tags.join(", "))
+    setSettingsError("")
+    setSettingsOpen(true)
+  }
+
+  const saveSettings = async () => {
+    setSavingSettings(true)
+    setSettingsError("")
+    try {
+      const normalizedTags = draftTags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+      if (normalizedTags.length > 3) {
+        throw new Error("A team can have at most 3 tags.")
+      }
+      if (draftDescription.trim().length < 5) {
+        throw new Error("Team description must be at least 5 characters.")
+      }
+      await onUpdateTeam(draftTeamName.trim(), draftDescription.trim(), normalizedTags)
+      setSettingsOpen(false)
+    } catch (saveError) {
+      setSettingsError(
+        saveError instanceof Error ? saveError.message : "Could not update team settings.",
+      )
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
+  const deleteTeam = async () => {
+    setDeletingTeam(true)
+    setSettingsError("")
+    try {
+      await onDeleteTeam()
+      setDeleteConfirmOpen(false)
+      setSettingsOpen(false)
+    } catch (deleteError) {
+      setSettingsError(
+        deleteError instanceof Error ? deleteError.message : "Could not delete this team.",
+      )
+      setDeleteConfirmOpen(false)
+    } finally {
+      setDeletingTeam(false)
+    }
+  }
 
   return (
     <section
@@ -123,7 +192,7 @@ export function OverviewTab({
                 {canManage && (
                   <button
                     type="button"
-                    onClick={() => setSettingsOpen(true)}
+                    onClick={openSettings}
                     aria-label="Open team settings"
                     title="Team settings"
                     className={cn(
@@ -275,21 +344,10 @@ export function OverviewTab({
                     <span className="flex min-w-0 items-center gap-3">
                       <span
                         className={cn(
-                          "flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-black text-[10px] font-semibold",
-                          isDark
-                            ? "bg-zinc-800 text-zinc-100"
-                            : "bg-slate-200 text-slate-700",
+                          "flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-black bg-white text-[10px] font-semibold text-black",
                         )}
                       >
-                        {member.avatar_url ? (
-                          <img
-                            src={member.avatar_url}
-                            alt=""
-                            className="size-full object-cover"
-                          />
-                        ) : (
-                          initials(member.name)
-                        )}
+                        <UserAvatarContents name={member.name} avatarUrl={member.avatar_url} />
                       </span>
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-semibold">
@@ -341,43 +399,123 @@ export function OverviewTab({
           <DialogHeader>
             <DialogTitle>Team settings</DialogTitle>
             <DialogDescription className={isDark ? "text-zinc-400" : ""}>
-              Preview of team management settings. Editing and deletion will be available later.
+              Update this team’s name, description, and tags, or delete the team.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5">
             <label className="block space-y-2 text-sm font-medium">
               Team name
-              <Input value={teamName} readOnly aria-readonly="true" />
-            </label>
-            <label className="block space-y-2 text-sm font-medium">
-              Team tags
               <Input
-                value={tags.join(", ")}
-                readOnly
-                aria-readonly="true"
-                placeholder="No tags"
+                value={draftTeamName}
+                onChange={(event) => setDraftTeamName(event.target.value)}
+                maxLength={50}
+                disabled={savingSettings || deletingTeam}
               />
             </label>
-            <div className="flex items-center justify-between gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-800">
-              <div className="min-w-0">
-                <p className="flex items-center gap-2 text-sm font-medium">
-                  <Trash2 className="size-4 text-red-500" />
+            <label className="block space-y-2 text-sm font-medium">
+              Description <span className="font-normal text-zinc-500">(5–300 characters)</span>
+              <Textarea
+                value={draftDescription}
+                onChange={(event) => setDraftDescription(event.target.value)}
+                minLength={5}
+                maxLength={300}
+                disabled={savingSettings || deletingTeam}
+                rows={3}
+              />
+            </label>
+            <label className="block space-y-2 text-sm font-medium">
+              Team tags <span className="font-normal text-zinc-500">(comma-separated, up to 3)</span>
+              <Input
+                value={draftTags}
+                onChange={(event) => setDraftTags(event.target.value)}
+                disabled={savingSettings || deletingTeam}
+                placeholder="No tags"
+              />
+              <span className={cn("block text-xs", parsedTagCount > 3 ? "text-red-500" : "text-zinc-500")}>
+                {parsedTagCount}/3 tags
+              </span>
+            </label>
+            {settingsError && (
+              <p role="alert" className="text-sm text-red-500">
+                {settingsError}
+              </p>
+            )}
+            <DialogFooter className="sm:justify-between">
+              {!isGeneralTeam ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => {
+                    setSettingsError("")
+                    setDeleteConfirmOpen(true)
+                  }}
+                  disabled={savingSettings || deletingTeam}
+                >
+                  <Trash2 className="size-4" />
                   Delete team
+                </Button>
+              ) : (
+                <p className="self-center text-xs text-zinc-500">
+                  The General team cannot be deleted.
                 </p>
-                <p className="mt-1 text-xs text-zinc-500">
-                  {isGeneralTeam
-                    ? "The General team is protected and cannot be deleted."
-                    : "Deleting a team is not available yet."}
-                </p>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setSettingsOpen(false)}
+                  disabled={savingSettings || deletingTeam}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void saveSettings()}
+                  disabled={
+                    savingSettings ||
+                    deletingTeam ||
+                    !draftTeamName.trim() ||
+                    draftDescription.trim().length < 5 ||
+                    draftDescription.trim().length > 300 ||
+                    parsedTagCount > 3
+                  }
+                >
+                  {savingSettings ? "Saving…" : "Save changes"}
+                </Button>
               </div>
-              <Button variant="destructive" disabled>
-                Delete
-              </Button>
-            </div>
+            </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent
+          className={cn(
+            isDark && "border-zinc-800 bg-[#15171e] text-white",
+          )}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete “{teamName}”?</AlertDialogTitle>
+            <AlertDialogDescription className={isDark ? "text-zinc-400" : ""}>
+              This permanently deletes the team, its tasks, decisions, discussions, and memberships.
+              Documents themselves remain in project storage, but this team’s access is removed.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingTeam}>Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void deleteTeam()}
+              disabled={deletingTeam}
+            >
+              {deletingTeam ? "Deleting…" : "Delete team"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }
