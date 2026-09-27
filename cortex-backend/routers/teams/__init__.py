@@ -63,6 +63,16 @@ class AddTeamMemberRequest(BaseModel):
     user_id: int
 
 
+class UpdateProjectMemberRoleRequest(BaseModel):
+    role: str
+
+    @validator("role")
+    def validate_role(cls, role: str):
+        if role not in {"admin", "member"}:
+            raise ValueError("Role must be admin or member")
+        return role
+
+
 # ---------------------------------------------------
 # CREATE TEAM
 # ---------------------------------------------------
@@ -379,7 +389,14 @@ def remove_member_from_team(
         ProjectMember.user_id == user_id
     ).first()
 
-    if not membership or membership.role != "admin":
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    is_project_owner = project.created_by == user_id
+    if not membership or (membership.role != "admin" and not is_project_owner):
         raise HTTPException(
             status_code=403,
             detail="Only admin can remove team members"
@@ -419,17 +436,6 @@ def remove_member_from_team(
             detail="Admin cannot remove themselves"
         )
 
-    project = db.query(Project).filter(
-        Project.project_id == project_id
-    ).first()
-
-    if not project:
-        raise HTTPException(
-            status_code=404,
-            detail="Project not found"
-        )
-
-    is_project_owner = project.created_by == user_id
     target_is_project_owner = project.created_by == target_user_id
 
     if target_is_project_owner:
@@ -579,6 +585,14 @@ def get_team_members(
             detail="Project not found"
         )
 
+    is_project_owner = project.created_by == user_id
+    is_team_member = db.query(TeamMember.id).filter(
+        TeamMember.team_id == team_id,
+        TeamMember.user_id == user_id,
+    ).first() is not None
+    if not is_team_member and membership.role != "admin" and not is_project_owner:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     members = db.query(
         TeamMember,
         User
@@ -602,7 +616,7 @@ def get_team_members(
             "name": user.name,
             "email": user.email,
             "avatar_url": user.avatar_url,
-            "role": project_membership.role if project_membership else "member",
+            "role": "admin" if user.user_id == project.created_by else project_membership.role if project_membership else "member",
             "is_project_owner": user.user_id == project.created_by,
             "joined_at": project_membership.joined_at if project_membership else None,
             "added_at": member.added_at
@@ -611,7 +625,13 @@ def get_team_members(
     return {
         "team_id": team.team_id,
         "team_name": team.name,
-        "current_user_role": membership.role,
+        "team_description": team.description,
+        "team_tags": team.tags or [],
+        "team_created_at": team.created_at,
+        "team_created_by": team.created_by,
+        "member_count": len(result),
+        "current_user_role": "admin" if is_project_owner else membership.role,
+        "current_user_is_project_owner": is_project_owner,
         "members": result
     }
 
@@ -665,7 +685,7 @@ def get_project_member_details(
 
 
 # ---------------------------------------------------
-# GET PROJECT MEMBER DETAILS FROM GENERAL TEAM
+# GET PROJECT MEMBER DETAILS FROM A TEAM
 # ---------------------------------------------------
 @router.get("/projects/{project_id}/teams/{team_id}/members/{target_user_id}/details")
 def get_general_project_member_details(
@@ -686,17 +706,28 @@ def get_general_project_member_details(
             detail="Access denied"
         )
 
-    general_team = db.query(Team).filter(
+    team = db.query(Team).filter(
         Team.team_id == team_id,
-        Team.project_id == project_id,
-        func.lower(Team.name) == "general"
+        Team.project_id == project_id
     ).first()
 
-    if not general_team:
-        raise HTTPException(
-            status_code=403,
-            detail="Project members can only be managed from the general team"
-        )
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    requester_is_owner = project.created_by == user_id
+    requester_is_admin = requester_membership.role == "admin" or requester_is_owner
+    requester_is_team_member = db.query(TeamMember.id).filter(
+        TeamMember.team_id == team_id,
+        TeamMember.user_id == user_id,
+    ).first() is not None
+    if not requester_is_team_member and not requester_is_admin:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     target_user = db.query(User).filter(
         User.user_id == target_user_id
@@ -713,26 +744,28 @@ def get_general_project_member_details(
             detail="User is not part of this project"
         )
 
-    project = db.query(Project).filter(
-        Project.project_id == project_id
-    ).first()
+    target_is_team_member = db.query(TeamMember.id).filter(
+        TeamMember.team_id == team_id,
+        TeamMember.user_id == target_user_id,
+    ).first() is not None
+    if not target_is_team_member:
+        raise HTTPException(status_code=404, detail="User is not part of this team")
 
-    if not project:
-        raise HTTPException(
-            status_code=404,
-            detail="Project not found"
-        )
-
-    is_project_owner = project.created_by == user_id
     target_is_project_owner = project.created_by == target_user_id
     can_remove_target = (
-        requester_membership.role == "admin"
+        requester_is_admin
         and target_user_id != user_id
         and not target_is_project_owner
         and (
             target_membership.role != "admin"
-            or is_project_owner
+            or requester_is_owner
         )
+    )
+    can_change_role = (
+        requester_is_admin
+        and target_user_id != user_id
+        and not target_is_project_owner
+        and (requester_is_owner or target_membership.role != "admin")
     )
 
     team_rows = db.query(Team, TeamMember).join(
@@ -750,7 +783,7 @@ def get_general_project_member_details(
         "name": target_user.name,
         "email": target_user.email,
         "avatar_url": target_user.avatar_url,
-        "role": target_membership.role,
+        "role": "admin" if target_is_project_owner else target_membership.role,
         "is_project_owner": target_is_project_owner,
         "joined_at": target_membership.joined_at,
         "teams": [
@@ -761,8 +794,86 @@ def get_general_project_member_details(
             }
             for team, team_member in team_rows
         ],
-        "can_remove": can_remove_target
+        "can_remove": can_remove_target,
+        "can_remove_project_member": (
+            team.name.strip().lower() == "general" and can_remove_target
+        ),
+        "can_remove_team_member": (
+            team.name.strip().lower() != "general" and can_remove_target
+        ),
+        "can_change_role": can_change_role
     }
+
+
+# ---------------------------------------------------
+# UPDATE PROJECT MEMBER ROLE (project-wide)
+# ---------------------------------------------------
+@router.patch("/projects/{project_id}/teams/{team_id}/members/{target_user_id}/role")
+def update_team_member_project_role(
+    project_id: int,
+    team_id: int,
+    target_user_id: int,
+    request: UpdateProjectMemberRoleRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    requester_membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id,
+    ).first()
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not requester_membership:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    team = db.query(Team).filter(
+        Team.team_id == team_id,
+        Team.project_id == project_id,
+    ).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    is_project_owner = project.created_by == user_id
+    if requester_membership.role != "admin" and not is_project_owner:
+        raise HTTPException(status_code=403, detail="Only project admins can change roles")
+    if target_user_id == user_id:
+        raise HTTPException(status_code=400, detail="You cannot change your own project role")
+    if not db.query(TeamMember.id).filter(
+        TeamMember.team_id == team_id,
+        TeamMember.user_id == target_user_id,
+    ).first():
+        raise HTTPException(status_code=404, detail="User is not part of this team")
+
+    target_membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == target_user_id,
+    ).first()
+    target_user = db.query(User).filter(User.user_id == target_user_id).first()
+    if not target_membership or not target_user:
+        raise HTTPException(status_code=404, detail="User is not part of this project")
+    if project.created_by == target_user_id:
+        raise HTTPException(status_code=403, detail="Project owner role cannot be changed")
+    if target_membership.role == request.role:
+        return {"message": "Role is unchanged", "role": target_membership.role}
+    if target_membership.role == "admin" and not is_project_owner:
+        raise HTTPException(status_code=403, detail="Only the project owner can demote an admin")
+
+    previous_role = target_membership.role
+    target_membership.role = request.role
+    actor = db.query(User).filter(User.user_id == user_id).first()
+    actor_name = actor.name if actor else "A project admin"
+    create_audit_log(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        action="update",
+        detail=f"{actor_name} changed {target_user.name}'s project role from {previous_role} to {request.role}",
+    )
+    db.commit()
+    return {"message": "Project role updated", "role": request.role}
 
 
 # ---------------------------------------------------
@@ -780,18 +891,6 @@ def remove_project_member_from_general_team(
         ProjectMember.project_id == project_id,
         ProjectMember.user_id == user_id
     ).first()
-
-    if not admin_membership or admin_membership.role != "admin":
-        raise HTTPException(
-            status_code=403,
-            detail="Only admin can remove project members"
-        )
-
-    if user_id == target_user_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Admin cannot remove themselves"
-        )
 
     general_team = db.query(Team).filter(
         Team.team_id == team_id,
@@ -815,6 +914,15 @@ def remove_project_member_from_general_team(
             detail="Project not found"
         )
 
+    is_project_owner = project.created_by == user_id
+    if not admin_membership or (
+        admin_membership.role != "admin" and not is_project_owner
+    ):
+        raise HTTPException(status_code=403, detail="Only admin can remove project members")
+
+    if user_id == target_user_id:
+        raise HTTPException(status_code=400, detail="Admin cannot remove themselves")
+
     target_membership = db.query(ProjectMember).filter(
         ProjectMember.project_id == project_id,
         ProjectMember.user_id == target_user_id
@@ -826,7 +934,6 @@ def remove_project_member_from_general_team(
             detail="User is not part of this project"
         )
 
-    is_project_owner = project.created_by == user_id
     target_is_project_owner = project.created_by == target_user_id
 
     if target_is_project_owner:

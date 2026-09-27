@@ -60,6 +60,9 @@ type MemberDetails = TeamMember & {
     added_at?: string
   }>
   can_remove: boolean
+  can_remove_project_member?: boolean
+  can_remove_team_member?: boolean
+  can_change_role?: boolean
 }
 
 function PageUserAvatar({
@@ -125,7 +128,11 @@ export default function TeamDetailPage() {
   const isDark = theme === "dark"
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const [teamName, setTeamName] = useState("Team")
+  const [teamDescription, setTeamDescription] = useState("")
+  const [teamTags, setTeamTags] = useState<string[]>([])
+  const [teamCreatedAt, setTeamCreatedAt] = useState<string | undefined>()
   const [currentUserRole, setCurrentUserRole] = useState<"admin" | "member">("member")
+  const [isProjectOwner, setIsProjectOwner] = useState(false)
   const [members, setMembers] = useState<TeamMember[]>([])
   const [error, setError] = useState("")
   const [memberDetailsOpen, setMemberDetailsOpen] = useState(false)
@@ -134,6 +141,8 @@ export default function TeamDetailPage() {
   const [memberDetailsError, setMemberDetailsError] = useState("")
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [removingMember, setRemovingMember] = useState(false)
+  const [updatingMemberRole, setUpdatingMemberRole] = useState(false)
+  const [pendingMemberRole, setPendingMemberRole] = useState<"admin" | "member" | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteQuery, setInviteQuery] = useState("")
   const [inviteResults, setInviteResults] = useState<SearchUser[]>([])
@@ -181,7 +190,15 @@ export default function TeamDetailPage() {
       if (!response.ok) throw new Error("failed")
       const data = await response.json()
       setTeamName(data?.team_name || "Team")
-      setCurrentUserRole(data?.current_user_role === "admin" ? "admin" : "member")
+      setTeamDescription(data?.team_description || "")
+      setTeamTags(Array.isArray(data?.team_tags) ? data.team_tags : [])
+      setTeamCreatedAt(data?.team_created_at || undefined)
+      setIsProjectOwner(data?.current_user_is_project_owner === true)
+      setCurrentUserRole(
+        data?.current_user_role === "admin" || data?.current_user_is_project_owner
+          ? "admin"
+          : "member"
+      )
       const fetchedMembers: TeamMember[] = Array.isArray(data?.members) ? data.members : []
 
       setMembers(fetchedMembers)
@@ -373,12 +390,14 @@ export default function TeamDetailPage() {
             joined_at: member.joined_at,
             teams: [],
             can_remove: false,
+            can_change_role: false,
           }
         : null
     )
     setMemberDetailsLoading(true)
     setMemberDetailsError("")
     setConfirmRemove(false)
+    setPendingMemberRole(null)
 
     try {
       const token = localStorage.getItem("access_token")
@@ -399,7 +418,7 @@ export default function TeamDetailPage() {
     }
   }
 
-  const removeMemberFromProject = async () => {
+  const removeMemberFromTeam = async () => {
     if (!memberDetails) return
 
     setRemovingMember(true)
@@ -410,7 +429,8 @@ export default function TeamDetailPage() {
       const projectId = localStorage.getItem("selected_project_id")
       if (!token || !projectId || !params?.teamId) throw new Error("Project context is missing.")
 
-      const response = await fetch(`${apiUrl}/projects/${projectId}/teams/${params.teamId}/members/${memberDetails.user_id}/project`, {
+      const removalScope = isGeneralTeam ? "/project" : ""
+      const response = await fetch(`${apiUrl}/projects/${projectId}/teams/${params.teamId}/members/${memberDetails.user_id}${removalScope}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -426,6 +446,49 @@ export default function TeamDetailPage() {
       setMemberDetailsError(removeError instanceof Error ? removeError.message : "Could not remove member.")
     } finally {
       setRemovingMember(false)
+    }
+  }
+
+  const updateMemberRole = async () => {
+    if (!memberDetails || !pendingMemberRole) return
+    setUpdatingMemberRole(true)
+    setMemberDetailsError("")
+
+    try {
+      const token = localStorage.getItem("access_token")
+      const projectId = localStorage.getItem("selected_project_id")
+      if (!token || !projectId || !params?.teamId) throw new Error("Project context is missing.")
+
+      const response = await fetch(
+        `${apiUrl}/projects/${projectId}/teams/${params.teamId}/members/${memberDetails.user_id}/role`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ role: pendingMemberRole }),
+        }
+      )
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.detail || "Could not update member role.")
+
+      setMemberDetails((current) =>
+        current
+          ? {
+              ...current,
+              role: pendingMemberRole,
+              can_change_role: isProjectOwner || pendingMemberRole === "member",
+              can_remove: isProjectOwner || pendingMemberRole === "member",
+            }
+          : current
+      )
+      setPendingMemberRole(null)
+      await loadTeam()
+    } catch (roleError) {
+      setMemberDetailsError(roleError instanceof Error ? roleError.message : "Could not update member role.")
+    } finally {
+      setUpdatingMemberRole(false)
     }
   }
 
@@ -546,7 +609,7 @@ export default function TeamDetailPage() {
 
       {error && <p className="shrink-0 px-5 pt-4 text-sm text-red-400 sm:px-8">{error}</p>}
 
-      <div className={cn("relative min-h-0 min-w-0 w-full flex-1 overflow-hidden", activeTab === "Discussions" || activeTab === "Timelines" || activeTab === "Files" ? "p-0" : "overflow-y-auto p-5 sm:p-8")}>
+      <div className={cn("relative min-h-0 min-w-0 w-full flex-1 overflow-hidden", activeTab === "Discussions" || activeTab === "Timelines" || activeTab === "Files" || activeTab === "Overview" ? "p-0" : "overflow-y-auto p-5 sm:p-8")}>
         {activeTab === "Tasks" && <TasksTab isDark={isDark} members={members} teamId={Number(params.teamId)} canManage={currentUserRole === "admin"} />}
         {activeTab === "Discussions" && (
           <DiscussionsTab
@@ -574,7 +637,21 @@ export default function TeamDetailPage() {
             onOpenMemberDetails={openMemberDetails}
           />
         )}
-        {activeTab === "Overview" && <OverviewTab isDark={isDark} />}
+        {activeTab === "Overview" && (
+          <OverviewTab
+            isDark={isDark}
+            teamName={teamName}
+            description={teamDescription}
+            tags={teamTags}
+            createdAt={teamCreatedAt}
+            members={members}
+            currentUserRole={currentUserRole}
+            isProjectOwner={isProjectOwner}
+            canManage={currentUserRole === "admin" || isProjectOwner}
+            isGeneralTeam={isGeneralTeam}
+            onOpenMemberDetails={openMemberDetails}
+          />
+        )}
       </div>
 
       <Dialog
@@ -796,12 +873,13 @@ export default function TeamDetailPage() {
       <Dialog
         open={memberDetailsOpen}
         onOpenChange={(open) => {
-          if (removingMember) return
+          if (removingMember || updatingMemberRole) return
           setMemberDetailsOpen(open)
           if (!open) {
             setMemberDetails(null)
             setMemberDetailsError("")
             setConfirmRemove(false)
+            setPendingMemberRole(null)
           }
         }}
       >
@@ -841,7 +919,11 @@ export default function TeamDetailPage() {
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Role</p>
-                    <p className="mt-1 text-sm font-semibold capitalize">{memberDetails.role}</p>
+                    <p className="mt-1 text-sm font-semibold">
+                      {memberDetails.is_project_owner
+                        ? "Project owner (Admin)"
+                        : memberDetails.role}
+                    </p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Joined</p>
@@ -867,17 +949,72 @@ export default function TeamDetailPage() {
 
               {memberDetailsError && <p className="text-sm text-red-400">{memberDetailsError}</p>}
 
-              {memberDetails.can_remove && currentUserRole === "admin" && memberDetails.user_id !== user?.user_id && !memberDetails.is_project_owner && (
+              {memberDetails.can_change_role && !memberDetails.is_project_owner && (
+                <div className={cn("rounded-2xl border p-4", isDark ? "border-zinc-700" : "border-slate-200")}>
+                  {pendingMemberRole ? (
+                    <div className="space-y-3">
+                      <p className="text-sm font-semibold">
+                        {pendingMemberRole === "admin"
+                          ? `Promote ${memberDetails.name} to project admin?`
+                          : `Demote ${memberDetails.name} to project member?`}
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        This changes their access across the entire project, not only this team.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          disabled={updatingMemberRole}
+                          onClick={updateMemberRole}
+                          className={pendingMemberRole === "member" ? "bg-amber-600 text-white hover:bg-amber-500" : ""}
+                        >
+                          {updatingMemberRole && <Loader2 className="mr-2 size-4 animate-spin" />}
+                          Confirm {pendingMemberRole === "admin" ? "promotion" : "demotion"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={updatingMemberRole}
+                          onClick={() => setPendingMemberRole(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">Project role</p>
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          Role changes apply across all project teams.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setPendingMemberRole(
+                            memberDetails.role === "admin" ? "member" : "admin"
+                          )
+                        }
+                      >
+                        {memberDetails.role === "admin"
+                          ? "Demote to member"
+                          : "Promote to admin"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {memberDetails.can_remove && memberDetails.user_id !== user?.user_id && !memberDetails.is_project_owner && (
                 <div className={cn("rounded-2xl border p-4", confirmRemove ? "border-red-500/30 bg-red-500/10" : isDark ? "border-zinc-700" : "border-slate-200")}>
                   {confirmRemove ? (
                     <div className="space-y-3">
                       <p className="text-sm font-semibold text-red-400">
-                        Remove {memberDetails.name} from this project and all project teams?
+                        Remove {memberDetails.name} {isGeneralTeam ? "from this project and all project teams" : `from ${teamName}`}?
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <Button
                           disabled={removingMember}
-                          onClick={removeMemberFromProject}
+                          onClick={removeMemberFromTeam}
                           className="bg-red-600 text-white hover:bg-red-500"
                         >
                           {removingMember && <Loader2 className="mr-2 size-4 animate-spin" />}
@@ -895,7 +1032,7 @@ export default function TeamDetailPage() {
                       className="border-red-500/40 text-red-500 hover:bg-red-500/10"
                     >
                       <Trash2 className="mr-2 size-4" />
-                      Remove from project
+                      {isGeneralTeam ? "Remove from project" : "Remove from team"}
                     </Button>
                   )}
                 </div>

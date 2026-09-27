@@ -400,5 +400,13 @@
 
 .sidebar-scroll-collapsed::-webkit-scrollbar {
   display: none;
+}
+
+.team-overview-scroll {
+  scrollbar-width: none;
+}
+
+.team-overview-scroll::-webkit-scrollbar {
+  display: none;
   width: 0;
 }
