@@ -96,7 +96,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
     <ProtectedRoute>
       <div
         className={cn(
-          "min-h-screen flex transition-colors duration-300 font-quicksand",
+          "flex h-dvh min-h-0 overflow-hidden transition-colors duration-300 font-quicksand",
           isDark ? "bg-[#0A0A0A] text-white" : "bg-slate-50 text-slate-900"
         )}
         style={{ fontWeight: 400 }}
@@ -111,7 +111,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
 
         <div
           className={cn(
-            "flex-1 flex flex-col min-h-screen transition-[padding-left] duration-300 ease-in-out",
+            "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-[padding-left] duration-300 ease-in-out",
             "pl-0 md:pl-[var(--sidebar-offset)]"
           )}
           style={{
@@ -210,8 +210,8 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
 
           <main
             className={cn(
-              "flex-1 min-h-0",
-              isFullPageRoute ? "overflow-hidden p-0" : "px-6 py-8"
+              "min-h-0 min-w-0 flex-1",
+              isFullPageRoute ? "overflow-hidden p-0" : "overflow-auto px-6 py-8"
             )}
           >
             {children}

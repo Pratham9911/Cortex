@@ -485,8 +485,8 @@ export default function TeamDetailPage() {
   }
 
   return (
-    <section className={cn("flex h-[calc(100vh-0rem)] min-h-0 flex-col overflow-hidden", isDark ? "bg-[#0d0f10]" : "bg-[#f8fafb]")}>
-      <div className={cn("relative z-20 shrink-0 border-b px-5 pt-3 sm:px-6 sm:pt-4", isDark ? "border-zinc-800/80 bg-[#0d0f10]" : "border-slate-200 bg-white")}>
+    <section className={cn("flex h-dvh min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden", isDark ? "bg-[#0d0f10]" : "bg-[#f8fafb]")}>
+      <div className={cn("relative z-20 w-full min-w-0 shrink-0 border-b px-5 pt-3 sm:px-6 sm:pt-4", isDark ? "border-zinc-800/80 bg-[#0d0f10]" : "border-slate-200 bg-white")}>
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <h1 className={cn("truncate text-xl font-bold tracking-tight sm:text-2xl", isDark ? "text-white" : "text-slate-900")}>
@@ -546,7 +546,7 @@ export default function TeamDetailPage() {
 
       {error && <p className="shrink-0 px-5 pt-4 text-sm text-red-400 sm:px-8">{error}</p>}
 
-      <div className={cn("min-h-0 flex-1 overflow-y-auto", activeTab === "Discussions" ? "p-0" : "p-5 sm:p-8")}>
+      <div className={cn("relative min-h-0 min-w-0 w-full flex-1 overflow-hidden", activeTab === "Discussions" || activeTab === "Timelines" ? "p-0" : "overflow-y-auto p-5 sm:p-8")}>
         {activeTab === "Tasks" && <TasksTab isDark={isDark} members={members} teamId={Number(params.teamId)} canManage={currentUserRole === "admin"} />}
         {activeTab === "Discussions" && (
           <DiscussionsTab
@@ -558,7 +558,15 @@ export default function TeamDetailPage() {
             }
           />
         )}
-        {activeTab === "Timelines" && <TimelinesTab isDark={isDark} />}
+        {activeTab === "Timelines" && (
+          <TimelinesTab
+            isDark={isDark}
+            members={members}
+            teamId={Number(params.teamId)}
+            canManage={currentUserRole === "admin"}
+            onOpenMemberDetails={openMemberDetails}
+          />
+        )}
         {activeTab === "Files" && <FilesTab isDark={isDark} />}
         {activeTab === "Overview" && <OverviewTab isDark={isDark} />}
       </div>
