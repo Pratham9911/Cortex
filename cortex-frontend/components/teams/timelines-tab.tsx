@@ -20,6 +20,8 @@ type Range = "1d" | "30d" | "12m" | "max"
 const DAY_MS = 86400000
 const ROW_H = 76
 const HEADER_H = 64
+const META_INSIDE_MIN_WIDTH = 360
+const META_OUTSIDE_WIDTH = 190
 const LOAD_THRESHOLD = 180
 const MAX_DAYS = 720
 const WEEKEND_HATCH = "repeating-linear-gradient(135deg, transparent, transparent 3px, rgba(128,128,128,.08) 3px, rgba(128,128,128,.08) 5px)"
@@ -233,12 +235,6 @@ export function TimelinesTab({
               </button>
             ))}
           </div>
-          {canManage && (
-            <Button size="sm" onClick={openCreate} className={cn("h-8 rounded-md", isDark ? "bg-white text-black hover:bg-zinc-200" : "bg-slate-900 text-white hover:bg-slate-800")}>
-              <Plus className="size-3.5" />
-              New
-            </Button>
-          )}
         </div>
       </header>
 
@@ -314,33 +310,68 @@ export function TimelinesTab({
                 const visible = orderedEnd >= 0 && orderedStart < days.length && end >= start
                 const span = visible ? Math.max(1, end - start + 1) : 1
                 const progress = progressFor(task)
-                const metaAfter = visible && days.length - end > 4
+                const metaInside = visible && span * colW >= META_INSIDE_MIN_WIDTH
+                const spaceAfterBar = (days.length - end - 1) * colW
+                const metaAfter = spaceAfterBar >= META_OUTSIDE_WIDTH
+                const metaLeft = metaAfter
+                  ? (end + 1) * colW + 8
+                  : Math.max(6, start * colW - META_OUTSIDE_WIDTH - 8)
+                const isDone = task.status === "DONE"
                 const top = row * ROW_H + 12
                 return (
                   <div key={task.id} className="absolute left-0 right-0" style={{ top, height: ROW_H - 24 }}>
                     {visible && (
-                      <button
-                        type="button"
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open task: ${task.title}`}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault()
+                            setSelectedTaskId(task.id)
+                          }
+                        }}
                         onClick={() => setSelectedTaskId(task.id)}
                         style={{ left: start * colW + 6, width: Math.max(span * colW - 12, 112) }}
                         className={cn(
-                          "absolute inset-y-0 z-10 flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 text-left shadow-[0_6px_18px_rgba(15,23,42,0.10)] transition hover:-translate-y-px",
-                          isDark ? "border border-zinc-700/80 bg-[#1c1c1c] text-zinc-100 hover:border-zinc-500" : "border border-white bg-white text-slate-800"
+                          "absolute inset-y-0 z-10 flex min-w-0 items-center gap-2.5 rounded-lg border px-2.5 text-left shadow-[0_6px_18px_rgba(15,23,42,0.10)] transition hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+                          isDone
+                            ? isDark
+                              ? "border-emerald-500/40 bg-emerald-400/10 text-zinc-100 hover:border-emerald-400/70"
+                              : "border-emerald-200 bg-emerald-50 text-slate-800 hover:border-emerald-300"
+                            : isDark
+                              ? "border-zinc-700/80 bg-[#1c1c1c] text-zinc-100 hover:border-zinc-500"
+                              : "border-white bg-white text-slate-800"
                         )}
                       >
-                        <span className={cn("h-8 w-1 shrink-0 rounded-full", priorityBar[task.priority])} />
+                        <span className={cn("h-8 w-1 shrink-0 rounded-full", isDone ? "bg-emerald-500" : priorityBar[task.priority])} />
                         <ListChecks className="size-4 shrink-0 text-zinc-500" />
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">{task.title}</span>
-                        {!metaAfter && (
-                          <span className="hidden items-center gap-2 text-[11px] text-zinc-500 sm:flex">
-                            <span>{progress.complete}/{progress.total}</span>
-                            <AvatarStack assigneeIds={task.assignees} members={members} isDark={isDark} />
+                        {metaInside && (
+                          <span className="flex shrink-0 items-center gap-2 text-[10px] text-zinc-500 sm:gap-2.5 sm:text-[11px]">
+                            <span className="inline-flex items-center gap-1">
+                              <CalendarDays className="size-3.5" />
+                              {parseDay(task.due_date).getDate()}
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <CheckCircle2 className="size-3.5" />
+                              {progress.complete}/{progress.total}
+                            </span>
+                            <AvatarStack
+                              assigneeIds={task.assignees}
+                              members={members}
+                              isDark={isDark}
+                              interactive
+                              onMemberClick={onOpenMemberDetails}
+                              onOverflowClick={() => setSelectedTaskId(task.id)}
+                            />
                           </span>
                         )}
-                      </button>
+                      </div>
                     )}
-                    {visible && metaAfter && (
-                      <div className="absolute inset-y-0 z-10 flex items-center gap-3 px-2 text-xs text-zinc-500" style={{ left: (end + 1) * colW + 8 }}>
+                    {visible && !metaInside && (
+                      <div className="absolute inset-y-0 z-10 flex items-center gap-3 px-2 text-xs text-zinc-500" style={{ left: metaLeft }}>
                         <span className="inline-flex items-center gap-1"><CalendarDays className="size-3.5" />{parseDay(task.due_date).getDate()}</span>
                         <span className="inline-flex items-center gap-1"><CheckCircle2 className="size-3.5" />{progress.complete}/{progress.total}</span>
                         <AvatarStack assigneeIds={task.assignees} members={members} isDark={isDark} interactive onMemberClick={onOpenMemberDetails} onOverflowClick={() => setSelectedTaskId(task.id)} />
@@ -350,17 +381,28 @@ export function TimelinesTab({
                 )
               })}
 
-              {canManage && (
-                <button type="button" onClick={openCreate} className="absolute z-10 ml-4 inline-flex items-center gap-1.5 px-2 py-2 text-sm text-zinc-500 hover:text-current" style={{ top: sortedTasks.length * ROW_H + 8 }}>
-                  <Plus className="size-4" />
-                  New
-                </button>
-              )}
             </div>
           </div>
         )}
         </div>
       </div>
+
+      {canManage && (
+        <Button
+          type="button"
+          size="sm"
+          onClick={openCreate}
+          className={cn(
+            "absolute left-5 top-1/2 z-40 h-9 -translate-y-1/2 rounded-full px-4 shadow-lg",
+            isDark
+              ? "bg-white text-black hover:bg-zinc-200"
+              : "bg-slate-900 text-white hover:bg-slate-800",
+          )}
+        >
+          <Plus className="size-4" />
+          New
+        </Button>
+      )}
 
       <TeamTaskOverlays
         isDark={isDark}
