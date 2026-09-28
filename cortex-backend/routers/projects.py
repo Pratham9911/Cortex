@@ -184,7 +184,8 @@ def list_projects(
             membership_alias.role.label("current_user_role"),
 
             member_count_expr,
-            admin_count_expr
+            admin_count_expr,
+            ProjectPack.name.label("plan_name")
         )
 
         # all project members for counting
@@ -205,6 +206,10 @@ def list_projects(
             (membership_alias.project_id == Project.project_id) &
             (membership_alias.user_id == user_id)
         )
+        .outerjoin(
+            ProjectPack,
+            ProjectPack.id == Project.plan_id
+        )
 
         .group_by(
             Project.project_id,
@@ -212,7 +217,8 @@ def list_projects(
             Project.created_at,
             Project.created_by,
             User.name,
-            membership_alias.role
+            membership_alias.role,
+            ProjectPack.name
         )
 
         .all()
@@ -234,6 +240,8 @@ def list_projects(
             "admin_count": project.admin_count,
 
             "current_user_role": project.current_user_role,
+
+            "plan_name": project.plan_name or "Free",
 
             "created_at": project.created_at
         }

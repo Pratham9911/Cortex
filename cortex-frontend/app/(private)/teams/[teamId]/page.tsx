@@ -50,6 +50,13 @@ type AvailableTeamUser = TeamMember & {
   role: "admin" | "member"
 }
 
+type ProjectMemberLimit = {
+  currentMembers: number
+  pendingInvites: number
+  maxMembers: number
+  planName: string
+}
+
 type MemberDetails = TeamMember & {
   role: "admin" | "member"
   is_project_owner?: boolean
@@ -150,6 +157,7 @@ export default function TeamDetailPage() {
   const [inviteResults, setInviteResults] = useState<SearchUser[]>([])
   const [inviteSearching, setInviteSearching] = useState(false)
   const [inviteError, setInviteError] = useState("")
+  const [inviteLimit, setInviteLimit] = useState<ProjectMemberLimit | null>(null)
   const [selectedInviteUser, setSelectedInviteUser] = useState<SearchUser | null>(null)
   const [sendingInvite, setSendingInvite] = useState(false)
   const [inviteSuccess, setInviteSuccess] = useState("")
@@ -323,6 +331,7 @@ export default function TeamDetailPage() {
     setInviteResults([])
     setInviteSearching(false)
     setInviteError("")
+    setInviteLimit(null)
     setSelectedInviteUser(null)
     setSendingInvite(false)
     setInviteSuccess("")
@@ -342,6 +351,7 @@ export default function TeamDetailPage() {
 
     setSendingInvite(true)
     setInviteError("")
+    setInviteLimit(null)
 
     try {
       const token = localStorage.getItem("access_token")
@@ -357,7 +367,19 @@ export default function TeamDetailPage() {
       )
 
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data?.detail || "Could not send invite.")
+      if (!response.ok) {
+        const detail = data?.detail
+        if (detail?.code === "PROJECT_MEMBER_LIMIT_REACHED") {
+          setInviteLimit({
+            currentMembers: Number(detail.current_members) || 0,
+            pendingInvites: Number(detail.pending_invites) || 0,
+            maxMembers: Number(detail.max_members) || 0,
+            planName: typeof detail.plan_name === "string" ? detail.plan_name : "Current",
+          })
+          return
+        }
+        throw new Error(typeof detail === "string" ? detail : "Could not send invite.")
+      }
 
       setInviteResults((current) =>
         current.map((person) =>
@@ -637,26 +659,28 @@ export default function TeamDetailPage() {
                 </span>
               )}
             </div>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              title="Add member"
-              className={cn(
-                "rounded-full transition-colors",
-                isDark ? "border-zinc-700 text-white hover:bg-zinc-800" : "border-slate-300 text-black hover:bg-slate-100"
-              )}
-              onClick={() => {
-                if (isGeneralTeam) {
-                  resetInviteDialog()
-                  setInviteOpen(true)
-                } else {
-                  resetTeamAddDialog()
-                  setTeamAddOpen(true)
-                }
-              }}
-            >
-              <Plus className="size-4" />
-            </Button>
+            {currentUserRole === "admin" && (
+              <Button
+                variant="outline"
+                size="icon-sm"
+                title="Add member"
+                className={cn(
+                  "rounded-full transition-colors",
+                  isDark ? "border-zinc-700 text-white hover:bg-zinc-800" : "border-slate-300 text-black hover:bg-slate-100"
+                )}
+                onClick={() => {
+                  if (isGeneralTeam) {
+                    resetInviteDialog()
+                    setInviteOpen(true)
+                  } else {
+                    resetTeamAddDialog()
+                    setTeamAddOpen(true)
+                  }
+                }}
+              >
+                <Plus className="size-4" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -833,7 +857,50 @@ export default function TeamDetailPage() {
             </DialogHeader>
           </div>
 
-          {selectedInviteUser ? (
+          {inviteLimit ? (
+            <div className="flex min-h-0 flex-1 flex-col justify-center px-6 py-6">
+              <div className={cn("rounded-2xl border p-5", isDark ? "border-amber-500/20 bg-amber-500/5" : "border-amber-200 bg-amber-50/70")}>
+                <div className="flex items-start gap-3">
+                  <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", isDark ? "bg-amber-400/10 text-amber-300" : "bg-amber-100 text-amber-700")}>
+                    <UserPlus className="size-5" />
+                  </span>
+                  <div>
+                    <h3 className="text-base font-bold">Project member limit reached</h3>
+                    <p className={cn("mt-1 text-sm leading-5", isDark ? "text-zinc-400" : "text-slate-600")}>
+                      The {inviteLimit.planName} plan allows up to {inviteLimit.maxMembers} project members. Invitations do not reserve slots; users can join if a slot is available when they accept.
+                    </p>
+                  </div>
+                </div>
+                <div className={cn("mt-5 rounded-xl border p-4", isDark ? "border-zinc-700 bg-[#101115]" : "border-amber-200/80 bg-white")}>
+                  <div className="mb-2 flex items-center justify-between text-sm">
+                    <span className={isDark ? "text-zinc-300" : "text-slate-700"}>Joined members</span>
+                    <span className="font-semibold">
+                      {inviteLimit.currentMembers} / {inviteLimit.maxMembers}
+                    </span>
+                  </div>
+                  <div className={cn("h-2 overflow-hidden rounded-full", isDark ? "bg-zinc-800" : "bg-slate-200")}>
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500"
+                      style={{
+                        width: `${inviteLimit.maxMembers
+                          ? Math.min(100, (inviteLimit.currentMembers / inviteLimit.maxMembers) * 100)
+                          : 100}%`,
+                      }}
+                    />
+                  </div>
+                  <p className={cn("mt-2 text-xs", isDark ? "text-zinc-500" : "text-slate-500")}>
+                    {inviteLimit.pendingInvites} pending invitation{inviteLimit.pendingInvites === 1 ? "" : "s"} do not use member slots.
+                  </p>
+                </div>
+              </div>
+              <DialogFooter className="mt-5">
+                <Button variant="outline" onClick={() => setInviteLimit(null)}>Back to invite</Button>
+                <Button onClick={() => { setInviteOpen(false); resetInviteDialog() }} className="bg-violet-600 text-white hover:bg-violet-500">
+                  Done
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : selectedInviteUser ? (
             <div className="flex min-h-0 flex-1 flex-col justify-center px-6 py-6">
               <div className={cn("rounded-2xl border p-5 text-center", isDark ? "border-zinc-700 bg-zinc-900/50" : "border-slate-200 bg-slate-50")}>
                 <PageUserAvatar name={selectedInviteUser.name} avatarUrl={selectedInviteUser.avatar_url} size="xl" className="mx-auto" />

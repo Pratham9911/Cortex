@@ -61,6 +61,7 @@ type Project = {
   member_count?: number
   admin_count?: number
   created_at?: string
+  plan_name?: string
   current_user_role?: string
   created_by?: {
     user_id: number
@@ -154,6 +155,14 @@ function WorkspaceContent() {
   }, [projects, query, sortBy])
 
   const noProjects = !loading && filteredProjects.length === 0
+  const planBadgeClass = (planName?: string) =>
+    planName?.toUpperCase() === "PRO"
+      ? isDark
+        ? "border border-violet-400 bg-violet-600 text-white shadow-sm shadow-violet-950/40"
+        : "border border-violet-700 bg-violet-100 text-violet-950 shadow-sm shadow-violet-200"
+      : isDark
+        ? "bg-zinc-100 text-zinc-900"
+        : "border border-slate-300 bg-white text-slate-700"
 
   const openProject = (project: Project) => {
     localStorage.setItem("selected_project_id", String(project.project_id))
@@ -425,8 +434,8 @@ function WorkspaceContent() {
                     <span className={cn("inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-widest", isDark ? "bg-zinc-800 text-zinc-200" : "bg-slate-100 text-slate-700")}>
                       {(project.current_user_role || "member").toUpperCase()}
                     </span>
-                    <span className={cn("inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-widest", isDark ? "bg-zinc-100 text-zinc-900" : "bg-white border border-slate-300 text-slate-700")}>
-                      FREE
+                    <span className={cn("inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-widest", planBadgeClass(project.plan_name))}>
+                      {(project.plan_name || "Free").toUpperCase()}
                     </span>
                   </div>
                 </div>
@@ -462,8 +471,8 @@ function WorkspaceContent() {
                     <div className="col-span-2">{project.member_count ?? 0}</div>
                     <div className="col-span-2">{project.admin_count ?? 0}</div>
                     <div className="col-span-2">
-                      <span className={cn("inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-widest", isDark ? "bg-zinc-100 text-zinc-900" : "bg-white border border-slate-300 text-slate-700")}>
-                        FREE
+                      <span className={cn("inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-widest", planBadgeClass(project.plan_name))}>
+                        {(project.plan_name || "Free").toUpperCase()}
                       </span>
                     </div>
                     <div className="col-span-1">{project.created_at ? new Date(project.created_at).toLocaleDateString() : "N/A"}</div>

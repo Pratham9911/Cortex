@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState } from "react"
-import { Check, FolderLock, Inbox, Loader2, Mail, X } from "lucide-react"
+import { Check, FolderLock, Inbox, Loader2, Mail, UserPlus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -37,6 +37,12 @@ type ProjectLimit = {
   planName: string
 }
 
+type ProjectMemberLimit = {
+  currentMembers: number
+  maxMembers: number
+  planName: string
+}
+
 type InboxController = ReturnType<typeof useInboxController>
 const InboxControllerContext = createContext<InboxController | null>(null)
 
@@ -57,6 +63,7 @@ export function useInboxController({ apiUrl, onInviteHandled }: InboxControllerO
   const [error, setError] = useState("")
   const [handlingMessageId, setHandlingMessageId] = useState<number | null>(null)
   const [projectLimit, setProjectLimit] = useState<ProjectLimit | null>(null)
+  const [projectMemberLimit, setProjectMemberLimit] = useState<ProjectMemberLimit | null>(null)
 
   const loadInbox = async () => {
     setLoading(true)
@@ -141,7 +148,15 @@ export function useInboxController({ apiUrl, onInviteHandled }: InboxControllerO
           })
           return
         }
-        throw new Error(data?.detail || `Could not ${action} invite.`)
+        if (action === "accept" && detail?.code === "PROJECT_MEMBER_LIMIT_REACHED") {
+          setProjectMemberLimit({
+            currentMembers: Number(detail.current_members) || 0,
+            maxMembers: Number(detail.max_members) || 0,
+            planName: typeof detail.plan_name === "string" ? detail.plan_name : "Current",
+          })
+          return
+        }
+        throw new Error(typeof detail === "string" ? detail : `Could not ${action} invite.`)
       }
 
       const nextStatus = action === "accept" ? "accepted" : "rejected"
@@ -167,6 +182,8 @@ export function useInboxController({ apiUrl, onInviteHandled }: InboxControllerO
     error,
     projectLimit,
     setProjectLimit,
+    projectMemberLimit,
+    setProjectMemberLimit,
     handlingMessageId,
     unreadCount: messages.filter((message) => message.status === "unread").length,
     loadInbox,
@@ -399,6 +416,60 @@ export function InboxContent({
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => controller.setProjectLimit(null)}>
+              Got it
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={!!controller.projectMemberLimit} onOpenChange={(open) => !open && controller.setProjectMemberLimit(null)}>
+      <DialogContent className={cn(
+        "overflow-hidden rounded-2xl p-0 sm:max-w-md",
+        isDark ? "border-zinc-700 bg-[#15171d] text-white" : "border-slate-200 bg-white text-slate-900"
+      )}>
+        <div className={cn(
+          "px-6 pb-5 pt-6",
+          isDark
+            ? "bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent"
+            : "bg-gradient-to-br from-amber-50 via-orange-50/60 to-white"
+        )}>
+          <DialogHeader className="text-left">
+            <div className={cn(
+              "mb-2 flex h-11 w-11 items-center justify-center rounded-xl",
+              isDark ? "bg-amber-400/10 text-amber-300" : "bg-amber-100 text-amber-700"
+            )}>
+              <UserPlus className="h-5 w-5" />
+            </div>
+            <DialogTitle className="text-xl font-bold">Project member limit reached</DialogTitle>
+            <DialogDescription className={isDark ? "pt-1 text-zinc-400" : "pt-1 text-slate-600"}>
+              This project has reached the {controller.projectMemberLimit?.planName} plan limit of {controller.projectMemberLimit?.maxMembers} members.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+        <div className="space-y-4 px-6 pb-6">
+          <div className={cn("rounded-xl border p-4", isDark ? "border-zinc-700 bg-[#101115]" : "border-slate-200 bg-slate-50")}>
+            <div className="mb-2 flex items-center justify-between text-sm">
+              <span className={isDark ? "text-zinc-300" : "text-slate-700"}>Project members</span>
+              <span className="font-semibold">
+                {controller.projectMemberLimit?.currentMembers} / {controller.projectMemberLimit?.maxMembers}
+              </span>
+            </div>
+            <div className={cn("h-2 overflow-hidden rounded-full", isDark ? "bg-zinc-800" : "bg-slate-200")}>
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500"
+                style={{
+                  width: `${controller.projectMemberLimit?.maxMembers
+                    ? Math.min(100, (controller.projectMemberLimit.currentMembers / controller.projectMemberLimit.maxMembers) * 100)
+                    : 100}%`,
+                }}
+              />
+            </div>
+          </div>
+          <p className={cn("text-sm leading-relaxed", isDark ? "text-zinc-400" : "text-slate-600")}>
+            This invitation is still pending. Ask a project admin to free a member slot before accepting it.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => controller.setProjectMemberLimit(null)}>
               Got it
             </Button>
           </DialogFooter>

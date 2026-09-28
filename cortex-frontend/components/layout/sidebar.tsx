@@ -89,6 +89,8 @@ function SidebarContent({
   }, [isCollapsed])
 
   const isDark = mounted && theme === "dark"
+  const planName = user?.plan_name || "Free"
+  const isPro = planName.toUpperCase() === "PRO"
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
   useEffect(() => {
@@ -487,27 +489,52 @@ function SidebarContent({
                 <NavRow id="Help" label="Help" icon={HelpCircle} />
               </div>
 
-              {/* Upgrade card */}
-              <div className={cn(
-                "mx-1.5 mb-1.5 p-3 rounded-lg border flex flex-col gap-2",
-                isDark ? "bg-[#1e1e2e] border-indigo-900/50" : "bg-indigo-50/60 border-indigo-100"
-              )}>
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-indigo-500/15">
-                    <Sparkles className="w-3 h-3 text-indigo-500" />
-                  </div>
-                  <div>
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Current plan</p>
-                    <p className={cn("text-[11px] font-extrabold", isDark ? "text-white" : "text-zinc-900")}>Pro trial</p>
-                  </div>
-                </div>
-                <button className={cn(
-                  "w-full h-7 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all",
-                  isDark ? "bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700" : "bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-50"
+              {isPro ? (
+                <div className={cn(
+                  "mx-1.5 mb-1.5 flex items-center gap-2 rounded-lg border px-3 py-2.5",
+                  isDark ? "border-violet-400/40 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/10" : "border-violet-300 bg-gradient-to-r from-violet-100 to-fuchsia-50"
                 )}>
-                  <Sparkles className="w-3 h-3 text-indigo-500" /> Upgrade to Pro
-                </button>
-              </div>
+                  <span className={cn(
+                    "flex size-7 items-center justify-center rounded-lg",
+                    isDark ? "bg-violet-400/20 text-violet-200" : "bg-violet-200 text-violet-800"
+                  )}>
+                    <Sparkles className="size-3.5" />
+                  </span>
+                  <span>
+                    <span className="block text-[9px] font-bold uppercase tracking-widest text-zinc-500">Current plan</span>
+                    <span className={cn("block text-xs font-extrabold tracking-wide", isDark ? "text-white" : "text-violet-950")}>PRO</span>
+                  </span>
+                </div>
+              ) : (
+                <div className={cn(
+                  "mx-1.5 mb-1.5 rounded-lg border p-3",
+                  isDark ? "border-violet-400/30 bg-gradient-to-br from-violet-500/15 via-indigo-500/10 to-[#1e1e2e]" : "border-violet-200 bg-gradient-to-br from-violet-50 via-indigo-50 to-white"
+                )}>
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-lg bg-violet-500/15 p-1.5">
+                      <Sparkles className="size-3 text-violet-500" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Current plan</p>
+                      <p className={cn("text-[11px] font-extrabold", isDark ? "text-white" : "text-zinc-900")}>{planName}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      router.push("/settings/billing")
+                      setProfileOpen(false)
+                    }}
+                    className={cn(
+                      "mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all",
+                      isDark
+                        ? "border-violet-300/30 bg-violet-500 text-white shadow-md shadow-violet-950/30 hover:bg-violet-400"
+                        : "border-violet-700 bg-violet-700 text-white shadow-md shadow-violet-200 hover:bg-violet-800"
+                    )}
+                  >
+                    <Sparkles className="size-3" /> Upgrade to Pro
+                  </button>
+                </div>
+              )}
 
               {/* Sign out / profile settings */}
               <div className={cn("border-t p-1.5 flex flex-col gap-0.5", isDark ? "border-zinc-700/60" : "border-zinc-100")}>
@@ -534,7 +561,7 @@ function SidebarContent({
           <div className="h-12 flex items-center w-full">
             <button
               onClick={handleProfileTrigger}
-              title={isCollapsed ? (user?.name ?? "Profile") : undefined}
+              title={isCollapsed ? `${user?.name ?? "Profile"} · ${planName}` : undefined}
               className={cn(
                 "w-full flex items-center gap-2.5 transition-all duration-300",
                 isCollapsed ? "rounded-full border-transparent h-9 px-1" : "rounded-xl border h-12 pl-1 pr-1",
@@ -545,7 +572,7 @@ function SidebarContent({
               )}
             >
               {/* Avatar — always in same spot */}
-              <span className="shrink-0">
+              <span className="relative shrink-0">
                 {user?.avatar_url ? (
                   <img
                     src={user.avatar_url}
@@ -564,6 +591,16 @@ function SidebarContent({
                 >
                   {user?.name ? user.name.slice(0, 2) : "CX"}
                 </span>
+                {isCollapsed && (
+                  <span className={cn(
+                    "absolute -bottom-1 -right-1 rounded px-1 text-[7px] font-extrabold uppercase leading-3 ring-2",
+                    isPro
+                      ? isDark ? "bg-violet-500 text-white ring-[#121215]" : "bg-violet-700 text-white ring-[#f7f7f8]"
+                      : isDark ? "bg-zinc-700 text-zinc-100 ring-[#121215]" : "bg-zinc-200 text-zinc-800 ring-[#f7f7f8]"
+                  )}>
+                    {planName}
+                  </span>
+                )}
               </span>
 
               {/* Name + plan — disappears instantly when collapsed */}
@@ -571,7 +608,14 @@ function SidebarContent({
                 <span className="text-xs font-extrabold truncate leading-tight">
                   {user?.name ?? "Cortex User"}
                 </span>
-                <span className="text-[9px] text-zinc-500 font-semibold uppercase tracking-wide">Pro trial</span>
+                <span className={cn(
+                  "mt-0.5 w-fit rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider",
+                  isPro
+                    ? isDark ? "bg-violet-500 text-white" : "bg-violet-700 text-white"
+                    : isDark ? "bg-zinc-800 text-zinc-300" : "bg-zinc-100 text-zinc-600"
+                )}>
+                  {planName}
+                </span>
               </span>
 
               {/* Chevron — also just clips away */}

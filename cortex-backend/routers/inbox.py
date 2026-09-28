@@ -13,7 +13,7 @@ from models import (
     Team,
     TeamMember
 )
-from modelmetrics import UserPack
+from modelmetrics import ProjectPack, UserPack
 
 from routers.audit import create_audit_log
 router = APIRouter()
@@ -194,6 +194,36 @@ def search_users_to_invite(
     }
 
 
+def get_project_pack(db: Session, project: Project) -> ProjectPack:
+    project_pack = None
+    if project.plan_id is not None:
+        project_pack = db.query(ProjectPack).filter(
+            ProjectPack.id == project.plan_id
+        ).first()
+    if project_pack is None:
+        project_pack = db.query(ProjectPack).filter(
+            func.lower(cast(ProjectPack.name, String)) == "free"
+        ).first()
+    if project_pack is None:
+        raise HTTPException(
+            status_code=500,
+            detail="The Free project plan is not configured.",
+        )
+    return project_pack
+
+
+def get_project_member_usage(db: Session, project_id: int) -> tuple[int, int]:
+    current_members = db.query(func.count(ProjectMember.id)).filter(
+        ProjectMember.project_id == project_id
+    ).scalar() or 0
+    pending_invites = db.query(func.count(InboxMessage.message_id)).filter(
+        InboxMessage.related_project_id == project_id,
+        InboxMessage.type == "invite",
+        InboxMessage.status.in_(["unread", "read"]),
+    ).scalar() or 0
+    return current_members, pending_invites
+
+
 # ---------------------------------------------------
 # SEND PROJECT INVITE
 # ---------------------------------------------------
@@ -225,7 +255,7 @@ def invite_user_to_project(
     # ----------------------------------------
     project = db.query(Project).filter(
         Project.project_id == project_id
-    ).first()
+    ).with_for_update().first()
 
     if not project:
         raise HTTPException(
@@ -283,6 +313,21 @@ def invite_user_to_project(
         raise HTTPException(
             status_code=400,
             detail="Invite already pending"
+        )
+
+    project_pack = get_project_pack(db, project)
+    current_members, pending_invites = get_project_member_usage(db, project_id)
+    if current_members >= project_pack.max_members:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PROJECT_MEMBER_LIMIT_REACHED",
+                "message": "This project has reached the member limit for its current plan.",
+                "current_members": current_members,
+                "pending_invites": pending_invites,
+                "max_members": project_pack.max_members,
+                "plan_name": project_pack.name,
+            },
         )
 
     sender = db.query(User).filter(
@@ -411,12 +456,27 @@ def accept_project_invite(
     # ----------------------------------------
     project = db.query(Project).filter(
         Project.project_id == inbox.related_project_id
-    ).first()
+    ).with_for_update().first()
 
     if not project:
         raise HTTPException(
             status_code=404,
             detail="Project not found"
+        )
+
+    project_pack = get_project_pack(db, project)
+    current_members, _ = get_project_member_usage(db, project.project_id)
+    if current_members >= project_pack.max_members:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PROJECT_MEMBER_LIMIT_REACHED",
+                "message": "This project has reached the member limit for its current plan.",
+                "current_members": current_members,
+                "pending_invites": 0,
+                "max_members": project_pack.max_members,
+                "plan_name": project_pack.name,
+            },
         )
 
     # ----------------------------------------

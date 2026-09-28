@@ -10,6 +10,7 @@ interface User {
   name?: string
   created_at?: string
   avatar_url?: string
+  plan_name?: string
 }
 
 interface AuthContextType {
@@ -74,7 +75,8 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
         name: data.name || "Cortex Explorer",
         email: data.email || "explorer@cortex.com",
         created_at: data.created_at,
-        avatar_url: avatarUrl
+        avatar_url: avatarUrl,
+        plan_name: data.plan_name || "Free",
       }
       
       setUser(userData)

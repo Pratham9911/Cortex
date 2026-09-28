@@ -2,9 +2,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import String, cast, func, text
 from database import SessionLocal, engine
 from models import Base, User
+from modelmetrics import UserPack
 from dependencies import get_current_user
 from routers import auth, projects, documents, teams, folder, inbox, user_profiles, agents, chats_messages, audit, integrations, notification
 from routers.tasks.router import router as tasks_router
@@ -103,9 +104,17 @@ def get_me(user_id: int = Depends(get_current_user), db: Session = Depends(get_d
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         return {"user_id": user_id}
+    user_pack = None
+    if user.plan_id is not None:
+        user_pack = db.query(UserPack).filter(UserPack.id == user.plan_id).first()
+    if user_pack is None:
+        user_pack = db.query(UserPack).filter(
+            func.lower(cast(UserPack.name, String)) == "free"
+        ).first()
     return {
         "user_id": user.user_id,
         "name": user.name,
         "email": user.email,
-        "created_at": user.created_at
+        "created_at": user.created_at,
+        "plan_name": user_pack.name if user_pack else "Free",
     }
