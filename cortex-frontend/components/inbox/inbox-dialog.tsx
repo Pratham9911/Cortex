@@ -1,14 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useState } from "react"
 import { Check, Inbox, Loader2, Mail, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
@@ -28,6 +25,19 @@ export type InboxMessage = {
 type InboxControllerOptions = {
   apiUrl: string
   onInviteHandled?: () => void | Promise<void>
+}
+
+type InboxController = ReturnType<typeof useInboxController>
+const InboxControllerContext = createContext<InboxController | null>(null)
+
+export function InboxControllerProvider({ controller, children }: { controller: InboxController; children: React.ReactNode }) {
+  return <InboxControllerContext.Provider value={controller}>{children}</InboxControllerContext.Provider>
+}
+
+export function useInboxControllerContext() {
+  const controller = useContext(InboxControllerContext)
+  if (!controller) throw new Error("InboxControllerProvider is required")
+  return controller
 }
 
 export function useInboxController({ apiUrl, onInviteHandled }: InboxControllerOptions) {
@@ -165,24 +175,20 @@ export function InboxUnreadBadge({ count }: { count: number }) {
   )
 }
 
-export function InboxDialog({
+export function InboxContent({
   controller,
   isDark,
+  fullPage = false,
 }: {
   controller: ReturnType<typeof useInboxController>
   isDark: boolean
+  fullPage?: boolean
 }) {
   return (
-    <Dialog open={controller.open} onOpenChange={controller.setOpen}>
-      <DialogContent
-        className={cn(
-          "h-[620px] max-h-[85vh] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-[760px]",
-          isDark ? "border-zinc-700 bg-[#171920] text-zinc-100" : "border-slate-200 bg-white"
-        )}
-      >
+    <div className={cn("grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden", isDark ? (fullPage ? "bg-[#0A0A0A] text-zinc-100" : "bg-[#171920] text-zinc-100") : "bg-white")}>
         <div className={cn("border-b px-6 py-5", isDark ? "border-zinc-800" : "border-slate-200")}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-3 text-lg">
+          <div>
+            <div className="flex items-center gap-3 text-lg font-semibold">
               <span className={cn("flex size-10 items-center justify-center rounded-xl", isDark ? "bg-sky-500/15 text-sky-400" : "bg-sky-100 text-sky-600")}>
                 <Inbox className="size-5" />
               </span>
@@ -194,11 +200,11 @@ export function InboxDialog({
                   </span>
                 )}
               </span>
-            </DialogTitle>
-            <DialogDescription className={cn("text-xs", isDark ? "text-zinc-400" : "text-slate-500")}>
+            </div>
+            <p className={cn("mt-1 text-xs", isDark ? "text-zinc-400" : "text-slate-500")}>
               Project invitations, updates, and system messages.
-            </DialogDescription>
-          </DialogHeader>
+            </p>
+          </div>
         </div>
 
         <div className="min-h-0 overflow-y-auto">
@@ -241,7 +247,7 @@ export function InboxDialog({
                       "relative flex w-full gap-4 px-5 py-4 text-left transition-colors",
                       isUnread
                         ? isDark ? "bg-sky-500/10 hover:bg-sky-500/15" : "bg-sky-50 hover:bg-sky-100/80"
-                        : isDark ? "bg-[#171920] hover:bg-zinc-800/60" : "bg-white hover:bg-slate-50"
+                        : isDark ? (fullPage ? "bg-[#0A0A0A] hover:bg-zinc-900" : "bg-[#171920] hover:bg-zinc-800/60") : "bg-white hover:bg-slate-50"
                     )}
                   >
                     {isUnread && <span className="absolute inset-y-0 left-0 w-1 bg-sky-500" />}
@@ -321,7 +327,10 @@ export function InboxDialog({
             </div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+    </div>
   )
+}
+
+export function InboxDialog({ controller, isDark }: { controller: InboxController; isDark: boolean }) {
+  return <Dialog open={controller.open} onOpenChange={controller.setOpen}><DialogContent className={cn("h-[620px] max-h-[85vh] overflow-hidden p-0 sm:max-w-[760px]", isDark ? "border-zinc-700 bg-[#171920] text-zinc-100" : "border-slate-200 bg-white")}><InboxContent controller={controller} isDark={isDark} /></DialogContent></Dialog>
 }

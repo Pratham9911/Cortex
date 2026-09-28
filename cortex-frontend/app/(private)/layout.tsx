@@ -3,10 +3,9 @@
 import { useEffect, useRef, useState } from "react"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { BookOpen, Code2, Cog, EllipsisVertical, HelpCircle, Inbox, Keyboard, Lightbulb, Menu, Plus, Search, Wrench } from "lucide-react"
+import { BookOpen, Code2, Cog, Keyboard, Menu, Plus, Wrench } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { Sidebar } from "@/components/layout/sidebar"
-import { Button } from "@/components/ui/button"
 import {
   CommandDialog,
   CommandEmpty,
@@ -16,15 +15,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { InboxDialog, InboxUnreadBadge, useInboxController } from "@/components/inbox/inbox-dialog"
+import { InboxControllerProvider, useInboxController } from "@/components/inbox/inbox-dialog"
 import { cn } from "@/lib/utils"
 
 export default function PrivateLayout({ children }: { children: React.ReactNode }) {
@@ -32,6 +23,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
   const isAgentRoute = pathname.startsWith("/ai-agent")
   const isSettingsRoute = pathname.startsWith("/settings")
   const isTeamDetailRoute = pathname.startsWith("/teams/")
+  const isInboxRoute = pathname.startsWith("/inbox")
   const isFullPageRoute = isAgentRoute || isSettingsRoute || isTeamDetailRoute
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isMobileOpen, setIsMobileOpen] = useState(false)
@@ -94,6 +86,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
 
   return (
     <ProtectedRoute>
+      <InboxControllerProvider controller={inbox}>
       <div
         className={cn(
           "flex h-dvh min-h-0 overflow-hidden transition-colors duration-300 font-quicksand",
@@ -107,6 +100,8 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
           isMobileOpen={isMobileOpen}
           setIsMobileOpen={setIsMobileOpen}
           agentMode={isFullPageRoute}
+          unreadInboxCount={inbox.unreadCount}
+          onOpenSearch={() => setCommandOpen(true)}
         />
 
         <div
@@ -149,61 +144,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
                 </span>
               </div>
 
-              <div className="flex items-center gap-3">
-                <button className={cn("hidden md:block text-sm font-medium", isDark ? "text-zinc-200 hover:text-white" : "text-slate-700 hover:text-slate-900")}>Feedback</button>
-                <button
-                  onClick={() => setCommandOpen(true)}
-                  className={cn(
-                    "hidden md:flex h-9 items-center gap-2 rounded-full border px-4",
-                    isDark ? "border-zinc-700 text-zinc-400 hover:border-zinc-600" : "border-slate-300 text-slate-600"
-                  )}
-                >
-                  <Search className="h-4 w-4" />
-                  <span className="text-sm">Search...</span>
-                  <span className={cn("text-xs", isDark ? "text-zinc-500" : "text-slate-500")}>Ctrl K</span>
-                </button>
-                <Button
-                  onClick={inbox.openInbox}
-                  className="relative hidden md:inline-flex h-9 min-h-9 rounded-full bg-sky-500 px-3 text-xs font-semibold leading-none text-white hover:bg-sky-400"
-                  aria-label={`Inbox${inbox.unreadCount ? `, ${inbox.unreadCount} unread` : ""}`}
-                >
-                  <Inbox className="h-4 w-4" />
-                  <InboxUnreadBadge count={inbox.unreadCount} />
-                </Button>
-                <button className={cn("hidden md:grid h-9 w-9 place-items-center rounded-full border", isDark ? "border-zinc-700 text-zinc-300" : "border-slate-300 text-slate-600")}>
-                  <HelpCircle className="h-4 w-4" />
-                </button>
-                <button className={cn("hidden md:grid h-9 w-9 place-items-center rounded-full border", isDark ? "border-zinc-700 text-zinc-300" : "border-slate-300 text-slate-600")}>
-                  <Lightbulb className="h-4 w-4" />
-                </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className={cn("md:hidden grid h-9 w-9 place-items-center rounded-full border", isDark ? "border-zinc-700 text-zinc-300" : "border-slate-300 text-slate-600")}>
-                      <EllipsisVertical className="h-4 w-4" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className={cn("w-48", isDark ? "border-zinc-700 bg-[#1a1c21] text-zinc-100" : "")}>
-                    <DropdownMenuLabel>Quick Actions</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => setCommandOpen(true)}>
-                      <Search className="h-4 w-4" /> Search
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={inbox.openInbox}>
-                      <span className="relative">
-                        <Inbox className="h-4 w-4" />
-                        <InboxUnreadBadge count={inbox.unreadCount} />
-                      </span>
-                      Inbox
-                    </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <HelpCircle className="h-4 w-4" /> Help
-                    </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <Lightbulb className="h-4 w-4" /> Feedback
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+              <div />
             </div>
           </header>
           )}
@@ -211,7 +152,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
           <main
             className={cn(
               "min-h-0 min-w-0 flex-1",
-              isFullPageRoute ? "overflow-hidden p-0" : "overflow-auto px-6 py-8"
+              isFullPageRoute || isInboxRoute ? "overflow-hidden p-0" : "overflow-auto px-6 py-8"
             )}
           >
             {children}
@@ -263,9 +204,9 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
             </CommandList>
           </CommandDialog>
 
-          <InboxDialog controller={inbox} isDark={isDark} />
         </div>
       </div>
+      </InboxControllerProvider>
     </ProtectedRoute>
   )
 }

@@ -20,6 +20,8 @@ interface SidebarProps {
   isMobileOpen: boolean
   setIsMobileOpen: (v: boolean) => void
   agentMode?: boolean
+  unreadInboxCount?: number
+  onOpenSearch?: () => void
 }
 
 const MENU_ITEMS = [
@@ -45,10 +47,14 @@ function SidebarContent({
   isCollapsed,
   setIsCollapsed,
   setIsMobileOpen,
+  unreadInboxCount = 0,
+  onOpenSearch,
 }: {
   isCollapsed: boolean
   setIsCollapsed: (v: boolean) => void
   setIsMobileOpen: (v: boolean) => void
+  unreadInboxCount?: number
+  onOpenSearch?: () => void
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -141,8 +147,12 @@ function SidebarContent({
   const divider = isDark ? "bg-zinc-800" : "bg-zinc-200"
   const navText = isDark ? "text-zinc-300" : "text-zinc-600"
   const activeCard = isDark
-    ? "bg-[#26262b] border border-zinc-700 text-white"
-    : "bg-zinc-100 border border-zinc-200 text-zinc-900"
+    ? "bg-[#26262b] text-white"
+    : "bg-zinc-100 text-zinc-950"
+  const activeMarker = cn(
+    "relative before:absolute before:left-0 before:top-1/4 before:h-1/2 before:w-[3px] before:rounded-r-full before:content-['']",
+    isDark ? "before:bg-white" : "before:bg-zinc-900"
+  )
   const hoverRow = isDark
     ? "hover:bg-[#26262b] hover:text-white"
     : "hover:bg-zinc-100 hover:text-zinc-900"
@@ -161,6 +171,7 @@ function SidebarContent({
       Settings: "/settings",
       Teams: "/teams",
       AuditLogs: "/audit-logs",
+      Inbox: "/inbox",
       Trash: "/trash",
     }
     const target = routeMap[id]
@@ -215,6 +226,10 @@ function SidebarContent({
       setActive("AuditLogs")
       return
     }
+    if (pathname.startsWith("/inbox")) {
+      setActive("Inbox")
+      return
+    }
     setActive("Dashboard")
   }, [pathname])
 
@@ -242,8 +257,8 @@ function SidebarContent({
         onClick={onClick ?? (() => handleNav(id))}
         title={isCollapsed ? label : undefined}
         className={cn(
-          "w-full flex items-center gap-3 rounded-lg px-2.5 h-9 text-xs font-semibold transition-colors duration-150 outline-none",
-          isActive ? activeCard : cn(navText, hoverRow)
+          "relative w-full flex items-center gap-3 rounded-lg px-2.5 h-9 text-xs font-semibold transition-colors duration-150 outline-none",
+          isActive ? cn(activeCard, activeMarker) : cn(navText, hoverRow)
         )}
       >
         <Icon className="w-4 h-4 shrink-0" />
@@ -266,7 +281,7 @@ function SidebarContent({
       <div>
         <div className={cn(
           "group flex h-9 w-full items-center rounded-lg text-xs font-semibold transition-colors duration-150",
-          isActive ? activeCard : cn(navText, hoverRow)
+          isActive ? cn(activeCard, activeMarker) : cn(navText, hoverRow)
         )}>
           <button
             type="button"
@@ -317,7 +332,7 @@ function SidebarContent({
                     className={cn(
                       "h-8 w-full truncate rounded-md px-2 text-left text-xs font-medium transition-colors",
                       pathname === `/teams/${team.team_id}`
-                        ? activeCard
+                        ? cn(activeCard, activeMarker)
                         : cn(navText, hoverRow)
                     )}
                   >
@@ -387,7 +402,7 @@ function SidebarContent({
         </div>
 
         {/* Quick search */}
-        <button className={cn(
+        <button onClick={onOpenSearch} className={cn(
           "flex h-9 items-center gap-3 rounded-lg border px-2.5 text-xs font-medium transition-colors",
           isDark
             ? "bg-[#26262b] border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-[#2d2d33]"
@@ -399,7 +414,7 @@ function SidebarContent({
 
         {/* Inbox + Notifications */}
         <div className="flex flex-col gap-0.5">
-          <NavRow id="Inbox" label="Inbox" icon={Inbox} badge="12" onClick={() => handleNav("Inbox")} />
+          <NavRow id="Inbox" label="Inbox" icon={Inbox} badge={unreadInboxCount > 0 ? String(unreadInboxCount) : undefined} onClick={() => handleNav("Inbox")} />
           <NavRow id="Notifications" label="Notifications" icon={Bell} badge="15+" onClick={() => handleNav("Notifications")} />
         </div>
 
@@ -565,7 +580,7 @@ function SidebarContent({
 }
 
 /* ─── Main export ─── */
-export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen, agentMode = false }: SidebarProps) {
+export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen, agentMode = false, unreadInboxCount = 0, onOpenSearch }: SidebarProps) {
   const pathname = usePathname()
   const { theme } = useTheme()
   const [mounted, setMounted] = useState(false)
@@ -617,6 +632,8 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
             isCollapsed={effectiveCollapsed}
             setIsCollapsed={setIsCollapsed}
             setIsMobileOpen={setIsMobileOpen}
+            unreadInboxCount={unreadInboxCount}
+            onOpenSearch={onOpenSearch}
           />
         </div>
       </aside>
@@ -639,7 +656,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
               <X className="w-4 h-4" />
             </button>
             <div className="h-full p-3 overflow-hidden min-h-0" style={{ fontWeight: 400 }}>
-              <SidebarContent isCollapsed={false} setIsCollapsed={() => { }} setIsMobileOpen={setIsMobileOpen} />
+              <SidebarContent isCollapsed={false} setIsCollapsed={() => { }} setIsMobileOpen={setIsMobileOpen} unreadInboxCount={unreadInboxCount} onOpenSearch={onOpenSearch} />
             </div>
           </aside>
         </div>

@@ -348,26 +348,26 @@ export default function TeamsPage() {
                 </div>
                 <div className={cn("px-4 md:px-5 py-3 border-t flex items-center", isDark ? "border-zinc-800" : "border-zinc-200")}>
                   <div className="flex items-center -space-x-2">
-                    {(teamMembersMap[team.team_id] || []).slice(0, 2).map((member) => (
+                    {(teamMembersMap[team.team_id] || []).slice(0, 3).map((member) => (
                       <span
                         key={member.user_id}
                         className={cn(
-                          "w-6 h-6 rounded-full border border-black bg-white text-black text-[9px] font-extrabold flex items-center justify-center uppercase overflow-hidden shadow-xs -ml-1.5 first:ml-0"
+                          "w-7 h-7 rounded-full border border-black bg-white text-black text-[10px] font-extrabold flex items-center justify-center uppercase overflow-hidden shadow-xs"
                         )}
                         title={member.name}
                       >
                         <UserAvatarContents name={member.name} avatarUrl={member.avatar_url} />
                       </span>
                     ))}
-                    {(teamMembersMap[team.team_id] || []).length > 2 && (
+                    {(teamMembersMap[team.team_id] || []).length > 3 && (
                       <span
                         className={cn(
-                          "w-6 h-6 rounded-full border text-[9px] font-bold flex items-center justify-center z-30 shrink-0",
+                          "w-7 h-7 rounded-full border text-[10px] font-bold flex items-center justify-center z-30 shrink-0",
                           isDark ? "bg-white text-black border-[#181a20]" : "bg-black text-white border-white"
                         )}
-                        title={`${(teamMembersMap[team.team_id] || []).length - 2} more members`}
+                        title={`${(teamMembersMap[team.team_id] || []).length - 3} more members`}
                       >
-                        +{(teamMembersMap[team.team_id] || []).length - 2}
+                        +{(teamMembersMap[team.team_id] || []).length - 3}
                       </span>
                     )}
                   </div>
