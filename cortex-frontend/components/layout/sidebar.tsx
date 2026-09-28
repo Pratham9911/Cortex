@@ -21,6 +21,7 @@ interface SidebarProps {
   setIsMobileOpen: (v: boolean) => void
   agentMode?: boolean
   unreadInboxCount?: number
+  unreadNotificationCount?: number
   onOpenSearch?: () => void
 }
 
@@ -48,12 +49,14 @@ function SidebarContent({
   setIsCollapsed,
   setIsMobileOpen,
   unreadInboxCount = 0,
+  unreadNotificationCount = 0,
   onOpenSearch,
 }: {
   isCollapsed: boolean
   setIsCollapsed: (v: boolean) => void
   setIsMobileOpen: (v: boolean) => void
   unreadInboxCount?: number
+  unreadNotificationCount?: number
   onOpenSearch?: () => void
 }) {
   const router = useRouter()
@@ -172,6 +175,7 @@ function SidebarContent({
       Teams: "/teams",
       AuditLogs: "/audit-logs",
       Inbox: "/inbox",
+      Notifications: "/notifications",
       Trash: "/trash",
     }
     const target = routeMap[id]
@@ -230,6 +234,10 @@ function SidebarContent({
       setActive("Inbox")
       return
     }
+    if (pathname.startsWith("/notifications")) {
+      setActive("Notifications")
+      return
+    }
     setActive("Dashboard")
   }, [pathname])
 
@@ -265,8 +273,10 @@ function SidebarContent({
         <span className="min-w-0 flex-1 truncate text-left">{label}</span>
         {badge && (
           <span className={cn(
-            "text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0",
-            badgeBg
+            "shrink-0 text-[10px] font-bold",
+            id === "Notifications" || id === "Inbox"
+              ? "flex size-5 items-center justify-center rounded-full bg-red-500 text-white shadow-sm"
+              : cn("rounded px-1.5 py-0.5", badgeBg)
           )}>
             {badge}
           </span>
@@ -415,7 +425,7 @@ function SidebarContent({
         {/* Inbox + Notifications */}
         <div className="flex flex-col gap-0.5">
           <NavRow id="Inbox" label="Inbox" icon={Inbox} badge={unreadInboxCount > 0 ? String(unreadInboxCount) : undefined} onClick={() => handleNav("Inbox")} />
-          <NavRow id="Notifications" label="Notifications" icon={Bell} badge="15+" onClick={() => handleNav("Notifications")} />
+          <NavRow id="Notifications" label="Notifications" icon={Bell} badge={unreadNotificationCount > 0 ? String(unreadNotificationCount) : undefined} onClick={() => handleNav("Notifications")} />
         </div>
 
         {/* Divider + Menu label */}
@@ -580,7 +590,7 @@ function SidebarContent({
 }
 
 /* ─── Main export ─── */
-export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen, agentMode = false, unreadInboxCount = 0, onOpenSearch }: SidebarProps) {
+export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen, agentMode = false, unreadInboxCount = 0, unreadNotificationCount = 0, onOpenSearch }: SidebarProps) {
   const pathname = usePathname()
   const { theme } = useTheme()
   const [mounted, setMounted] = useState(false)
@@ -633,6 +643,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
             setIsCollapsed={setIsCollapsed}
             setIsMobileOpen={setIsMobileOpen}
             unreadInboxCount={unreadInboxCount}
+            unreadNotificationCount={unreadNotificationCount}
             onOpenSearch={onOpenSearch}
           />
         </div>
@@ -656,7 +667,7 @@ export function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobile
               <X className="w-4 h-4" />
             </button>
             <div className="h-full p-3 overflow-hidden min-h-0" style={{ fontWeight: 400 }}>
-              <SidebarContent isCollapsed={false} setIsCollapsed={() => { }} setIsMobileOpen={setIsMobileOpen} unreadInboxCount={unreadInboxCount} onOpenSearch={onOpenSearch} />
+              <SidebarContent isCollapsed={false} setIsCollapsed={() => { }} setIsMobileOpen={setIsMobileOpen} unreadInboxCount={unreadInboxCount} unreadNotificationCount={unreadNotificationCount} onOpenSearch={onOpenSearch} />
             </div>
           </aside>
         </div>

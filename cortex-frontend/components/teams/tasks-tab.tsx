@@ -138,7 +138,7 @@ function TaskCard({ task, members, isDark, onOpen, onDragStart, onMemberClick, o
     </article>
   )
 }
-export function TasksTab({ isDark, members = [], teamId, canManage = false }: { isDark: boolean; members?: TeamMember[]; teamId: number; canManage?: boolean }) {
+export function TasksTab({ isDark, members = [], teamId, canManage = false, initialTaskId }: { isDark: boolean; members?: TeamMember[]; teamId: number; canManage?: boolean; initialTaskId?: number }) {
   const fallbackMembers: TeamMember[] = [{ user_id: 1, name: "Pratham" }, { user_id: 2, name: "Aarav Kapoor" }, { user_id: 3, name: "Maya Shah" }, { user_id: 4, name: "Isha Patel" }, { user_id: 5, name: "Rohan Mehta" }]
   const people = members.length ? members : fallbackMembers
   const [tasks, setTasks] = useState<Task[]>([])
@@ -190,6 +190,11 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false }: { 
     }
   }
   useEffect(() => { loadTasks() }, [teamId])
+  useEffect(() => {
+    if (initialTaskId && tasks.some((task) => task.id === initialTaskId)) {
+      setSelectedTaskId(initialTaskId)
+    }
+  }, [initialTaskId, tasks])
   const filteredTasks = useMemo(() => tasks.filter((task) => priorityFilter === "ALL" || task.priority === priorityFilter).sort((a, b) => sortBy === "DUE_DATE" ? a.due_date.localeCompare(b.due_date) : ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[a.priority] - { HIGH: 0, MEDIUM: 1, LOW: 2 }[b.priority])), [tasks, priorityFilter, sortBy])
   const moveTask = async (taskId: number, status: TaskStatus) => {
     const task = tasks.find((item) => item.id === taskId)

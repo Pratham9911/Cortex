@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useTheme } from "next-themes"
 import {
   Check,
@@ -123,6 +123,7 @@ function PageUserAvatar({
 
 export default function TeamDetailPage() {
   const params = useParams<{ teamId: string }>()
+  const searchParams = useSearchParams()
   const router = useRouter()
   const { user } = useAuth()
   const { theme } = useTheme()
@@ -667,7 +668,7 @@ export default function TeamDetailPage() {
       {error && <p className="shrink-0 px-5 pt-4 text-sm text-red-400 sm:px-8">{error}</p>}
 
       <div className={cn("relative min-h-0 min-w-0 w-full flex-1 overflow-hidden", activeTab === "Discussions" || activeTab === "Timelines" || activeTab === "Files" || activeTab === "Overview" ? "p-0" : "overflow-y-auto p-5 sm:p-8")}>
-        {activeTab === "Tasks" && <TasksTab isDark={isDark} members={members} teamId={Number(params.teamId)} canManage={currentUserRole === "admin"} />}
+        {activeTab === "Tasks" && <TasksTab isDark={isDark} members={members} teamId={Number(params.teamId)} canManage={currentUserRole === "admin"} initialTaskId={Number(searchParams.get("taskId")) || undefined} />}
         {activeTab === "Discussions" && (
           <DiscussionsTab
             isDark={isDark}

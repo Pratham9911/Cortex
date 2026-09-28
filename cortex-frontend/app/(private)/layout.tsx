@@ -30,6 +30,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
   const [mounted, setMounted] = useState(false)
   const [projectName, setProjectName] = useState("Project")
   const [commandOpen, setCommandOpen] = useState(false)
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
   const preFullPageCollapsedRef = useRef<boolean | null>(null)
   const { theme } = useTheme()
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -46,6 +47,20 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
       setProjectName(selectedProjectName)
     }
   }, [])
+
+  useEffect(() => {
+    const loadNotificationCount = async () => {
+      const token = localStorage.getItem("access_token")
+      const projectId = localStorage.getItem("selected_project_id")
+      if (!token || !projectId) return setNotificationUnreadCount(0)
+      try {
+        const response = await fetch(`${apiUrl}/projects/${projectId}/notifications?unread_only=true`, { headers: { Authorization: `Bearer ${token}` } })
+        const data = await response.json().catch(() => ({}))
+        setNotificationUnreadCount(response.ok ? (data.unread_count || 0) : 0)
+      } catch { setNotificationUnreadCount(0) }
+    }
+    void loadNotificationCount()
+  }, [apiUrl, pathname])
 
   useEffect(() => {
     if (isFullPageRoute) {
@@ -101,6 +116,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
           setIsMobileOpen={setIsMobileOpen}
           agentMode={isFullPageRoute}
           unreadInboxCount={inbox.unreadCount}
+          unreadNotificationCount={notificationUnreadCount}
           onOpenSearch={() => setCommandOpen(true)}
         />
 

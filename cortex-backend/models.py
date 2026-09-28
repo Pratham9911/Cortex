@@ -642,6 +642,30 @@ class InboxMessage(Base):
     )
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.project_id", ondelete="CASCADE"), nullable=False, index=True)
+    team_id = Column(Integer, ForeignKey("teams.team_id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(String(50), nullable=False, default="TASK_ASSIGNED")
+    title = Column(String(150), nullable=False)
+    message = Column(String(250), nullable=False)
+    reference_type = Column(String(50), nullable=False)
+    reference_id = Column(Integer, nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    is_read = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("type = 'TASK_ASSIGNED'", name="ck_notification_type"),
+        CheckConstraint("reference_type = 'TASK'", name="ck_notification_reference_type"),
+        Index("ix_notifications_user_project_read_created", "user_id", "project_id", "is_read", "created_at"),
+    )
+
+
 class UserIntegration(Base):
     __tablename__ = "user_integrations"
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from dependencies import get_current_user
-from models import ProjectMember, Subtask, Task, TaskAssignee, Team, TeamMember, User
+from models import Notification, ProjectMember, Subtask, Task, TaskAssignee, Team, TeamMember, User
 
 
 router = APIRouter(prefix="/projects/{project_id}/teams/{team_id}/tasks", tags=["tasks"])
@@ -200,6 +200,28 @@ def _replace_task_relations(db: Session, task: Task, payload: TaskInput) -> None
     db.add_all([Subtask(task_id=task.id, title=item.title, position=item.position or index) for index, item in enumerate(payload.subtasks, start=1)])
 
 
+def _notify_new_assignees(db: Session, project_id: int, task: Task, actor_id: int, recipient_ids: set[int]) -> None:
+    recipients = recipient_ids - {actor_id}
+    if not recipients:
+        return
+    actor = db.query(User).filter(User.user_id == actor_id).first()
+    actor_name = actor.name if actor else "A project admin"
+    db.add_all([
+        Notification(
+            project_id=project_id,
+            team_id=task.team_id,
+            user_id=recipient_id,
+            type="TASK_ASSIGNED",
+            title=f"{actor_name} assigned you a task",
+            message=task.title,
+            reference_type="TASK",
+            reference_id=task.id,
+            actor_id=actor_id,
+        )
+        for recipient_id in recipients
+    ])
+
+
 @router.get("")
 def list_tasks(
     project_id: int,
@@ -239,6 +261,7 @@ def create_task(project_id: int, team_id: int, payload: TaskInput, user_id: int 
         db.add(task)
         db.flush()
         _replace_task_relations(db, task, payload)
+        _notify_new_assignees(db, project_id, task, user_id, set(payload.assignee_ids))
         if task.status == "DONE" and not _all_subtasks_complete(db, task.id):
             raise HTTPException(status_code=422, detail="Complete every subtask before marking a task done")
         db.commit()
@@ -262,12 +285,14 @@ def get_task(project_id: int, team_id: int, task_id: int, user_id: int = Depends
 def update_task(project_id: int, team_id: int, task_id: int, payload: TaskInput, user_id: int = Depends(get_current_user), db: Session = Depends(get_db)):
     _require_admin(db, project_id, team_id, user_id)
     task = _task_or_404(db, team_id, task_id)
+    previous_assignees = {row[0] for row in db.query(TaskAssignee.user_id).filter(TaskAssignee.task_id == task.id).all()}
     if payload.due_date < date.today() and payload.due_date != task.due_date:
         raise HTTPException(status_code=422, detail="Due date must be today or in the future")
     try:
         task.title, task.description = payload.title, payload.description
         task.status, task.due_date, task.priority, task.tags = payload.status, payload.due_date, payload.priority, payload.tags
         _replace_task_relations(db, task, payload)
+        _notify_new_assignees(db, project_id, task, user_id, set(payload.assignee_ids) - previous_assignees)
         db.flush()
         if task.status == "DONE" and not _all_subtasks_complete(db, task.id):
             raise HTTPException(status_code=422, detail="Complete every subtask before marking a task done")
