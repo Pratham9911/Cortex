@@ -1,15 +1,16 @@
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form
-from sqlalchemy import text
+from sqlalchemy import String, cast, func, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from document_acl import can_download_document, can_search_document, is_owner_override, is_project_owner, is_document_owner
 from dependencies import get_current_user
 from task_queue.ingestion_queue import enqueue_document_ingestion
-from sqlalchemy.sql import func
 from models import User, Project, ProjectMember, Document, DocumentVersion , DocumentChunk , Team , Folder, TeamMember
+from modelmetrics import CortexGlobalMetric, ProjectPack
 from supabase_client import supabase
 from routers.audit import create_audit_log
 from services.audit_service import AuditService
@@ -33,6 +34,103 @@ def safe_filename(name: str):
     name = name.replace(" ", "_")
     name = re.sub(r"[^a-z0-9._-]", "", name)
     return name
+
+
+def _check_project_document_limits(
+    db: Session,
+    project_id: int,
+    incoming_file_size: int,
+    *,
+    creating_document: bool,
+) -> None:
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).with_for_update().first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project_pack = None
+    if project.plan_id is not None:
+        project_pack = db.query(ProjectPack).filter(
+            ProjectPack.id == project.plan_id
+        ).first()
+    if project_pack is None:
+        project_pack = db.query(ProjectPack).filter(
+            func.lower(cast(ProjectPack.name, String)) == "free"
+        ).first()
+    if project_pack is None:
+        raise HTTPException(
+            status_code=500,
+            detail="The Free project plan is not configured.",
+        )
+
+    current_documents = db.query(func.count(Document.document_id)).filter(
+        Document.project_id == project_id
+    ).scalar() or 0
+    current_storage_bytes = db.query(
+        func.coalesce(func.sum(DocumentVersion.file_size), 0)
+    ).join(
+        Document,
+        Document.document_id == DocumentVersion.document_id,
+    ).filter(
+        Document.project_id == project_id,
+    ).scalar() or 0
+    max_storage_bytes = project_pack.max_storage_mb * 1024 * 1024
+
+    if creating_document and current_documents >= project_pack.max_documents:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "DOCUMENT_LIMIT_REACHED",
+                "message": "This project has reached the document limit for its current plan.",
+                "current_documents": current_documents,
+                "max_documents": project_pack.max_documents,
+                "current_storage_bytes": current_storage_bytes,
+                "incoming_file_size": incoming_file_size,
+                "max_storage_mb": project_pack.max_storage_mb,
+                "plan_name": project_pack.name,
+            },
+        )
+
+    if current_storage_bytes + incoming_file_size > max_storage_bytes:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "STORAGE_LIMIT_REACHED",
+                "message": "This upload would exceed the storage limit for the project's current plan.",
+                "current_documents": current_documents,
+                "max_documents": project_pack.max_documents,
+                "current_storage_bytes": current_storage_bytes,
+                "incoming_file_size": incoming_file_size,
+                "max_storage_mb": project_pack.max_storage_mb,
+                "plan_name": project_pack.name,
+            },
+        )
+
+
+def _increment_global_document_upload_metric(db: Session) -> None:
+    latest_metric = db.query(CortexGlobalMetric).order_by(
+        CortexGlobalMetric.metric_date.desc()
+    ).first()
+    metric_insert = insert(CortexGlobalMetric).values(
+        metric_date=func.current_date(),
+        total_projects_created=latest_metric.total_projects_created if latest_metric else 0,
+        total_teams_created=latest_metric.total_teams_created if latest_metric else 0,
+        total_documents_uploaded=(latest_metric.total_documents_uploaded if latest_metric else 0) + 1,
+        total_decisions_made=latest_metric.total_decisions_made if latest_metric else 0,
+        total_ai_requests=latest_metric.total_ai_requests if latest_metric else 0,
+        total_input_tokens=latest_metric.total_input_tokens if latest_metric else 0,
+        total_output_tokens=latest_metric.total_output_tokens if latest_metric else 0,
+    )
+    db.execute(
+        metric_insert.on_conflict_do_update(
+            index_elements=[CortexGlobalMetric.metric_date],
+            set_={
+                "total_documents_uploaded": CortexGlobalMetric.total_documents_uploaded + 1,
+                "updated_at": func.now(),
+            },
+        )
+    )
 
 
 @router.post("/projects/{project_id}/documents/upload")
@@ -220,6 +318,13 @@ async def upload_document(
             detail=f"Failed to read uploaded file: {str(e)}"
         )
 
+    _check_project_document_limits(
+        db,
+        project_id,
+        file_size,
+        creating_document=True,
+    )
+
     # ---------------------------------------------------
     # 9. CREATE DOCUMENT
     # ---------------------------------------------------
@@ -363,7 +468,6 @@ async def upload_document(
         },
         description=f"User {{user:{user_id}}} created document {{document:{new_document.document_id}}}"
     )
-
     # ---------------------------------------------------
     # 14. UPDATE FOLDER
     # ---------------------------------------------------
@@ -385,6 +489,7 @@ async def upload_document(
 
     try:
 
+        _increment_global_document_upload_metric(db)
         db.commit()
 
     except Exception as e:
@@ -746,6 +851,13 @@ async def upload_new_version(
             status_code=500,
             detail=f"Failed to read uploaded file: {str(e)}"
         )
+
+    _check_project_document_limits(
+        db,
+        project_id,
+        file_size,
+        creating_document=False,
+    )
 
     # ============================================================
     # 6. GET NEXT VERSION
@@ -3058,5 +3170,3 @@ def bulk_permanent_delete_document_versions(
         "storage_cleanup_failed_count": storage_cleanup_failed_count,
         "storage_cleanup_failed_paths": storage_cleanup_failed_paths,
     }
-
-

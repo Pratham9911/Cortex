@@ -45,6 +45,11 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/components/auth/protected-route"
+import {
+  DocumentUploadStatusDialogs,
+  parseDocumentPlanLimit,
+  type DocumentPlanLimit,
+} from "@/components/documents/upload-status-dialogs"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -173,6 +178,8 @@ export default function FolderPage() {
   const [isDragOver, setIsDragOver]                     = useState(false)
   const [uploadLoading, setUploadLoading]               = useState(false)
   const [uploadError, setUploadError]                   = useState("")
+  const [uploadLimit, setUploadLimit]                   = useState<DocumentPlanLimit | null>(null)
+  const [uploadComplete, setUploadComplete]             = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Settings panel (doc) ────────────────────────────────────────────────────
@@ -489,14 +496,20 @@ export default function FolderPage() {
         method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form
       })
       if (!res.ok) {
-        const e = await res.json()
-        setUploadVerError(e.detail || "Upload failed")
+        const e = await res.json().catch(() => ({}))
+        const limit = parseDocumentPlanLimit(e.detail)
+        if (limit) {
+          setUploadVersionOpen(false)
+          setUploadLimit(limit)
+        }
+        else setUploadVerError(typeof e.detail === "string" ? e.detail : "Upload failed")
         return
       }
       setUploadVersionOpen(false)
       setUploadVerFile(null)
       fetchDocVersions(selectedDoc.document_id)
       fetchAll()
+      setUploadComplete(true)
     } catch {
       setUploadVerError("Something went wrong")
     } finally {
@@ -565,8 +578,18 @@ export default function FolderPage() {
       const res = await fetch(`${apiUrl}/projects/${projectId}/documents/upload`, {
         method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form
       })
-      if (!res.ok) { const e = await res.json(); setUploadError(e.detail || "Upload failed"); return }
-      setUploadOpen(false); resetUpload(); fetchAll()
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        const limit = parseDocumentPlanLimit(e.detail)
+        if (limit) {
+          setUploadOpen(false)
+          setUploadLimit(limit)
+        } else {
+          setUploadError(typeof e.detail === "string" ? e.detail : "Upload failed")
+        }
+        return
+      }
+      setUploadOpen(false); resetUpload(); fetchAll(); setUploadComplete(true)
     } catch { setUploadError("Something went wrong") } finally { setUploadLoading(false) }
   }
 
@@ -1291,6 +1314,14 @@ export default function FolderPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DocumentUploadStatusDialogs
+        isDark={isDark}
+        limit={uploadLimit}
+        onCloseLimit={() => setUploadLimit(null)}
+        uploadComplete={uploadComplete}
+        onCloseUploadComplete={() => setUploadComplete(false)}
+      />
 
       {/* ══════════════ UPLOAD MODAL ══════════════════════════════════ */}
       <Dialog
