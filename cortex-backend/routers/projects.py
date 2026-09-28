@@ -285,6 +285,62 @@ def update_project(
     db.commit()
     return {"message": "Project updated successfully", "project": {"project_id": project.project_id, "name": project.name}}
 
+
+@router.delete("/projects/{project_id}/leave")
+def leave_project(
+    project_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(
+        Project.project_id == project_id
+    ).with_for_update().first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.created_by == user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Project owner cannot leave the project. Transfer ownership or delete the project instead.",
+        )
+
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id
+    ).with_for_update().first()
+    if not membership:
+        raise HTTPException(
+            status_code=404,
+            detail="You are not a member of this project",
+        )
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    team_memberships = db.query(TeamMember).join(
+        Team,
+        Team.team_id == TeamMember.team_id
+    ).filter(
+        Team.project_id == project_id,
+        TeamMember.user_id == user_id
+    ).all()
+    for team_membership in team_memberships:
+        db.delete(team_membership)
+
+    create_audit_log(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        action="delete",
+        detail=f"{user.name} left project '{project.name}'",
+    )
+    db.delete(membership)
+    db.commit()
+
+    return {"message": "You left the project successfully"}
+
+
 @router.delete("/projects/{project_id}")
 def delete_project(
     project_id: int,
