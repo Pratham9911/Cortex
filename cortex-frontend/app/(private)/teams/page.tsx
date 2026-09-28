@@ -5,6 +5,7 @@ import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
 import {
   CalendarDays,
+  FolderLock,
   Plus,
   Search,
   SlidersHorizontal,
@@ -39,6 +40,12 @@ type TeamMember = {
   user_id: number
   name: string
   avatar_url?: string
+}
+
+type TeamLimit = {
+  currentTeams: number
+  maxTeams: number
+  planName: string
 }
 
 // ----------------------------------------------------------------------
@@ -95,6 +102,7 @@ export default function TeamsPage() {
   const [restrictedTeam, setRestrictedTeam] = useState<Team | null>(null)
   
   const [openCreate, setOpenCreate] = useState(false)
+  const [teamLimit, setTeamLimit] = useState<TeamLimit | null>(null)
   const [creating, setCreating] = useState(false)
   const [teamName, setTeamName] = useState("")
   const [teamDescription, setTeamDescription] = useState("")
@@ -243,7 +251,17 @@ export default function TeamsPage() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
-        throw new Error(data?.detail || "create-failed")
+        const detail = data?.detail
+        if (detail?.code === "TEAM_LIMIT_REACHED") {
+          setOpenCreate(false)
+          setTeamLimit({
+            currentTeams: Number(detail.current_teams) || 0,
+            maxTeams: Number(detail.max_teams) || 0,
+            planName: typeof detail.plan_name === "string" ? detail.plan_name : "Current",
+          })
+          return
+        }
+        throw new Error(typeof detail === "string" ? detail : "Could not create team.")
       }
 
       setOpenCreate(false)
@@ -403,6 +421,59 @@ export default function TeamsPage() {
           <DialogFooter>
             <Button onClick={() => setRestrictedTeam(null)}>Close</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!teamLimit} onOpenChange={(open) => !open && setTeamLimit(null)}>
+        <DialogContent className={cn(
+          "overflow-hidden rounded-2xl p-0 sm:max-w-md",
+          isDark ? "border-zinc-700 bg-[#15171d] text-white" : "border-slate-200 bg-white text-slate-900"
+        )}>
+          <div className={cn(
+            "px-6 pb-5 pt-6",
+            isDark
+              ? "bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent"
+              : "bg-gradient-to-br from-amber-50 via-orange-50/60 to-white"
+          )}>
+            <DialogHeader className="text-left">
+              <div className={cn(
+                "mb-2 flex h-11 w-11 items-center justify-center rounded-xl",
+                isDark ? "bg-amber-400/10 text-amber-300" : "bg-amber-100 text-amber-700"
+              )}>
+                <FolderLock className="h-5 w-5" />
+              </div>
+              <DialogTitle className="text-xl font-bold">Team limit reached</DialogTitle>
+              <DialogDescription className={isDark ? "pt-1 text-zinc-400" : "pt-1 text-slate-600"}>
+                This project’s {teamLimit?.planName} plan includes up to {teamLimit?.maxTeams} teams, including General.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <div className="space-y-4 px-6 pb-6">
+            <div className={cn("rounded-xl border p-4", isDark ? "border-zinc-700 bg-[#101115]" : "border-slate-200 bg-slate-50")}>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className={isDark ? "text-zinc-300" : "text-slate-700"}>Teams in use</span>
+                <span className="font-semibold">{teamLimit?.currentTeams} / {teamLimit?.maxTeams}</span>
+              </div>
+              <div className={cn("h-2 overflow-hidden rounded-full", isDark ? "bg-zinc-800" : "bg-slate-200")}>
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500"
+                  style={{
+                    width: `${teamLimit?.maxTeams
+                      ? Math.min(100, (teamLimit.currentTeams / teamLimit.maxTeams) * 100)
+                      : 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+            <p className={cn("text-sm leading-relaxed", isDark ? "text-zinc-400" : "text-slate-600")}>
+              To create another team, upgrade this project’s plan.
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setTeamLimit(null)}>
+                Got it
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 

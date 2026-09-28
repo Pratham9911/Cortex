@@ -12,7 +12,7 @@ from sqlalchemy import (
     Index,
     Date,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
 from database import Base
@@ -26,6 +26,7 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     password_hash = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("user_packs.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -35,6 +36,7 @@ class Project(Base):
     project_id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     created_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("project_packs.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

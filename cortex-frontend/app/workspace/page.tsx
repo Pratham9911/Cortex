@@ -21,6 +21,7 @@ import {
   Wrench,
   FlaskConical,
   ScrollText,
+  FolderLock,
 } from "lucide-react"
 import { ProtectedRoute, useAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
@@ -67,6 +68,12 @@ type Project = {
   }
 }
 
+type ProjectLimit = {
+  currentProjects: number
+  maxProjects: number
+  planName: string
+}
+
 function WorkspaceContent() {
   const router = useRouter()
   const { user, logout } = useAuth()
@@ -82,6 +89,7 @@ function WorkspaceContent() {
   const [sortBy, setSortBy] = useState<"name" | "recent">("name")
   const [profileOpen, setProfileOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [projectLimit, setProjectLimit] = useState<ProjectLimit | null>(null)
   const [commandOpen, setCommandOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState("")
   const [creating, setCreating] = useState(false)
@@ -172,12 +180,25 @@ function WorkspaceContent() {
         },
         body: JSON.stringify({ name }),
       })
-      if (!res.ok) throw new Error("failed")
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        const detail = data?.detail
+        if (detail?.code === "PROJECT_LIMIT_REACHED") {
+          setCreateOpen(false)
+          setProjectLimit({
+            currentProjects: Number(detail.current_projects) || 0,
+            maxProjects: Number(detail.max_projects) || 0,
+            planName: typeof detail.plan_name === "string" ? detail.plan_name : "Current",
+          })
+          return
+        }
+        throw new Error(typeof detail === "string" ? detail : "Could not create project.")
+      }
       setCreateOpen(false)
       setNewProjectName("")
       await loadProjects()
-    } catch {
-      setError("Could not create project.")
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not create project.")
     } finally {
       setCreating(false)
     }
@@ -453,6 +474,62 @@ function WorkspaceContent() {
           </Card>
         )}
       </section>
+
+      <Dialog open={!!projectLimit} onOpenChange={(open) => !open && setProjectLimit(null)}>
+        <DialogContent className={cn(
+          "overflow-hidden rounded-2xl p-0 sm:max-w-md font-quicksand",
+          isDark ? "border-zinc-700 bg-[#15171d] text-white" : "border-slate-200 bg-white text-slate-900"
+        )}>
+          <div className={cn(
+            "px-6 pt-6 pb-5",
+            isDark
+              ? "bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent"
+              : "bg-gradient-to-br from-amber-50 via-orange-50/60 to-white"
+          )}>
+            <DialogHeader className="text-left">
+              <div className={cn(
+                "mb-2 flex h-11 w-11 items-center justify-center rounded-xl",
+                isDark ? "bg-amber-400/10 text-amber-300" : "bg-amber-100 text-amber-700"
+              )}>
+                <FolderLock className="h-5 w-5" />
+              </div>
+              <DialogTitle className="text-xl font-bold">Project limit reached</DialogTitle>
+              <DialogDescription className={cn("pt-1", isDark ? "text-zinc-400" : "text-slate-600")}>
+                Your {projectLimit?.planName} plan includes up to {projectLimit?.maxProjects} projects.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <div className="space-y-4 px-6 pb-6">
+            <div className={cn("rounded-xl border p-4", isDark ? "border-zinc-700 bg-[#101115]" : "border-slate-200 bg-slate-50")}>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className={isDark ? "text-zinc-300" : "text-slate-700"}>Projects in use</span>
+                <span className="font-semibold">{projectLimit?.currentProjects} / {projectLimit?.maxProjects}</span>
+              </div>
+              <div className={cn("h-2 overflow-hidden rounded-full", isDark ? "bg-zinc-800" : "bg-slate-200")}>
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500"
+                  style={{
+                    width: `${projectLimit?.maxProjects
+                      ? Math.min(100, (projectLimit.currentProjects / projectLimit.maxProjects) * 100)
+                      : 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            <p className={cn("text-sm leading-relaxed", isDark ? "text-zinc-400" : "text-slate-600")}>
+              To create another project, ask a project admin to remove you from one you no longer need, or upgrade your plan.
+            </p>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setProjectLimit(null)}>
+                Got it
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className={cn("sm:max-w-md font-quicksand", isDark ? "border-zinc-700 bg-[#171920] text-white" : "")} style={{ fontWeight: 400 }}>

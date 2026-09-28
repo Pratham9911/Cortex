@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
@@ -13,6 +13,7 @@ from models import (
     Team,
     TeamMember
 )
+from modelmetrics import UserPack
 
 from routers.audit import create_audit_log
 router = APIRouter()
@@ -369,6 +370,42 @@ def accept_project_invite(
             detail="Invite already handled"
         )
 
+    user = db.query(User).filter(
+        User.user_id == user_id
+    ).with_for_update().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user_pack = None
+    if user.plan_id is not None:
+        user_pack = db.query(UserPack).filter(
+            UserPack.id == user.plan_id
+        ).first()
+    if user_pack is None:
+        user_pack = db.query(UserPack).filter(
+            func.lower(cast(UserPack.name, String)) == "free"
+        ).first()
+    if user_pack is None:
+        raise HTTPException(
+            status_code=500,
+            detail="The Free user plan is not configured.",
+        )
+
+    current_project_count = db.query(func.count(ProjectMember.id)).filter(
+        ProjectMember.user_id == user_id
+    ).scalar() or 0
+    if current_project_count >= user_pack.max_projects:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PROJECT_LIMIT_REACHED",
+                "message": "You have reached the project limit for your current plan.",
+                "current_projects": current_project_count,
+                "max_projects": user_pack.max_projects,
+                "plan_name": user_pack.name,
+            },
+        )
+
     # ----------------------------------------
     # Get project
     # ----------------------------------------
@@ -638,6 +675,3 @@ def remove_member_from_project(
     return {
         "message": "Member removed successfully"
     }
-
-
-

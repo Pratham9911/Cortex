@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import String, cast, func, or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert
 
 from database import SessionLocal
 from dependencies import get_current_user
@@ -25,6 +26,7 @@ from models import (
     DiscussionSTM,
     TeamDiscussion,
 )
+from modelmetrics import CortexGlobalMetric, ProjectPack
 
 from routers.audit import create_audit_log
 from routers.teams.discussions.service import delete_team_discussions
@@ -153,7 +155,7 @@ def create_team(
     # ----------------------------------------
     project = db.query(Project).filter(
         Project.project_id == project_id
-    ).first()
+    ).with_for_update().first()
 
     if not project:
         raise HTTPException(
@@ -173,6 +175,36 @@ def create_team(
         raise HTTPException(
             status_code=400,
             detail="Team already exists"
+        )
+
+    project_pack = None
+    if project.plan_id is not None:
+        project_pack = db.query(ProjectPack).filter(
+            ProjectPack.id == project.plan_id
+        ).first()
+    if project_pack is None:
+        project_pack = db.query(ProjectPack).filter(
+            func.lower(cast(ProjectPack.name, String)) == "free"
+        ).first()
+    if project_pack is None:
+        raise HTTPException(
+            status_code=500,
+            detail="The Free project plan is not configured.",
+        )
+
+    current_team_count = db.query(func.count(Team.team_id)).filter(
+        Team.project_id == project_id
+    ).scalar() or 0
+    if current_team_count >= project_pack.max_teams:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "TEAM_LIMIT_REACHED",
+                "message": "This project has reached the team limit for its current plan.",
+                "current_teams": current_team_count,
+                "max_teams": project_pack.max_teams,
+                "plan_name": project_pack.name,
+            },
         )
 
     # ----------------------------------------
@@ -210,6 +242,52 @@ def create_team(
         user_id=user_id,
         action="create",
         detail=f"{user.name} created team '{request.name}'"
+    )
+
+    latest_metric = db.query(CortexGlobalMetric).order_by(
+        CortexGlobalMetric.metric_date.desc()
+    ).first()
+    global_metric_insert = insert(CortexGlobalMetric).values(
+        metric_date=func.current_date(),
+        total_projects_created=latest_metric.total_projects_created if latest_metric else 0,
+        total_teams_created=(latest_metric.total_teams_created if latest_metric else 0) + 1,
+        total_documents_uploaded=latest_metric.total_documents_uploaded if latest_metric else 0,
+        total_decisions_made=latest_metric.total_decisions_made if latest_metric else 0,
+        total_ai_requests=latest_metric.total_ai_requests if latest_metric else 0,
+        total_input_tokens=latest_metric.total_input_tokens if latest_metric else 0,
+        total_output_tokens=latest_metric.total_output_tokens if latest_metric else 0,
+    )
+    db.execute(
+        global_metric_insert.on_conflict_do_update(
+            index_elements=[CortexGlobalMetric.metric_date],
+            set_={
+                "total_teams_created": CortexGlobalMetric.total_teams_created + 1,
+                "updated_at": func.now(),
+            },
+        )
+    )
+
+    latest_metric = db.query(CortexGlobalMetric).order_by(
+        CortexGlobalMetric.metric_date.desc()
+    ).first()
+    global_metric_insert = insert(CortexGlobalMetric).values(
+        metric_date=func.current_date(),
+        total_projects_created=latest_metric.total_projects_created if latest_metric else 0,
+        total_teams_created=(latest_metric.total_teams_created if latest_metric else 0) + 1,
+        total_documents_uploaded=latest_metric.total_documents_uploaded if latest_metric else 0,
+        total_decisions_made=latest_metric.total_decisions_made if latest_metric else 0,
+        total_ai_requests=latest_metric.total_ai_requests if latest_metric else 0,
+        total_input_tokens=latest_metric.total_input_tokens if latest_metric else 0,
+        total_output_tokens=latest_metric.total_output_tokens if latest_metric else 0,
+    )
+    db.execute(
+        global_metric_insert.on_conflict_do_update(
+            index_elements=[CortexGlobalMetric.metric_date],
+            set_={
+                "total_teams_created": CortexGlobalMetric.total_teams_created + 1,
+                "updated_at": func.now(),
+            },
+        )
     )
 
     db.commit()

@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, aliased
-from pydantic import BaseModel, Field
-from sqlalchemy import func, case
+from pydantic import BaseModel, Field, validator
+from sqlalchemy import String, case, cast, func
+from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal
 from routers.audit import create_audit_log
 from models import Project, ProjectMember, User , Team, TeamMember
+from modelmetrics import CortexGlobalMetric, ProjectPack, UserPack
 from dependencies import get_current_user
 
 
@@ -21,66 +23,94 @@ def get_db():
 class CreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
 
+    @validator("name")
+    def validate_name(cls, name: str) -> str:
+        normalized_name = name.strip()
+        if len(normalized_name) < 2:
+            raise ValueError("Project name must be at least 2 characters.")
+        return normalized_name
+
 @router.post("/projects")
 def create_project(
     request: CreateProjectRequest,
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    user = db.query(User).filter(
+        User.user_id == user_id
+    ).with_for_update().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    # ----------------------------------------
-    # Create project
-    # ----------------------------------------
+    user_pack = None
+    if user.plan_id is not None:
+        user_pack = db.query(UserPack).filter(
+            UserPack.id == user.plan_id
+        ).first()
+    if user_pack is None:
+        user_pack = db.query(UserPack).filter(
+            func.lower(cast(UserPack.name, String)) == "free"
+        ).first()
+    if user_pack is None:
+        raise HTTPException(
+            status_code=500,
+            detail="The Free user plan is not configured.",
+        )
+
+    current_project_count = db.query(func.count(ProjectMember.id)).filter(
+        ProjectMember.user_id == user_id
+    ).scalar() or 0
+    if current_project_count >= user_pack.max_projects:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PROJECT_LIMIT_REACHED",
+                "message": "You have reached the project limit for your current plan.",
+                "current_projects": current_project_count,
+                "max_projects": user_pack.max_projects,
+                "plan_name": user_pack.name,
+            },
+        )
+
+    free_project_pack = db.query(ProjectPack).filter(
+        func.lower(cast(ProjectPack.name, String)) == "free"
+    ).first()
+    if not free_project_pack:
+        raise HTTPException(
+            status_code=500,
+            detail="The Free project plan is not configured.",
+        )
+
     new_project = Project(
-        name=request.name,
-        created_by=user_id
+        name=request.name.strip(),
+        created_by=user_id,
+        plan_id=free_project_pack.id,
     )
-
     db.add(new_project)
-    db.commit()
-    db.refresh(new_project)
+    db.flush()
 
-    # ----------------------------------------
-    # Add creator as admin
-    # ----------------------------------------
     project_member = ProjectMember(
         project_id=new_project.project_id,
         user_id=user_id,
         role="admin"
     )
-
     db.add(project_member)
 
-    # ----------------------------------------
-    # Create default "general" team
-    # ----------------------------------------
     general_team = Team(
         project_id=new_project.project_id,
         name="general",
+        description="Default team for this project.",
         created_by=user_id
     )
-
     db.add(general_team)
-    db.commit()
-    db.refresh(general_team)
+    db.flush()
 
-    # ----------------------------------------
-    # Add admin to general team
-    # ----------------------------------------
     general_team_member = TeamMember(
         team_id=general_team.team_id,
         user_id=user_id,
         added_by=user_id
     )
-
     db.add(general_team_member)
-
-    # ----------------------------------------
-    # Audit log
-    # ----------------------------------------
-    user = db.query(User).filter(
-        User.user_id == user_id
-    ).first()
 
     create_audit_log(
         db=db,
@@ -90,10 +120,32 @@ def create_project(
         detail=f"{user.name} created project '{new_project.name}'"
     )
 
-    # ----------------------------------------
-    # Final commit
-    # ----------------------------------------
+    latest_metric = db.query(CortexGlobalMetric).order_by(
+        CortexGlobalMetric.metric_date.desc()
+    ).first()
+    global_metric_insert = insert(CortexGlobalMetric).values(
+        metric_date=func.current_date(),
+        total_projects_created=(latest_metric.total_projects_created if latest_metric else 0) + 1,
+        total_teams_created=(latest_metric.total_teams_created if latest_metric else 0) + 1,
+        total_documents_uploaded=latest_metric.total_documents_uploaded if latest_metric else 0,
+        total_decisions_made=latest_metric.total_decisions_made if latest_metric else 0,
+        total_ai_requests=latest_metric.total_ai_requests if latest_metric else 0,
+        total_input_tokens=latest_metric.total_input_tokens if latest_metric else 0,
+        total_output_tokens=latest_metric.total_output_tokens if latest_metric else 0,
+    )
+    db.execute(
+        global_metric_insert.on_conflict_do_update(
+            index_elements=[CortexGlobalMetric.metric_date],
+            set_={
+                "total_projects_created": CortexGlobalMetric.total_projects_created + 1,
+                "total_teams_created": CortexGlobalMetric.total_teams_created + 1,
+                "updated_at": func.now(),
+            },
+        )
+    )
+
     db.commit()
+    db.refresh(new_project)
 
     return {
         "message": "Project created successfully",
@@ -404,4 +456,3 @@ def delete_project(
     return {
         "message": "Project deleted successfully"
     }
-
