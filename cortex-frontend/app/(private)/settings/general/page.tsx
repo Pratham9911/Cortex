@@ -1,5 +1,5 @@
-import { SettingsPlaceholder } from "@/components/settings/settings-placeholder"
+import ProjectSettingsContent from "@/components/settings/project-settings-content"
 
 export default function GeneralSettingsPage() {
-  return <SettingsPlaceholder title="General" description="General application settings and preferences." />
+  return <ProjectSettingsContent />
 }

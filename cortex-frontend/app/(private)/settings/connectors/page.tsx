@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Search, Plus, X, Check, Zap } from "lucide-react"
+import { X, Check } from "lucide-react"
 
 interface IntegrationStatus {
   id: number
@@ -136,34 +136,14 @@ export default function ConnectorsSettingsPage() {
       description: "GitHub App — choose which repositories Cortex can access",
       icon: "/icons/github.svg",
       type: "Web",
-      custom: false,
       connected: isGitHubConnected,
       email: githubIntegration?.account_email || null,
-    },
-    {
-      id: "tinyfish",
-      name: "TinyFish",
-      icon: null,
-      type: "Web",
-      custom: true,
-      connected: true,
-      email: null,
-    },
-    {
-      id: "gdrive",
-      name: "Google Drive",
-      icon: "/icons/google-drive.svg",
-      type: "Web",
-      custom: false,
-      connected: false,
-      email: null,
     },
     {
       id: "gmail",
       name: "Google Gmail",
       icon: "/icons/gmail.svg",
       type: "Web",
-      custom: false,
       connected: isGmailConnected,
       email: gmailIntegration?.account_email || null,
     },
@@ -188,20 +168,13 @@ export default function ConnectorsSettingsPage() {
 
       <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
         <h2 className="text-xl font-bold text-white">Connectors</h2>
-        <div className="flex items-center gap-2">
-          <button className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800">
-            <Search className="h-4 w-4" />
-          </button>
-          <button className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-medium rounded-lg flex items-center gap-1.5">
-            Add <Plus className="h-3 w-3" />
-          </button>
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800"
+          aria-label="Close connector settings"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -236,15 +209,6 @@ export default function ConnectorsSettingsPage() {
                 <Check className="h-3 w-3" /> Connected
               </span>
             )}
-          </div>
-
-          <div className="bg-[#181a24] border border-zinc-800/80 rounded-xl p-4 flex items-center justify-between shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center overflow-hidden">
-                <img src="/icons/google-drive.svg" alt="Google Drive" className="w-5 h-5 object-contain" />
-              </div>
-              <p className="text-sm font-semibold text-white">Google Drive</p>
-            </div>
           </div>
         </div>
       </div>
@@ -292,22 +256,13 @@ export default function ConnectorsSettingsPage() {
                   <td className="py-3.5 px-4 font-semibold text-white">
                     <div className="flex items-center gap-3">
                       <div className="w-6 h-6 rounded flex items-center justify-center overflow-hidden">
-                        {c.icon ? (
-                          <img src={c.icon} alt={c.name} className="w-4 h-4 object-contain" />
-                        ) : (
-                          <Zap className="w-4 h-4 text-amber-400" />
-                        )}
+                        <img src={c.icon} alt={c.name} className="w-4 h-4 object-contain" />
                       </div>
                       <span>{c.name}</span>
                     </div>
                   </td>
                   <td className="py-3.5 px-4 text-zinc-400">
-                    {c.type}{" "}
-                    {c.custom && (
-                      <span className="ml-1.5 px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded text-[10px]">
-                        Custom
-                      </span>
-                    )}
+                    {c.type}
                   </td>
                   <td className="py-3.5 px-4 text-right">
                     {c.id === "github" ? (
@@ -354,13 +309,7 @@ export default function ConnectorsSettingsPage() {
                           Connect
                         </button>
                       )
-                    ) : c.connected ? (
-                      <span className="text-emerald-400 font-semibold">✓</span>
-                    ) : (
-                      <button className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-white rounded text-xs font-medium">
-                        Connect
-                      </button>
-                    )}
+                    ) : null}
                   </td>
                 </tr>
               ))

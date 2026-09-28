@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import {
   Search, Inbox, Bell, LayoutGrid, BarChart3, LineChart,
   Bot, FileText, Building2, Trash2, Sparkles,
-  Sliders, Moon, Sun, Palette, HelpCircle, ChevronsUpDown,
+  Sliders, Moon, Sun, HelpCircle, ChevronsUpDown,
   PanelLeftClose, PanelLeftOpen, LogOut, User, X, Settings, ClipboardList,
   ChevronRight,
 } from "lucide-react"
@@ -485,53 +485,64 @@ function SidebarContent({
                   icon={isDark ? Sun : Moon}
                   onClick={() => setTheme(isDark ? "light" : "dark")}
                 />
-                <NavRow id="Themes" label="Themes" icon={Palette} />
                 <NavRow id="Help" label="Help" icon={HelpCircle} />
               </div>
 
               {isPro ? (
                 <div className={cn(
-                  "mx-1.5 mb-1.5 flex items-center gap-2 rounded-lg border px-3 py-2.5",
-                  isDark ? "border-violet-400/40 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/10" : "border-violet-300 bg-gradient-to-r from-violet-100 to-fuchsia-50"
+                  "mx-2 my-2 rounded-xl border p-3",
+                  isDark
+                    ? "border-violet-300/20 bg-gradient-to-br from-[#262b47] to-[#1d2030]"
+                    : "border-[#d8ddeb] bg-gradient-to-br from-[#e4e8f8] to-[#f5f6fb]"
                 )}>
-                  <span className={cn(
-                    "flex size-7 items-center justify-center rounded-lg",
-                    isDark ? "bg-violet-400/20 text-violet-200" : "bg-violet-200 text-violet-800"
-                  )}>
-                    <Sparkles className="size-3.5" />
-                  </span>
-                  <span>
-                    <span className="block text-[9px] font-bold uppercase tracking-widest text-zinc-500">Current plan</span>
-                    <span className={cn("block text-xs font-extrabold tracking-wide", isDark ? "text-white" : "text-violet-950")}>PRO</span>
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className={cn(
+                      "flex size-10 shrink-0 items-center justify-center rounded-full border",
+                      isDark ? "border-violet-200/40 bg-[#f8f9ff] text-indigo-600" : "border-[#b9c5e4] bg-white text-indigo-600"
+                    )}>
+                      <Sparkles className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className={cn("block text-xs", isDark ? "text-zinc-300" : "text-slate-700")}>Current plan:</span>
+                      <span className={cn("block truncate text-sm font-semibold", isDark ? "text-white" : "text-slate-900")}>PRO</span>
+                    </span>
+                  </div>
                 </div>
               ) : (
                 <div className={cn(
-                  "mx-1.5 mb-1.5 rounded-lg border p-3",
-                  isDark ? "border-violet-400/30 bg-gradient-to-br from-violet-500/15 via-indigo-500/10 to-[#1e1e2e]" : "border-violet-200 bg-gradient-to-br from-violet-50 via-indigo-50 to-white"
+                  "mx-2 my-2 rounded-xl border p-3",
+                  isDark
+                    ? "border-violet-300/20 bg-gradient-to-br from-[#262b47] to-[#1d2030]"
+                    : "border-[#d8ddeb] bg-gradient-to-br from-[#e4e8f8] to-[#f5f6fb]"
                 )}>
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-lg bg-violet-500/15 p-1.5">
-                      <Sparkles className="size-3 text-violet-500" />
-                    </div>
-                    <div>
-                      <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Current plan</p>
-                      <p className={cn("text-[11px] font-extrabold", isDark ? "text-white" : "text-zinc-900")}>{planName}</p>
-                    </div>
+                  <div className="flex items-center gap-3">
+                    <span className={cn(
+                      "flex size-10 shrink-0 items-center justify-center rounded-full border",
+                      isDark ? "border-violet-200/40 bg-[#f8f9ff] text-indigo-600" : "border-[#b9c5e4] bg-white text-indigo-600"
+                    )}>
+                      <Sparkles className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className={cn("block text-xs", isDark ? "text-zinc-300" : "text-slate-700")}>Current plan:</span>
+                      <span className={cn("block truncate text-sm font-semibold", isDark ? "text-white" : "text-slate-900")}>{planName}</span>
+                    </span>
                   </div>
+                  <p className={cn("mt-3 text-sm leading-5", isDark ? "text-zinc-300" : "text-slate-700")}>
+                    Upgrade to Pro to get the latest and exclusive features
+                  </p>
                   <button
                     onClick={() => {
                       router.push("/settings/billing")
                       setProfileOpen(false)
                     }}
                     className={cn(
-                      "mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all",
+                      "mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg border text-sm font-semibold shadow-sm transition-colors",
                       isDark
-                        ? "border-violet-300/30 bg-violet-500 text-white shadow-md shadow-violet-950/30 hover:bg-violet-400"
-                        : "border-violet-700 bg-violet-700 text-white shadow-md shadow-violet-200 hover:bg-violet-800"
+                        ? "border-zinc-600 bg-[#f8f9ff] text-zinc-900 hover:bg-white"
+                        : "border-[#d2d5dc] bg-white text-slate-900 hover:bg-slate-50"
                     )}
                   >
-                    <Sparkles className="size-3" /> Upgrade to Pro
+                    <Sparkles className="size-4 text-indigo-600" /> Upgrade to Pro
                   </button>
                 </div>
               )}
@@ -593,7 +604,7 @@ function SidebarContent({
                 </span>
                 {isCollapsed && (
                   <span className={cn(
-                    "absolute -bottom-1 -right-1 rounded px-1 text-[7px] font-extrabold uppercase leading-3 ring-2",
+                    "absolute -bottom-0.5 -right-1 rounded-sm px-1 text-[6px] font-bold uppercase leading-[10px] ring-1",
                     isPro
                       ? isDark ? "bg-violet-500 text-white ring-[#121215]" : "bg-violet-700 text-white ring-[#f7f7f8]"
                       : isDark ? "bg-zinc-700 text-zinc-100 ring-[#121215]" : "bg-zinc-200 text-zinc-800 ring-[#f7f7f8]"
@@ -609,7 +620,7 @@ function SidebarContent({
                   {user?.name ?? "Cortex User"}
                 </span>
                 <span className={cn(
-                  "mt-0.5 w-fit rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider",
+                  "mt-0.5 w-fit rounded-sm px-1 py-0.5 text-[8px] font-bold uppercase leading-none tracking-wide",
                   isPro
                     ? isDark ? "bg-violet-500 text-white" : "bg-violet-700 text-white"
                     : isDark ? "bg-zinc-800 text-zinc-300" : "bg-zinc-100 text-zinc-600"
