@@ -1,7 +1,8 @@
 
 import json
 import asyncio
-from typing import Optional
+from contextlib import contextmanager
+from typing import Generator, Optional, TypedDict
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -14,16 +15,49 @@ from rag.retriever import (
     hybrid_search_with_rerank
 )
 from database import SessionLocal
-from rag.generator import generate_answer
+from rag.generator import generate_answer_with_usage
 from rag.agents.answer_validator import validate_answer
 from rag.orchestrator import run_pipeline
 from rag.evaluator import run_evaluation
 from models import ProjectMember, TeamMember
+from services.ai_usage import finish_ai_request, reserve_ai_request
 
 
 from rag.agents.intent import detect_intent
 
 router = APIRouter()
+
+
+class AIRequestUsage(TypedDict):
+    succeeded: bool
+    input_tokens: int
+    output_tokens: int
+
+
+@contextmanager
+def _tracked_ai_request(
+    db: Session,
+    user_id: int,
+    project_id: int,
+) -> Generator[AIRequestUsage, None, None]:
+    usage_date = reserve_ai_request(db, user_id, project_id)
+    usage: AIRequestUsage = {
+        "succeeded": False,
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }
+    try:
+        yield usage
+    finally:
+        finish_ai_request(
+            db,
+            user_id,
+            project_id,
+            usage_date,
+            succeeded=usage["succeeded"],
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+        )
 
 
 class ProjectAskRequest(BaseModel):
@@ -63,24 +97,28 @@ def sementic_search_route(
             ).all()
         ]
 
-        chunks = semantic_search(
-            query,
-            project_id,
-            user_id,
-            membership.role,
-            user_team_ids,
-            db
-        )
+        with _tracked_ai_request(db, user_id, project_id) as usage:
+            chunks = semantic_search(
+                query,
+                project_id,
+                user_id,
+                membership.role,
+                user_team_ids,
+                db
+            )
 
-        answer = generate_answer(query, chunks)
+            answer, token_usage = generate_answer_with_usage(query, chunks)
+            usage["input_tokens"] = token_usage["input_tokens"]
+            usage["output_tokens"] = token_usage["output_tokens"]
+            usage["succeeded"] = True
 
-        return {
-            "project_id": project_id,
-            "query": query,
-            "retrieved_chunks": len(chunks),
-            "answer": answer,
-            "chunks": chunks
-        }
+            return {
+                "project_id": project_id,
+                "query": query,
+                "retrieved_chunks": len(chunks),
+                "answer": answer,
+                "chunks": chunks
+            }
     
 
 @router.post("/projects/{project_id}/keyword-search")
@@ -184,23 +222,27 @@ def ask_route_reranked(
             raise HTTPException(status_code=403, detail="Access denied")
 
         
-        chunks = hybrid_search_with_rerank(
-            request.query,
-            project_id,
-            user_id,
-            membership.role,
-            db,
-            document_ids=request.document_ids
-         )
+        with _tracked_ai_request(db, user_id, project_id) as usage:
+            chunks = hybrid_search_with_rerank(
+                request.query,
+                project_id,
+                user_id,
+                membership.role,
+                db,
+                document_ids=request.document_ids
+             )
 
-        answer = generate_answer(request.query, chunks)
-        return {
-            "project_id": project_id,
-            "query": request.query,
-            "reranked_chunks": len(chunks),
-            "answer": answer,
-            "chunks": chunks
-        }
+            answer, token_usage = generate_answer_with_usage(request.query, chunks)
+            usage["input_tokens"] = token_usage["input_tokens"]
+            usage["output_tokens"] = token_usage["output_tokens"]
+            usage["succeeded"] = True
+            return {
+                "project_id": project_id,
+                "query": request.query,
+                "reranked_chunks": len(chunks),
+                "answer": answer,
+                "chunks": chunks
+            }
 
 @router.post("/projects/{project_id}/ask-hybrid")
 def ask_route_hybrid(
@@ -223,27 +265,27 @@ def ask_route_hybrid(
         )
 
     # Hybrid Search (Semantic + Keyword + RRF)
-    chunks = hybrid_search(
-        query=request.query,
-        project_id=project_id,
-        user_id=user_id,
-        user_role=membership.role,
-        db=db,
-        document_ids=request.document_ids
-    )
+    with _tracked_ai_request(db, user_id, project_id) as usage:
+        chunks = hybrid_search(
+            query=request.query,
+            project_id=project_id,
+            user_id=user_id,
+            user_role=membership.role,
+            db=db,
+            document_ids=request.document_ids
+        )
 
-    # Generate answer
-    answer = generate_answer(request.query, chunks)
-
-   
-
-    return {
-        "project_id": project_id,
-        "query": request.query,
-        "retrieved_chunks": len(chunks),
-        "answer": answer,
-        "chunks": chunks
-    }
+        answer, token_usage = generate_answer_with_usage(request.query, chunks)
+        usage["input_tokens"] = token_usage["input_tokens"]
+        usage["output_tokens"] = token_usage["output_tokens"]
+        usage["succeeded"] = True
+        return {
+            "project_id": project_id,
+            "query": request.query,
+            "retrieved_chunks": len(chunks),
+            "answer": answer,
+            "chunks": chunks
+        }
 
 
 @router.post("/projects/{project_id}/ask")
@@ -268,11 +310,15 @@ def ask_route(
             detail="Access denied"
         )
 
+    usage_date = reserve_ai_request(db, user_id, project_id)
+
     # ----------------------------------------
     # SSE Event Generator
     # ----------------------------------------
     def event_generator():
-
+        usage_succeeded = False
+        input_tokens = 0
+        output_tokens = 0
         try:
 
             for event in run_pipeline(
@@ -283,6 +329,9 @@ def ask_route(
                 db=db,
                 document_ids=request.document_ids
             ):
+                if event.get("type") == "final":
+                    input_tokens = max(input_tokens, int(event.get("input_tokens") or 0))
+                    output_tokens = max(output_tokens, int(event.get("output_tokens") or 0))
 
                 yield (
                     f"data: "
@@ -295,6 +344,7 @@ def ask_route(
                 "event: done\n"
                 "data: complete\n\n"
             )
+            usage_succeeded = True
 
         except Exception as e:
 
@@ -307,6 +357,16 @@ def ask_route(
                 f"data: "
                 f"{json.dumps(error_event)}"
                 f"\n\n"
+            )
+        finally:
+            finish_ai_request(
+                db,
+                user_id,
+                project_id,
+                usage_date,
+                succeeded=usage_succeeded,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
 
     # ----------------------------------------
@@ -472,6 +532,7 @@ async def run_agent(
     if not membership:
         raise HTTPException(status_code=403, detail="Access denied to this project")
 
+    usage_date = reserve_ai_request(db, user_id, project_id)
     user_role = membership.role
     thread_id = str(uuid4())
     config = {"configurable": {"thread_id": thread_id}}
@@ -500,24 +561,25 @@ async def run_agent(
         output_tokens = 0
         pending_events = []
         is_interrupted = False
+        usage_succeeded = False
 
         def sub_event_emitter(event_type: str, *args, **data):
             agent_val = data.pop("agent", None) or (args[0] if args else "main")
             pending_events.append((event_type, {"agent": agent_val, **data}))
 
-        yield emit("agent_started", agent="main", thread_id=thread_id)
-
-        set_active_event_callback(sub_event_emitter)
-        set_active_project_context(
-            project_id=project_id,
-            user_id=user_id,
-            user_role=user_role,
-            db=stream_db,
-            thread_id=thread_id,
-            document_ids=document_ids,
-        )
-
         try:
+            yield emit("agent_started", agent="main", thread_id=thread_id)
+
+            set_active_event_callback(sub_event_emitter)
+            set_active_project_context(
+                project_id=project_id,
+                user_id=user_id,
+                user_role=user_role,
+                db=stream_db,
+                thread_id=thread_id,
+                document_ids=document_ids,
+            )
+
             workflow = main_graph.workflow or main_graph.build_workflow()
             async for stream_kind, stream_value, stream_data in _stream_workflow(
                 workflow, initial_state, config=config
@@ -568,15 +630,28 @@ async def run_agent(
                         output_tokens = node_update.get("output_tokens", output_tokens)
 
                 if is_interrupted:
+                    usage_succeeded = True
                     return
 
             # Workflow completed without interruption -> cleanup checkpoint
             delete_checkpoint(thread_id, stream_db)
+            usage_succeeded = True
 
         finally:
             set_active_event_callback(None)
             set_active_project_context(None)
-            stream_db.close()
+            try:
+                finish_ai_request(
+                    stream_db,
+                    user_id,
+                    project_id,
+                    usage_date,
+                    succeeded=usage_succeeded,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            finally:
+                stream_db.close()
 
         yield emit(
             "agent_completed",
@@ -619,6 +694,7 @@ async def resume_agent(
     if not membership:
         raise HTTPException(status_code=403, detail="Access denied to this project")
 
+    usage_date = reserve_ai_request(db, user_id, project_id)
     user_role = membership.role
     config = {"configurable": {"thread_id": thread_id}}
     resume_payload = {"action": decision, "feedback": feedback or ""}
@@ -632,25 +708,26 @@ async def resume_agent(
         output_tokens = 0
         pending_events = []
         is_interrupted = False
+        usage_succeeded = False
 
         def sub_event_emitter(event_type: str, *args, **data):
             agent_val = data.pop("agent", None) or (args[0] if args else "main")
             pending_events.append((event_type, {"agent": agent_val, **data}))
 
-        yield emit("agent_resumed", agent="main", thread_id=thread_id, decision=decision, feedback=feedback)
-
-        set_active_event_callback(sub_event_emitter)
-        set_active_project_context(
-            project_id=project_id,
-            user_id=user_id,
-            user_role=user_role,
-            db=stream_db,
-            thread_id=thread_id,
-            resume_action=decision,
-            resume_feedback=feedback or "",
-        )
-
         try:
+            yield emit("agent_resumed", agent="main", thread_id=thread_id, decision=decision, feedback=feedback)
+
+            set_active_event_callback(sub_event_emitter)
+            set_active_project_context(
+                project_id=project_id,
+                user_id=user_id,
+                user_role=user_role,
+                db=stream_db,
+                thread_id=thread_id,
+                resume_action=decision,
+                resume_feedback=feedback or "",
+            )
+
             workflow = main_graph.workflow or main_graph.build_workflow()
             async for stream_kind, stream_value, stream_data in _stream_workflow(
                 workflow, Command(resume=resume_payload), config=config
@@ -701,15 +778,28 @@ async def resume_agent(
                         output_tokens = node_update.get("output_tokens", output_tokens)
 
                 if is_interrupted:
+                    usage_succeeded = True
                     return
 
             # Workflow completed -> cleanup checkpointer
             delete_checkpoint(thread_id, stream_db)
+            usage_succeeded = True
 
         finally:
             set_active_event_callback(None)
             set_active_project_context(None)
-            stream_db.close()
+            try:
+                finish_ai_request(
+                    stream_db,
+                    user_id,
+                    project_id,
+                    usage_date,
+                    succeeded=usage_succeeded,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            finally:
+                stream_db.close()
 
         yield emit(
             "agent_completed",
@@ -732,10 +822,5 @@ async def resume_agent(
             "X-Accel-Buffering": "no",
         },
     )
-
-
-
-
-
 
 

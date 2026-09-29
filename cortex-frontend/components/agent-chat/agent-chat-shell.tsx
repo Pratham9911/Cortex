@@ -56,6 +56,16 @@ export function AgentChatShell() {
   const [isChatsLoading, setIsChatsLoading] = useState(true)
   const [loadingChatId, setLoadingChatId] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
+  const [aiQuota, setAiQuota] = useState<{
+    can_request: boolean
+    request_count: number
+    request_limit: number
+    total_tokens: number
+    token_limit: number
+    token_reserve: number
+    limit_reason: string | null
+  } | null>(null)
+  const [aiQuotaError, setAiQuotaError] = useState("")
   const [executionChatId, setExecutionChatId] = useState<string | null>(null)
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([])
   const [promptPoolIndex] = useState(0)
@@ -81,6 +91,37 @@ export function AgentChatShell() {
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  const refreshAiQuota = useCallback(async () => {
+    const projectId = selectedProjectId()
+    const token = localStorage.getItem("access_token") || localStorage.getItem("token")
+    if (!projectId || !token) {
+      setAiQuota(null)
+      setAiQuotaError("")
+      return
+    }
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/me/ai-usage?project_id=${projectId}`,
+        { headers: { Authorization: ["Bearer", token].join(" ") }, cache: "no-store" }
+      )
+      if (!response.ok) throw new Error("Could not load AI usage.")
+      const data = await response.json().catch(() => null)
+      if (response.ok && typeof data?.can_request === "boolean") {
+        setAiQuota(data)
+        setAiQuotaError("")
+      } else {
+        throw new Error("AI usage response was invalid.")
+      }
+    } catch {
+      setAiQuota(null)
+      setAiQuotaError("Unable to check your daily AI usage. Please try again.")
+    }
+  }, [])
+
+  useEffect(() => {
+    if (mounted) void refreshAiQuota()
+  }, [mounted, refreshAiQuota])
 
   useEffect(() => {
     if (!isThinking) return
@@ -329,6 +370,12 @@ export function AgentChatShell() {
 
       const projectId = selectedProjectId()
       if (!projectId) return
+      if (!aiQuota) {
+        setAiQuotaError("Checking your daily AI usage. Please try again in a moment.")
+        await refreshAiQuota()
+        return
+      }
+      if (aiQuota && !aiQuota.can_request) return
 
       const isAgent = forceIsAgent ?? isAgentMode
 
@@ -521,8 +568,10 @@ export function AgentChatShell() {
         })
 
         await refreshChats()
+        await refreshAiQuota()
 
       } catch (error) {
+        await refreshAiQuota()
         if (error instanceof Error && error.name === "AbortError") {
           const cancelledMessage = optimisticAssistantMessage(
             "⚠️ *Execution stopped by user.*",
@@ -565,7 +614,7 @@ export function AgentChatShell() {
         agentActivitiesRef.current = []
       }
     },
-    [activeChat, activeChatId, executionChatId, isAgentMode, isThinking, refreshChats, replaceChatMessages, selectedDocs]
+    [activeChat, activeChatId, aiQuota, executionChatId, isAgentMode, isThinking, refreshAiQuota, refreshChats, replaceChatMessages, selectedDocs]
   )
 
   const handleHITLResponse = useCallback(
@@ -573,6 +622,19 @@ export function AgentChatShell() {
       if (!hitlPermission || !activeChat) return
       const projectId = selectedProjectId()
       if (!projectId) return
+      if (!aiQuota) {
+        setAiQuotaError("Checking your daily AI usage. Please try again in a moment.")
+        await refreshAiQuota()
+        return
+      }
+      if (!aiQuota.can_request) {
+        setAiQuotaError(
+          aiQuota.limit_reason === "request_limit"
+            ? "Your daily AI request limit has been reached."
+            : "Your daily AI token limit has been reached."
+        )
+        return
+      }
 
       const controller = new AbortController()
       abortControllerRef.current = controller
@@ -737,6 +799,7 @@ export function AgentChatShell() {
         }
         console.error("HITL resume error", e)
       } finally {
+        await refreshAiQuota()
         setIsThinking(false)
         setExecutionChatId(null)
         setThinkingEvents([])
@@ -744,7 +807,7 @@ export function AgentChatShell() {
         agentActivitiesRef.current = []
       }
     },
-    [activeChat, hitlPermission, refreshChats, replaceChatMessages]
+    [activeChat, aiQuota, hitlPermission, refreshAiQuota, refreshChats, replaceChatMessages]
   )
 
   return (
@@ -788,6 +851,15 @@ export function AgentChatShell() {
         elapsedSeconds={elapsedSeconds}
         hitlPermission={hitlPermission}
         onHITLResponse={(decision, feedback) => void handleHITLResponse(decision, feedback)}
+        aiQuotaReached={aiQuota !== null && !aiQuota.can_request}
+        aiQuotaMessage={
+          aiQuotaError ||
+          (aiQuota?.limit_reason === "request_limit"
+            ? "Your daily AI request limit has been reached."
+            : aiQuota?.limit_reason === "token_limit"
+              ? "Your daily AI token limit has been reached."
+              : undefined)
+        }
         isMessagesLoading={Boolean(activeChatId && loadingChatId === activeChatId)}
         onStop={handleStop}
         projectId={selectedProjectId() || 1}
@@ -798,4 +870,3 @@ export function AgentChatShell() {
     </div>
   )
 }
-

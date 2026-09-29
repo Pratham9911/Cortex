@@ -231,7 +231,14 @@ export async function streamChatAsk(
 
   if (!response.ok || !response.body) {
     const data = await response.json().catch(() => null)
-    throw new Error(data?.detail || response.statusText)
+    const detail = data?.detail
+    throw new Error(
+      typeof detail === "string"
+        ? detail
+        : typeof detail?.message === "string"
+          ? detail.message
+          : response.statusText
+    )
   }
 
   const reader = response.body.getReader()
@@ -323,4 +330,3 @@ export async function streamResumeAgent(
     }
   }
 }
-

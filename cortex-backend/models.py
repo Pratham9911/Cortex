@@ -1,5 +1,6 @@
 from sqlalchemy import (
     Column,
+    Computed,
     Integer,
     BigInteger,
     String,
@@ -54,6 +55,46 @@ class ProjectMember(Base):
 
     __table_args__ = (
         UniqueConstraint("project_id", "user_id", name="uq_project_user"),
+    )
+
+
+class AiUsageDaily(Base):
+    __tablename__ = "ai_usage_daily"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    usage_date = Column(Date, nullable=False)
+    request_count = Column(Integer, nullable=False, default=0, server_default="0")
+    successful_requests = Column(Integer, nullable=False, default=0, server_default="0")
+    failed_requests = Column(Integer, nullable=False, default=0, server_default="0")
+    input_tokens = Column(BigInteger, nullable=False, default=0, server_default="0")
+    output_tokens = Column(BigInteger, nullable=False, default=0, server_default="0")
+    total_tokens = Column(
+        BigInteger,
+        Computed("input_tokens + output_tokens", persisted=True),
+        nullable=False,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "project_id", "usage_date", name="uq_ai_usage_user_project_date"),
+        CheckConstraint("request_count >= 0", name="ck_ai_usage_requests_nonnegative"),
+        CheckConstraint("successful_requests >= 0", name="ck_ai_usage_success_nonnegative"),
+        CheckConstraint("failed_requests >= 0", name="ck_ai_usage_failed_nonnegative"),
+        CheckConstraint("input_tokens >= 0", name="ck_ai_usage_input_nonnegative"),
+        CheckConstraint("output_tokens >= 0", name="ck_ai_usage_output_nonnegative"),
     )
 
 

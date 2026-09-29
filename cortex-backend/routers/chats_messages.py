@@ -34,6 +34,7 @@ from agentic.memory.short_term.stm_db import (
     extract_summary_text,
     check_and_summarize_db,
 )
+from services.ai_usage import finish_ai_request, reserve_ai_request
 
 
 router = APIRouter()
@@ -703,23 +704,36 @@ async def ask_chat(
             detail="Query is required"
         )
 
-    existing_user_messages = db.query(Message).filter(
-        Message.chat_id == chat.chat_id,
-        Message.role == "user"
-    ).count()
+    usage_date = reserve_ai_request(db, user_id, chat.project_id)
 
-    user_message = Message(
-        chat_id=chat.chat_id,
-        role="user",
-        content=query
-    )
-    db.add(user_message)
+    try:
+        existing_user_messages = db.query(Message).filter(
+            Message.chat_id == chat.chat_id,
+            Message.role == "user"
+        ).count()
 
-    if existing_user_messages == 0 and not chat.title:
-        chat.title = _title_from_query(query)
+        user_message = Message(
+            chat_id=chat.chat_id,
+            role="user",
+            content=query
+        )
+        db.add(user_message)
 
-    chat.updated_at = func.now()
-    db.commit()
+        if existing_user_messages == 0 and not chat.title:
+            chat.title = _title_from_query(query)
+
+        chat.updated_at = func.now()
+        db.commit()
+    except Exception:
+        db.rollback()
+        finish_ai_request(
+            db,
+            user_id,
+            chat.project_id,
+            usage_date,
+            succeeded=False,
+        )
+        raise
 
     is_agent = bool(request.is_agent)
     start_time = time.time()
@@ -730,6 +744,9 @@ async def ask_chat(
         web_sources = []
         document_chunks = []
         activities = []
+        usage_input_tokens = 0
+        usage_output_tokens = 0
+        usage_succeeded = False
 
         try:
             # Check and load short-term memory
@@ -766,6 +783,8 @@ async def ask_chat(
                         final_intent = event.get("intent") or final_intent
                         input_tokens = event.get("input_tokens", input_tokens) or 0
                         output_tokens = event.get("output_tokens", output_tokens) or 0
+                        usage_input_tokens = max(usage_input_tokens, int(input_tokens))
+                        usage_output_tokens = max(usage_output_tokens, int(output_tokens))
                         total_tokens = event.get("total_tokens")
                         if total_tokens is None:
                             total_tokens = input_tokens + output_tokens
@@ -802,6 +821,7 @@ async def ask_chat(
                 db.add(assistant_message)
                 chat.updated_at = func.now()
                 db.commit()
+                usage_succeeded = True
 
                 # Post-response memory check & compaction
                 check_and_summarize_db(db, chat.chat_id)
@@ -912,6 +932,8 @@ async def ask_chat(
                                     final_answer = answer
                                 input_tokens = node_update.get("input_tokens", input_tokens)
                                 output_tokens = node_update.get("output_tokens", output_tokens)
+                                usage_input_tokens = max(usage_input_tokens, int(input_tokens or 0))
+                                usage_output_tokens = max(usage_output_tokens, int(output_tokens or 0))
 
                                 if reasoning:
                                     activities.append({"agent": "main", "kind": "thought", "content": reasoning})
@@ -937,6 +959,10 @@ async def ask_chat(
                                     web_sources = sources
                                 if chunks:
                                     document_chunks = chunks
+                                input_tokens = node_update.get("input_tokens", input_tokens)
+                                output_tokens = node_update.get("output_tokens", output_tokens)
+                                usage_input_tokens = max(usage_input_tokens, int(input_tokens or 0))
+                                usage_output_tokens = max(usage_output_tokens, int(output_tokens or 0))
 
                         if is_interrupted:
                             return
@@ -972,6 +998,7 @@ async def ask_chat(
                 db.add(assistant_message)
                 chat.updated_at = func.now()
                 db.commit()
+                usage_succeeded = True
 
                 # Post-response memory check & compaction
                 check_and_summarize_db(db, chat.chat_id)
@@ -1022,6 +1049,16 @@ async def ask_chat(
             }
 
             yield f"data: {json.dumps(error_event)}\n\n"
+        finally:
+            finish_ai_request(
+                db,
+                user_id,
+                chat.project_id,
+                usage_date,
+                succeeded=usage_succeeded,
+                input_tokens=usage_input_tokens,
+                output_tokens=usage_output_tokens,
+            )
 
     return StreamingResponse(
         event_generator(),
@@ -1031,4 +1068,3 @@ async def ask_chat(
             "Connection": "keep-alive"
         }
     )
-

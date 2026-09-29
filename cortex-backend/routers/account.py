@@ -11,6 +11,7 @@ from database import SessionLocal
 from dependencies import get_current_user
 from agentic.email.oauth_state import invalidate_user_states
 from models import (
+    AiUsageDaily,
     Chat,
     ChatHistory,
     AuditLog,
@@ -168,6 +169,9 @@ def delete_my_account(
             )
 
         db.query(TaskAssignee).filter(TaskAssignee.user_id == user_id).delete(
+            synchronize_session=False
+        )
+        db.query(AiUsageDaily).filter(AiUsageDaily.user_id == user_id).delete(
             synchronize_session=False
         )
         db.query(DecisionParticipant).filter(

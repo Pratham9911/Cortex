@@ -116,6 +116,8 @@ async def run_discussion_agent(
                 sources = node_update.get("sources", [])
                 chunks = node_update.get("chunks", [])
                 proposal = node_update.get("decision_proposal")
+                input_tokens = node_update.get("input_tokens", input_tokens)
+                output_tokens = node_update.get("output_tokens", output_tokens)
                 if sources:
                     final_sources = sources
                 if chunks:

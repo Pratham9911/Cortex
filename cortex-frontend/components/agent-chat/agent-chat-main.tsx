@@ -36,6 +36,8 @@ type AgentChatMainProps = {
   selectedDocs?: ProjectDocumentItem[]
   onSelectDocs?: (docs: ProjectDocumentItem[]) => void
   onRemoveDoc?: (docId: number) => void
+  aiQuotaReached?: boolean
+  aiQuotaMessage?: string
 }
 
 function ThreadSkeleton({ isDark }: { isDark: boolean }) {
@@ -95,6 +97,8 @@ export function AgentChatMain({
   selectedDocs = [],
   onSelectDocs,
   onRemoveDoc,
+  aiQuotaReached = false,
+  aiQuotaMessage,
 }: AgentChatMainProps) {
   return (
     <div
@@ -171,7 +175,7 @@ export function AgentChatMain({
         <AgentWelcomeView
           prompts={prompts}
           onSend={(text) => onSend(text, isAgentMode)}
-          disabled={isThinking}
+          disabled={isThinking || aiQuotaReached}
           isDark={isDark}
         />
       ) : (
@@ -193,10 +197,21 @@ export function AgentChatMain({
         />
       )}
 
+      {aiQuotaMessage && (
+        <p
+          role="status"
+          className={cn(
+            "mx-10 mb-1 text-xs",
+            isDark ? "text-amber-300" : "text-amber-700"
+          )}
+        >
+          {aiQuotaMessage}
+        </p>
+      )}
       <AgentChatComposer
         onSend={(text, isAgent) => onSend(text, isAgent ?? isAgentMode)}
         onStop={onStop}
-        disabled={isPipelineRunning}
+        disabled={isPipelineRunning || aiQuotaReached}
         isDark={isDark}
         isAgentMode={isAgentMode}
         setIsAgentMode={setIsAgentMode}
@@ -208,4 +223,3 @@ export function AgentChatMain({
     </div>
   )
 }
-

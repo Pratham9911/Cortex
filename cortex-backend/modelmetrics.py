@@ -5,6 +5,8 @@ code should query those tables through future metric/limit helpers rather than
 duplicating plan limits here.
 """
 
+from datetime import date, datetime, timezone
+
 from sqlalchemy import BigInteger, CheckConstraint, Column, Computed, Date, DateTime, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.dialects.postgresql import insert
@@ -89,6 +91,10 @@ def increment_cortex_global_metrics(
     teams: int = 0,
     documents: int = 0,
     decisions: int = 0,
+    ai_requests: int = 0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    metric_date: date | None = None,
 ) -> None:
     increments = {
         "total_projects_created": projects,
@@ -96,15 +102,21 @@ def increment_cortex_global_metrics(
         "total_documents_uploaded": documents,
         "total_decisions_made": decisions,
     }
+    metric_date = metric_date or datetime.now(timezone.utc).date()
+    increments.update({
+        "total_ai_requests": ai_requests,
+        "total_input_tokens": input_tokens,
+        "total_output_tokens": output_tokens,
+    })
     values = {
-        "metric_date": func.current_date(),
+        "metric_date": metric_date,
         "total_projects_created": projects,
         "total_teams_created": teams,
         "total_documents_uploaded": documents,
         "total_decisions_made": decisions,
-        "total_ai_requests": 0,
-        "total_input_tokens": 0,
-        "total_output_tokens": 0,
+        "total_ai_requests": ai_requests,
+        "total_input_tokens": input_tokens,
+        "total_output_tokens": output_tokens,
     }
     db.execute(
         insert(CortexGlobalMetric)

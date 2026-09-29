@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   CheckCircle2,
   Hash,
@@ -89,6 +89,44 @@ export function DiscussionChat({
   const [highlightedMsgId, setHighlightedMsgId] = useState<number | null>(null)
   const [cortexThinkingStatus, setCortexThinkingStatus] = useState<string | null>(null)
   const [cortexAgentName, setCortexAgentName] = useState<string | null>(null)
+  const [aiQuota, setAiQuota] = useState<{
+    can_request: boolean
+    request_count: number
+    request_limit: number
+    total_tokens: number
+    token_limit: number
+    token_reserve: number
+    limit_reason: string | null
+  } | null>(null)
+  const [aiQuotaError, setAiQuotaError] = useState("")
+
+  const refreshAiQuota = useCallback(async () => {
+    const token = getAuthToken()
+    if (!token) return
+    const projectId = getProjectId()
+    try {
+      const response = await fetch(
+        `${apiUrl}/me/ai-usage?project_id=${projectId}`,
+        { headers: { Authorization: ["Bearer", token].join(" ") }, cache: "no-store" }
+      )
+      if (!response.ok) throw new Error("Could not load AI usage.")
+      const data = await response.json().catch(() => null)
+      if (response.ok && typeof data?.can_request === "boolean") {
+        setAiQuota(data)
+        setAiQuotaError("")
+      } else {
+        throw new Error("AI usage response was invalid.")
+      }
+    } catch (error) {
+      setAiQuota(null)
+      setAiQuotaError("Unable to check your daily AI usage. Please try again.")
+      console.error("Failed to load AI usage:", error)
+    }
+  }, [apiUrl])
+
+  useEffect(() => {
+    void refreshAiQuota()
+  }, [refreshAiQuota, teamId])
 
   const handleJumpToMessage = async (targetId: number) => {
     // 1. If element is already in current DOM
@@ -336,6 +374,15 @@ export function DiscussionChat({
       try {
         const payload: WsChatEvent = JSON.parse(event.data)
         if (payload && payload.event) {
+          if (payload.event === "ai_quota_error") {
+            const message =
+              typeof payload.detail === "string"
+                ? payload.detail
+                : payload.detail.message || "Your daily AI limit has been reached."
+            setAiQuotaError(message)
+            void refreshAiQuota()
+            return
+          }
           if (payload.event === "cortex_thinking") {
             if (payload.status) {
               setCortexThinkingStatus(payload.status)
@@ -343,6 +390,7 @@ export function DiscussionChat({
             } else {
               setCortexThinkingStatus(null)
               setCortexAgentName(null)
+              void refreshAiQuota()
             }
             return
           }
@@ -354,6 +402,7 @@ export function DiscussionChat({
             if (incoming.is_ai_message || incoming.sender_id === null || incoming.sender_id === -1) {
               setCortexThinkingStatus(null)
               setCortexAgentName(null)
+              void refreshAiQuota()
             }
 
             setMessages((prev) => {
@@ -379,7 +428,7 @@ export function DiscussionChat({
     return () => {
       socket.close()
     }
-  }, [activeDiscussion?.id])
+  }, [activeDiscussion?.id, refreshAiQuota])
 
   const isInitialLoadRef = useRef(true)
 
@@ -424,6 +473,20 @@ export function DiscussionChat({
     if (!inputContent.trim() || !activeDiscussion || !teamId) return
 
     const content = inputContent.trim()
+    const invokesCortex = content.toLowerCase().includes("@cortex")
+    if (invokesCortex && !aiQuota) {
+      setAiQuotaError("Checking your daily AI usage. Please try again in a moment.")
+      await refreshAiQuota()
+      return
+    }
+    if (invokesCortex && aiQuota && !aiQuota.can_request) {
+      setAiQuotaError(
+        aiQuota.limit_reason === "request_limit"
+          ? "Your daily AI request limit has been reached."
+          : "Your daily AI token limit has been reached."
+      )
+      return
+    }
     const parentId = replyingTo?.id || null
     const docIds = selectedDocs.length > 0 ? selectedDocs.map((d) => d.document_id) : undefined
     setInputContent("")
@@ -841,6 +904,20 @@ export function DiscussionChat({
           </div>
         )}
 
+        {(aiQuotaError || aiQuota?.can_request === false) && (
+          <p
+            role="status"
+            className={cn(
+              "mb-2 text-xs",
+              isDark ? "text-amber-300" : "text-amber-700"
+            )}
+          >
+            {aiQuotaError ||
+              (aiQuota?.limit_reason === "request_limit"
+                ? "Your daily AI request limit has been reached. Regular discussion messages are still available."
+                : "Your daily AI token limit has been reached. Regular discussion messages are still available.")}
+          </p>
+        )}
         <form onSubmit={handleSendMessage} className="flex items-end gap-2">
           <div
             className={cn(
@@ -905,7 +982,11 @@ export function DiscussionChat({
             <Button
               type="submit"
               size="icon-sm"
-              disabled={!activeDiscussion || !inputContent.trim()}
+              disabled={
+                !activeDiscussion ||
+                !inputContent.trim() ||
+                (inputContent.toLowerCase().includes("@cortex") && aiQuota?.can_request === false)
+              }
               className={cn(
                 "rounded-xl mb-0.5 shrink-0",
                 isDark

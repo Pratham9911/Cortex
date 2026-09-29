@@ -79,3 +79,7 @@ export type WsChatEvent =
       agent_name?: string | null
       message?: ChatMessage
     }
+  | {
+      event: "ai_quota_error"
+      detail: string | { message?: string; reason?: string }
+    }

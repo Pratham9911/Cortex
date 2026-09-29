@@ -18,6 +18,7 @@ from routers.teams.chats.service import (
     list_messages,
     toggle_reaction,
 )
+from services.ai_usage import finish_ai_request, reserve_ai_request
 
 router = APIRouter()
 
@@ -334,20 +335,46 @@ async def discussion_websocket(
                 content = data.get("content", "").strip()
                 parent_id = data.get("parent_message_id")
                 if content:
-                    new_msg = create_message(
-                        db,
-                        discussion_id=discussion_id,
-                        sender_id=user.user_id,
-                        content=content,
-                        parent_message_id=parent_id,
-                    )
-                    await manager.broadcast(
-                        discussion_id,
-                        {
-                            "event": "new_message",
-                            "message": new_msg,
-                        },
-                    )
+                    usage_date = None
+                    if "@cortex" in content.lower():
+                        try:
+                            usage_date = reserve_ai_request(
+                                db,
+                                user.user_id,
+                                team.project_id,
+                            )
+                        except HTTPException as error:
+                            await websocket.send_json({
+                                "event": "ai_quota_error",
+                                "detail": error.detail,
+                            })
+                            continue
+
+                    try:
+                        new_msg = create_message(
+                            db,
+                            discussion_id=discussion_id,
+                            sender_id=user.user_id,
+                            content=content,
+                            parent_message_id=parent_id,
+                        )
+                        await manager.broadcast(
+                            discussion_id,
+                            {
+                                "event": "new_message",
+                                "message": new_msg,
+                            },
+                        )
+                    except Exception:
+                        if usage_date is not None:
+                            finish_ai_request(
+                                db,
+                                user.user_id,
+                                team.project_id,
+                                usage_date,
+                                succeeded=False,
+                            )
+                        raise
 
                     if "@cortex" in content.lower():
                         cleaned_query = content.replace("@Cortex", "").replace("@cortex", "").strip()
@@ -357,18 +384,30 @@ async def discussion_websocket(
                         selected_doc_ids = data.get("selected_document_ids") or data.get("document_ids")
 
                         import asyncio
-                        asyncio.create_task(
-                            _trigger_cortex_discussion_agent_ws(
-                                discussion_id=discussion_id,
-                                project_id=team.project_id,
-                                team_id=discussion.team_id,
-                                user_id=user.user_id,
-                                user_role=membership.role,
-                                query_text=cleaned_query,
-                                parent_message_id=new_msg.get("id"),
-                                selected_document_ids=selected_doc_ids,
+                        try:
+                            asyncio.create_task(
+                                _trigger_cortex_discussion_agent_ws(
+                                    discussion_id=discussion_id,
+                                    project_id=team.project_id,
+                                    team_id=discussion.team_id,
+                                    user_id=user.user_id,
+                                    user_role=membership.role,
+                                    query_text=cleaned_query,
+                                    parent_message_id=new_msg.get("id"),
+                                    selected_document_ids=selected_doc_ids,
+                                    usage_date=usage_date,
+                                )
                             )
-                        )
+                        except Exception:
+                            if usage_date is not None:
+                                finish_ai_request(
+                                    db,
+                                    user.user_id,
+                                    team.project_id,
+                                    usage_date,
+                                    succeeded=False,
+                                )
+                            raise
     except WebSocketDisconnect:
         manager.disconnect(discussion_id, websocket)
     except Exception as e:
@@ -387,6 +426,7 @@ async def _trigger_cortex_discussion_agent_ws(
     query_text: str,
     parent_message_id: Optional[int] = None,
     selected_document_ids: Optional[list[int]] = None,
+    usage_date=None,
 ):
     import asyncio
     from database import SessionLocal
@@ -395,6 +435,9 @@ async def _trigger_cortex_discussion_agent_ws(
     from agentic.teams.discussion_agent.runner import run_discussion_agent
 
     db = SessionLocal()
+    usage_input_tokens = 0
+    usage_output_tokens = 0
+    usage_succeeded = False
     try:
         await manager.broadcast(
             discussion_id,
@@ -458,6 +501,8 @@ async def _trigger_cortex_discussion_agent_ws(
             selected_document_ids=selected_document_ids,
             event_callback=ws_event_callback,
         )
+        usage_input_tokens = int(result.get("input_tokens") or 0)
+        usage_output_tokens = int(result.get("output_tokens") or 0)
 
         # Inject decision_proposal into ai_sources so it persists with the message
         ai_sources = result.get("sources") or {}
@@ -473,6 +518,7 @@ async def _trigger_cortex_discussion_agent_ws(
             ai_sources=ai_sources,
             ai_chunks=result.get("chunks"),
         )
+        usage_succeeded = True
 
         await manager.broadcast(
             discussion_id,
@@ -501,5 +547,16 @@ async def _trigger_cortex_discussion_agent_ws(
             },
         )
     finally:
-        db.close()
-
+        try:
+            if usage_date is not None:
+                finish_ai_request(
+                    db,
+                    user_id,
+                    project_id,
+                    usage_date,
+                    succeeded=usage_succeeded,
+                    input_tokens=usage_input_tokens,
+                    output_tokens=usage_output_tokens,
+                )
+        finally:
+            db.close()
