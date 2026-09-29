@@ -1,6 +1,6 @@
 "use client"
 
-import { Settings, Share2, Sparkles } from "lucide-react"
+import { AlertCircle, Settings, Share2, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ActivityItem, HITLPermissionState, Message, PromptCard, ThinkingEvent } from "./types"
 import { AgentChatComposer } from "./agent-chat-composer"
@@ -36,7 +36,6 @@ type AgentChatMainProps = {
   selectedDocs?: ProjectDocumentItem[]
   onSelectDocs?: (docs: ProjectDocumentItem[]) => void
   onRemoveDoc?: (docId: number) => void
-  aiQuotaReached?: boolean
   aiQuotaMessage?: string
 }
 
@@ -97,7 +96,6 @@ export function AgentChatMain({
   selectedDocs = [],
   onSelectDocs,
   onRemoveDoc,
-  aiQuotaReached = false,
   aiQuotaMessage,
 }: AgentChatMainProps) {
   return (
@@ -175,7 +173,7 @@ export function AgentChatMain({
         <AgentWelcomeView
           prompts={prompts}
           onSend={(text) => onSend(text, isAgentMode)}
-          disabled={isThinking || aiQuotaReached}
+          disabled={isThinking}
           isDark={isDark}
         />
       ) : (
@@ -198,20 +196,28 @@ export function AgentChatMain({
       )}
 
       {aiQuotaMessage && (
-        <p
+        <div
           role="status"
           className={cn(
-            "mx-10 mb-1 text-xs",
-            isDark ? "text-amber-300" : "text-amber-700"
+            "mx-auto mb-2 flex w-[min(100%-3rem,48rem)] items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs shadow-sm",
+            isDark
+              ? "border-amber-400/20 bg-amber-400/[0.07] text-amber-200"
+              : "border-amber-200 bg-amber-50 text-amber-900"
           )}
         >
-          {aiQuotaMessage}
-        </p>
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+          <div className="min-w-0">
+            <p className="font-semibold">AI request unavailable</p>
+            <p className={cn("mt-0.5 leading-relaxed", isDark ? "text-amber-200/75" : "text-amber-800/80")}>
+              {aiQuotaMessage}
+            </p>
+          </div>
+        </div>
       )}
       <AgentChatComposer
         onSend={(text, isAgent) => onSend(text, isAgent ?? isAgentMode)}
         onStop={onStop}
-        disabled={isPipelineRunning || aiQuotaReached}
+        disabled={isPipelineRunning}
         isDark={isDark}
         isAgentMode={isAgentMode}
         setIsAgentMode={setIsAgentMode}

@@ -372,10 +372,18 @@ export function AgentChatShell() {
       if (!projectId) return
       if (!aiQuota) {
         setAiQuotaError("Checking your daily AI usage. Please try again in a moment.")
-        await refreshAiQuota()
+        void refreshAiQuota()
         return
       }
-      if (aiQuota && !aiQuota.can_request) return
+      if (!aiQuota.can_request) {
+        setAiQuotaError(
+          aiQuota.limit_reason === "request_limit"
+            ? "Your daily AI request limit has been reached."
+            : "Your daily AI token limit has been reached."
+        )
+        return
+      }
+      setAiQuotaError("")
 
       const isAgent = forceIsAgent ?? isAgentMode
 
@@ -851,15 +859,7 @@ export function AgentChatShell() {
         elapsedSeconds={elapsedSeconds}
         hitlPermission={hitlPermission}
         onHITLResponse={(decision, feedback) => void handleHITLResponse(decision, feedback)}
-        aiQuotaReached={aiQuota !== null && !aiQuota.can_request}
-        aiQuotaMessage={
-          aiQuotaError ||
-          (aiQuota?.limit_reason === "request_limit"
-            ? "Your daily AI request limit has been reached."
-            : aiQuota?.limit_reason === "token_limit"
-              ? "Your daily AI token limit has been reached."
-              : undefined)
-        }
+        aiQuotaMessage={aiQuotaError || undefined}
         isMessagesLoading={Boolean(activeChatId && loadingChatId === activeChatId)}
         onStop={handleStop}
         projectId={selectedProjectId() || 1}
