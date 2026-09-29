@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import String, cast, func, text
 from database import SessionLocal, engine
@@ -115,6 +116,37 @@ def get_me(user_id: int = Depends(get_current_user), db: Session = Depends(get_d
         "user_id": user.user_id,
         "name": user.name,
         "email": user.email,
+        "avatar_url": user.avatar_url,
         "created_at": user.created_at,
         "plan_name": user_pack.name if user_pack else "Free",
+    }
+
+
+class UpdateMyProfileRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+@app.patch("/me/profile")
+def update_my_profile(
+    request: UpdateMyProfileRequest,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Name cannot be empty.")
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    user.name = name
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "user_id": user.user_id,
+        "name": user.name,
+        "email": user.email,
+        "avatar_url": user.avatar_url,
     }

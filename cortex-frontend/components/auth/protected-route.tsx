@@ -17,12 +17,14 @@ interface AuthContextType {
   user: User | null
   loading: boolean
   logout: () => void
+  updateUser: (updates: Partial<User>) => void
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   logout: () => {},
+  updateUser: () => {},
 })
 
 export function useAuth() {
@@ -75,7 +77,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
         name: data.name || "Cortex Explorer",
         email: data.email || "explorer@cortex.com",
         created_at: data.created_at,
-        avatar_url: avatarUrl,
+        avatar_url: data.avatar_url || avatarUrl,
         plan_name: data.plan_name || "Free",
       }
       
@@ -83,6 +85,10 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error("Backend synchronization failed:", error)
     }
+  }
+
+  const updateUser = (updates: Partial<User>) => {
+    setUser((currentUser) => currentUser ? { ...currentUser, ...updates } : currentUser)
   }
 
   useEffect(() => {
@@ -139,7 +145,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, logout }}>
+    <AuthContext.Provider value={{ user, loading, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   )

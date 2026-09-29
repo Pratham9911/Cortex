@@ -62,9 +62,10 @@ def get_current_user(
             db.commit()
             db.refresh(user)
         else:
-            if user.avatar_url != avatar_url or user.name != name:
+            # Google metadata is the initial default, not the source of truth
+            # after the user has customized their Cortex profile.
+            if user.avatar_url is None and avatar_url:
                 user.avatar_url = avatar_url
-                user.name = name
                 db.commit()
                 db.refresh(user)
 
