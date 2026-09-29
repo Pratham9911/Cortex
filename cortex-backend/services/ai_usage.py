@@ -1,8 +1,9 @@
 import logging
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import func, update
+from sqlalchemy import String, cast, func, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -25,7 +26,7 @@ def get_user_pack(db: Session, user: User) -> UserPack:
         user_pack = db.query(UserPack).filter(UserPack.id == user.plan_id).first()
     if user_pack is None:
         user_pack = db.query(UserPack).filter(
-            func.lower(UserPack.name) == "free"
+            func.lower(cast(UserPack.name, String)) == "free"
         ).first()
     if user_pack is None:
         raise HTTPException(
@@ -197,14 +198,29 @@ def finish_ai_request(
 ) -> None:
     input_tokens = max(int(input_tokens or 0), 0)
     output_tokens = max(int(output_tokens or 0), 0)
-    values = {
-        "successful_requests": AiUsageDaily.successful_requests + int(succeeded),
-        "failed_requests": AiUsageDaily.failed_requests + int(not succeeded),
-        "input_tokens": AiUsageDaily.input_tokens + input_tokens,
-        "output_tokens": AiUsageDaily.output_tokens + output_tokens,
-        "updated_at": func.now(),
-    }
     try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise RuntimeError("The user for the reserved AI request was not found.")
+        pack = get_user_pack(db, user)
+        input_cost = (
+            Decimal(input_tokens) * Decimal(pack.input_model_cost) / Decimal(1_000_000)
+        )
+        output_cost = (
+            Decimal(output_tokens) * Decimal(pack.output_model_cost) / Decimal(1_000_000)
+        )
+        cost_precision = Decimal("0.0000000001")
+        input_cost = input_cost.quantize(cost_precision)
+        output_cost = output_cost.quantize(cost_precision)
+        values = {
+            "successful_requests": AiUsageDaily.successful_requests + int(succeeded),
+            "failed_requests": AiUsageDaily.failed_requests + int(not succeeded),
+            "input_tokens": AiUsageDaily.input_tokens + input_tokens,
+            "output_tokens": AiUsageDaily.output_tokens + output_tokens,
+            "input_cost": AiUsageDaily.input_cost + input_cost,
+            "output_cost": AiUsageDaily.output_cost + output_cost,
+            "updated_at": func.now(),
+        }
         result = db.execute(
             update(AiUsageDaily)
             .where(
@@ -218,6 +234,8 @@ def finish_ai_request(
             raise RuntimeError("The reserved daily AI usage row was not found.")
         increment_cortex_global_metrics(
             db,
+            ai_input_cost=input_cost,
+            ai_output_cost=output_cost,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             metric_date=usage_date,

@@ -3,6 +3,7 @@ from sqlalchemy import (
     Computed,
     Integer,
     BigInteger,
+    Numeric,
     String,
     Text,
     DateTime,
@@ -80,6 +81,13 @@ class AiUsageDaily(Base):
     failed_requests = Column(Integer, nullable=False, default=0, server_default="0")
     input_tokens = Column(BigInteger, nullable=False, default=0, server_default="0")
     output_tokens = Column(BigInteger, nullable=False, default=0, server_default="0")
+    input_cost = Column(Numeric(20, 10), nullable=False, default=0, server_default="0")
+    output_cost = Column(Numeric(20, 10), nullable=False, default=0, server_default="0")
+    total_cost = Column(
+        Numeric(20, 10),
+        Computed("input_cost + output_cost", persisted=True),
+        nullable=False,
+    )
     total_tokens = Column(
         BigInteger,
         Computed("input_tokens + output_tokens", persisted=True),
@@ -95,6 +103,8 @@ class AiUsageDaily(Base):
         CheckConstraint("failed_requests >= 0", name="ck_ai_usage_failed_nonnegative"),
         CheckConstraint("input_tokens >= 0", name="ck_ai_usage_input_nonnegative"),
         CheckConstraint("output_tokens >= 0", name="ck_ai_usage_output_nonnegative"),
+        CheckConstraint("input_cost >= 0", name="ck_ai_usage_input_cost_nonnegative"),
+        CheckConstraint("output_cost >= 0", name="ck_ai_usage_output_cost_nonnegative"),
     )
 
 

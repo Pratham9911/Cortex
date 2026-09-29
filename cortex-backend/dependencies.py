@@ -2,7 +2,9 @@ from typing import Optional
 from uuid import UUID
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import String, cast, func
 from supabase_client import supabase
+from modelmetrics import UserPack
 from models import User
 from database import SessionLocal
 
@@ -65,6 +67,16 @@ def get_current_user(
         elif user_by_email and user_by_email.user_id != user.user_id:
             raise HTTPException(status_code=403, detail="This email is linked to another Cortex identity.")
 
+        if user is None or user.plan_id is None:
+            free_pack = db.query(UserPack).filter(
+                func.lower(cast(UserPack.name, String)) == "free"
+            ).first()
+            if free_pack is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="The Free user pack is not configured. Please contact support.",
+                )
+
         if not user:
             user = User(
                 name=name,
@@ -72,6 +84,7 @@ def get_current_user(
                 password_hash=None,
                 avatar_url=avatar_url,
                 auth_user_id=auth_user_id,
+                plan_id=free_pack.id,
             )
             db.add(user)
             db.commit()
@@ -87,6 +100,9 @@ def get_current_user(
             # after the user has customized their Cortex profile.
             if user.avatar_url is None and avatar_url:
                 user.avatar_url = avatar_url
+                changed = True
+            if user.plan_id is None:
+                user.plan_id = free_pack.id
                 changed = True
             if changed:
                 db.commit()

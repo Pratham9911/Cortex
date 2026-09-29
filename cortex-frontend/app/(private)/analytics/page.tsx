@@ -8,7 +8,6 @@ import {
   CalendarDays,
   ChevronDown,
   RefreshCw,
-  Sparkles,
 } from "lucide-react"
 import {
   Bar,
@@ -23,38 +22,61 @@ import {
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 
-type Metric = "total_tokens" | "input_tokens" | "output_tokens" | "requests"
+type Metric =
+  | "total_tokens"
+  | "input_tokens"
+  | "output_tokens"
+  | "cost"
+  | "requests"
 type RangePreset = "7" | "14" | "30" | "90" | "custom"
 
 type DailyUsage = {
   date: string
   requests: number
+  successful_requests: number
+  failed_requests: number
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  input_cost: number
+  output_cost: number
+  total_cost: number
 }
 
 type ProjectUsage = {
   project_id: number
   project_name: string
   requests: number
+  successful_requests: number
+  failed_requests: number
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  input_cost: number
+  output_cost: number
+  total_cost: number
 }
 
 type AnalyticsData = {
   start_date: string
   end_date: string
   selected_project_id: number | null
+  model_name: string
+  input_model_cost_per_million: number
+  output_model_cost_per_million: number
   projects: { project_id: number; project_name: string }[]
   daily: DailyUsage[]
   projects_usage: ProjectUsage[]
   totals: {
     requests: number
+    successful_requests: number
+    failed_requests: number
     input_tokens: number
     output_tokens: number
     total_tokens: number
+    input_cost: number
+    output_cost: number
+    total_cost: number
   }
 }
 
@@ -62,6 +84,7 @@ const METRICS: { id: Metric; label: string }[] = [
   { id: "total_tokens", label: "Total tokens" },
   { id: "input_tokens", label: "Input tokens" },
   { id: "output_tokens", label: "Output tokens" },
+  { id: "cost", label: "Cost" },
   { id: "requests", label: "Requests" },
 ]
 
@@ -87,6 +110,19 @@ function formatCount(value: number): string {
 
 function formatFullCount(value: number): string {
   return new Intl.NumberFormat("en").format(value)
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 8,
+  }).format(value)
+}
+
+function formatMetricValue(value: number, selectedMetric: Metric): string {
+  return selectedMetric.endsWith("_cost") ? formatCurrency(value) : formatFullCount(value)
 }
 
 function formatPercent(value: number): string {
@@ -267,20 +303,30 @@ export default function AnalyticsPage() {
 
   const totals = analytics?.totals ?? {
     requests: 0,
+    successful_requests: 0,
+    failed_requests: 0,
     input_tokens: 0,
     output_tokens: 0,
     total_tokens: 0,
+    input_cost: 0,
+    output_cost: 0,
+    total_cost: 0,
   }
   const metricLabel = METRICS.find((item) => item.id === metric)?.label ?? "Total tokens"
   const chartData = useMemo(
     () =>
       (analytics?.daily ?? []).map((item) => ({
         ...item,
+        cost: item.total_cost,
         day_label: formatDay(item.date),
       })),
     [analytics?.daily]
   )
-  const contributionTotal = totals[metric]
+  const metricValue = (values: DailyUsage | ProjectUsage | typeof totals, selectedMetric: Metric) =>
+    selectedMetric === "cost" ? values.total_cost : values[selectedMetric]
+  const contributionTotal = metricValue(totals, metric)
+  const isCostMetric = metric === "cost"
+  const isSplitMetric = metric === "total_tokens" || isCostMetric
 
   const panelClass = isDark
     ? "border-white/[0.08] bg-[#111315]"
@@ -318,13 +364,6 @@ export default function AnalyticsPage() {
           <p className={cn("mt-1.5 max-w-2xl text-sm", secondaryTextClass)}>
             Explore your AI usage over time and see how each project contributes.
           </p>
-        </div>
-        <div className={cn(
-          "inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
-          isDark ? "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-300" : "border-emerald-200 bg-emerald-50 text-emerald-800"
-        )}>
-          <Sparkles className="size-3.5" />
-          Personal usage · UTC
         </div>
       </header>
 
@@ -438,7 +477,9 @@ export default function AnalyticsPage() {
                 {metric === "requests" ? <Activity className="size-4" /> : <BarChart3 className="size-4" />}
               </span>
               <h2 className={cn("text-base font-semibold", isDark ? "text-zinc-100" : "text-slate-900")}>
-                {metric === "requests" ? "AI requests" : "Token usage"} over time
+                {metric === "requests"
+                  ? "AI requests over time"
+                  : `${isCostMetric ? "AI cost" : "Token usage"} over time`}
               </h2>
             </div>
             <p className={cn("mt-2 text-xs", secondaryTextClass)}>
@@ -447,21 +488,26 @@ export default function AnalyticsPage() {
           </div>
           <div className="sm:text-right">
             <p className={cn("text-[10px] font-semibold uppercase tracking-[0.16em]", secondaryTextClass)}>
-              {metric === "requests" ? "Total requests" : metricLabel}
+              {metric === "requests" ? "Requests" : metricLabel}
             </p>
             <p className={cn("mt-1 text-3xl font-bold tabular-nums", isDark ? "text-white" : "text-slate-950")}>
-              {loading ? "—" : formatCount(totals[metric])}
+              {loading
+                ? "—"
+                : isCostMetric
+                  ? formatCurrency(contributionTotal)
+                  : formatCount(contributionTotal)}
             </p>
             {!loading && (
               <p className={cn("mt-0.5 text-xs", secondaryTextClass)}>
-                {formatFullCount(totals[metric])} {metric === "requests" ? "requests" : "tokens"}
+                {formatMetricValue(contributionTotal, metric)}
+                {metric === "requests" ? " requests" : isCostMetric ? " USD" : " tokens"}
               </p>
             )}
           </div>
         </div>
 
         <div className="h-[300px] w-full sm:h-[360px]">
-          {!chartData.some((item) => item[metric] > 0) ? (
+          {!chartData.some((item) => metricValue(item, metric) > 0) ? (
             <div className={cn("flex h-full flex-col items-center justify-center text-center", secondaryTextClass)}>
               <BarChart3 className="mb-3 size-8 opacity-40" />
               <p className={cn("text-sm font-medium", isDark ? "text-zinc-300" : "text-slate-700")}>No usage in this period</p>
@@ -483,8 +529,8 @@ export default function AnalyticsPage() {
                   axisLine={false}
                   tickLine={false}
                   tick={{ fill: isDark ? "#8d969a" : "#64748b", fontSize: 11 }}
-                  tickFormatter={formatCount}
-                  width={48}
+                  tickFormatter={isCostMetric ? formatCurrency : formatCount}
+                  width={isCostMetric ? 96 : 48}
                 />
                 <Tooltip
                   cursor={{ fill: isDark ? "rgba(255,255,255,0.035)" : "rgba(15,23,42,0.035)" }}
@@ -495,28 +541,74 @@ export default function AnalyticsPage() {
                       <div className={cn("min-w-[190px] rounded-xl border p-3 shadow-xl", isDark ? "border-white/10 bg-[#1b1e20] text-zinc-100" : "border-slate-200 bg-white text-slate-900")}>
                         <p className={cn("mb-2 text-xs font-semibold", secondaryTextClass)}>{label}</p>
                         <div className="space-y-1.5 text-xs">
-                          <p className="flex justify-between gap-6"><span style={{ color: COLORS.input }}>Input tokens</span><span className="font-semibold tabular-nums">{formatFullCount(row.input_tokens)} · {formatPercent(projectPercentage(row.input_tokens, row.total_tokens))}</span></p>
-                          <p className="flex justify-between gap-6"><span style={{ color: COLORS.output }}>Output tokens</span><span className="font-semibold tabular-nums">{formatFullCount(row.output_tokens)} · {formatPercent(projectPercentage(row.output_tokens, row.total_tokens))}</span></p>
-                          <div className={cn("my-1 border-t", isDark ? "border-white/10" : "border-slate-100")} />
-                          <p className="flex justify-between gap-6"><span>Total tokens</span><span className="font-semibold tabular-nums">{formatFullCount(row.total_tokens)}</span></p>
-                          <p className="flex justify-between gap-6"><span>Requests</span><span className="font-semibold tabular-nums">{formatFullCount(row.requests)}</span></p>
+                          {isCostMetric ? (
+                            <>
+                              <p className="flex justify-between gap-6">
+                                <span style={{ color: COLORS.input }}>Input cost</span>
+                                <span className="font-semibold tabular-nums">{formatCurrency(row.input_cost)}</span>
+                              </p>
+                              <p className="flex justify-between gap-6">
+                                <span style={{ color: COLORS.output }}>Output cost</span>
+                                <span className="font-semibold tabular-nums">{formatCurrency(row.output_cost)}</span>
+                              </p>
+                              <div className={cn("my-1 border-t", isDark ? "border-white/10" : "border-slate-100")} />
+                              <p className="flex justify-between gap-6">
+                                <span>Total cost</span>
+                                <span className="font-semibold tabular-nums">{formatCurrency(row.total_cost)}</span>
+                              </p>
+                            </>
+                          ) : metric === "requests" ? (
+                            <>
+                              <p className="flex justify-between gap-6">
+                                <span>Total requests</span>
+                                <span className="font-semibold tabular-nums">{formatFullCount(row.requests)}</span>
+                              </p>
+                              <p className="flex items-center justify-between gap-6">
+                                <span className="inline-flex items-center gap-2">
+                                  <i className="size-2 rounded-full bg-emerald-500" />
+                                  Successful
+                                </span>
+                                <span className="font-semibold tabular-nums">{formatFullCount(row.successful_requests)}</span>
+                              </p>
+                              <p className="flex items-center justify-between gap-6">
+                                <span className="inline-flex items-center gap-2">
+                                  <i className="size-2 rounded-full bg-red-500" />
+                                  Failed
+                                </span>
+                                <span className="font-semibold tabular-nums">{formatFullCount(row.failed_requests)}</span>
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="flex justify-between gap-6"><span>Input tokens</span><span className="font-semibold tabular-nums">{formatFullCount(row.input_tokens)}</span></p>
+                              <p className="flex justify-between gap-6"><span>Output tokens</span><span className="font-semibold tabular-nums">{formatFullCount(row.output_tokens)}</span></p>
+                              <div className={cn("my-1 border-t", isDark ? "border-white/10" : "border-slate-100")} />
+                              <p className="flex justify-between gap-6"><span>Total tokens</span><span className="font-semibold tabular-nums">{formatFullCount(row.total_tokens)}</span></p>
+                            </>
+                          )}
                         </div>
                       </div>
                     )
                   }}
                 />
-                {metric === "total_tokens" ? (
+                {isSplitMetric ? (
                   <Bar
-                    dataKey="total_tokens"
+                    dataKey={metric}
                     shape={(props: BarProps) => {
                       const row = chartData[Number(props.index)]
                       const x = Number(props.x ?? 0)
                       const y = Number(props.y ?? 0)
                       const width = Number(props.width ?? 0)
                       const height = Number(props.height ?? 0)
-                      const total = row?.total_tokens ?? 0
+                      const inputValue = isCostMetric
+                        ? row?.input_cost ?? 0
+                        : row?.input_tokens ?? 0
+                      const outputValue = isCostMetric
+                        ? row?.output_cost ?? 0
+                        : row?.output_tokens ?? 0
+                      const total = inputValue + outputValue
                       const inputHeight = total > 0
-                        ? height * (row.input_tokens / total)
+                        ? height * (inputValue / total)
                         : 0
                       const outputHeight = height - inputHeight
 
@@ -554,11 +646,11 @@ export default function AnalyticsPage() {
             </ResponsiveContainer>
           )}
         </div>
-        {metric === "total_tokens" && (
+        {isSplitMetric && (
           <div className={cn("mt-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 border-t pt-4 text-xs", isDark ? "border-white/[0.07] text-zinc-400" : "border-slate-100 text-slate-500")}>
-            <span className="inline-flex items-center gap-2"><i className="size-2.5 rounded-sm" style={{ backgroundColor: COLORS.input }} />Input tokens</span>
-            <span className="inline-flex items-center gap-2"><i className="size-2.5 rounded-sm" style={{ backgroundColor: COLORS.output }} />Output tokens</span>
-            <span>Bar height is total tokens · hover for percentages</span>
+            <span className="inline-flex items-center gap-2"><i className="size-2.5 rounded-sm" style={{ backgroundColor: COLORS.input }} />{isCostMetric ? "Input cost" : "Input tokens"}</span>
+            <span className="inline-flex items-center gap-2"><i className="size-2.5 rounded-sm" style={{ backgroundColor: COLORS.output }} />{isCostMetric ? "Output cost" : "Output tokens"}</span>
+            <span>Bar height is total {isCostMetric ? "cost" : "tokens"}</span>
           </div>
         )}
       </section>
@@ -567,31 +659,72 @@ export default function AnalyticsPage() {
         <div className={cn("rounded-2xl border p-5", panelClass)}>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className={cn("text-sm font-semibold", isDark ? "text-zinc-100" : "text-slate-900")}>Token mix</h2>
-              <p className={cn("mt-1 text-xs", secondaryTextClass)}>Input and output share of total tokens</p>
+              <h2 className={cn("text-sm font-semibold", isDark ? "text-zinc-100" : "text-slate-900")}>
+                {isCostMetric ? "Cost breakdown" : metric === "requests" ? "Request outcomes" : "Token mix"}
+              </h2>
+              <p className={cn("mt-1 text-xs", secondaryTextClass)}>
+                {isCostMetric ? "Input and output cost for this period" : metric === "requests" ? "Successful and failed AI requests" : "Input and output token totals"}
+              </p>
+              {isCostMetric && analytics && (
+                <p className={cn("mt-1 text-xs", secondaryTextClass)}>
+                  {analytics.model_name} pack rates: input {formatCurrency(analytics.input_model_cost_per_million)} / 1M tokens · output {formatCurrency(analytics.output_model_cost_per_million)} / 1M tokens
+                </p>
+              )}
             </div>
-            <span className={cn("text-xs font-medium", secondaryTextClass)}>{formatFullCount(totals.total_tokens)} total</span>
+            <span className={cn("text-xs font-medium tabular-nums", secondaryTextClass)}>
+              {isCostMetric
+                ? formatCurrency(totals.total_cost)
+                : metric === "requests"
+                  ? `${formatFullCount(totals.requests)} total`
+                  : `${formatFullCount(totals.total_tokens)} total`}
+            </span>
           </div>
-          <div className={cn("mt-5 flex h-2 overflow-hidden rounded-full", isDark ? "bg-white/5" : "bg-slate-100")}>
-            {totals.total_tokens > 0 && (
-              <>
-                <div className="bg-[#0d9278] transition-all" style={{ width: `${projectPercentage(totals.input_tokens, totals.total_tokens)}%` }} />
-                <div className="bg-[#28b7b1] transition-all" style={{ width: `${projectPercentage(totals.output_tokens, totals.total_tokens)}%` }} />
-              </>
-            )}
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div className={cn("rounded-xl p-3", isDark ? "bg-white/[0.035]" : "bg-slate-50")}>
-              <p className={cn("text-xs", secondaryTextClass)}>Input</p>
-              <p className={cn("mt-1 text-lg font-semibold tabular-nums", isDark ? "text-white" : "text-slate-900")}>{formatPercent(projectPercentage(totals.input_tokens, totals.total_tokens))}</p>
-              <p className={cn("text-[11px] tabular-nums", secondaryTextClass)}>{formatFullCount(totals.input_tokens)} tokens</p>
+          {isCostMetric ? (
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className={cn("rounded-xl p-3", isDark ? "bg-white/[0.035]" : "bg-slate-50")}>
+                <p className={cn("text-xs", secondaryTextClass)}>Input</p>
+                <p className={cn("mt-1 text-lg font-semibold tabular-nums", isDark ? "text-white" : "text-slate-900")}>
+                  {formatCurrency(totals.input_cost)}
+                </p>
+              </div>
+              <div className={cn("rounded-xl p-3", isDark ? "bg-white/[0.035]" : "bg-slate-50")}>
+                <p className={cn("text-xs", secondaryTextClass)}>Output</p>
+                <p className={cn("mt-1 text-lg font-semibold tabular-nums", isDark ? "text-white" : "text-slate-900")}>
+                  {formatCurrency(totals.output_cost)}
+                </p>
+              </div>
             </div>
-            <div className={cn("rounded-xl p-3", isDark ? "bg-white/[0.035]" : "bg-slate-50")}>
-              <p className={cn("text-xs", secondaryTextClass)}>Output</p>
-              <p className={cn("mt-1 text-lg font-semibold tabular-nums", isDark ? "text-white" : "text-slate-900")}>{formatPercent(projectPercentage(totals.output_tokens, totals.total_tokens))}</p>
-              <p className={cn("text-[11px] tabular-nums", secondaryTextClass)}>{formatFullCount(totals.output_tokens)} tokens</p>
+          ) : metric === "requests" ? (
+            <div className="mt-5 space-y-3">
+              <p className={cn("flex items-center justify-between text-sm", isDark ? "text-zinc-200" : "text-slate-700")}>
+                <span className="inline-flex items-center gap-2">
+                  <i className="size-2.5 rounded-full bg-emerald-500" />
+                  Successful
+                </span>
+                <span className="font-semibold tabular-nums">{formatFullCount(totals.successful_requests)}</span>
+              </p>
+              <p className={cn("flex items-center justify-between text-sm", isDark ? "text-zinc-200" : "text-slate-700")}>
+                <span className="inline-flex items-center gap-2">
+                  <i className="size-2.5 rounded-full bg-red-500" />
+                  Failed
+                </span>
+                <span className="font-semibold tabular-nums">{formatFullCount(totals.failed_requests)}</span>
+              </p>
             </div>
-          </div>
+          ) : (
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className={cn("rounded-xl p-3", isDark ? "bg-white/[0.035]" : "bg-slate-50")}>
+                <p className={cn("text-xs", secondaryTextClass)}>Input</p>
+                <p className={cn("mt-1 text-lg font-semibold tabular-nums", isDark ? "text-white" : "text-slate-900")}>{formatFullCount(totals.input_tokens)}</p>
+                <p className={cn("text-[11px]", secondaryTextClass)}>tokens</p>
+              </div>
+              <div className={cn("rounded-xl p-3", isDark ? "bg-white/[0.035]" : "bg-slate-50")}>
+                <p className={cn("text-xs", secondaryTextClass)}>Output</p>
+                <p className={cn("mt-1 text-lg font-semibold tabular-nums", isDark ? "text-white" : "text-slate-900")}>{formatFullCount(totals.output_tokens)}</p>
+                <p className={cn("text-[11px]", secondaryTextClass)}>tokens</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className={cn("rounded-2xl border p-5", panelClass)}>
@@ -600,14 +733,17 @@ export default function AnalyticsPage() {
               <h2 className={cn("text-sm font-semibold", isDark ? "text-zinc-100" : "text-slate-900")}>Project contribution</h2>
               <p className={cn("mt-1 text-xs", secondaryTextClass)}>{metricLabel} share across projects in this period</p>
             </div>
-            <span className={cn("text-xs font-medium tabular-nums", secondaryTextClass)}>{formatFullCount(contributionTotal)} {metric === "requests" ? "requests" : "tokens"}</span>
+            <span className={cn("text-xs font-medium tabular-nums", secondaryTextClass)}>
+              {formatMetricValue(contributionTotal, metric)}
+              {metric === "requests" ? " requests" : isCostMetric ? " USD" : " tokens"}
+            </span>
           </div>
           <div className="mt-4 space-y-3">
             {(analytics?.projects_usage ?? []).length === 0 ? (
               <p className={cn("py-5 text-center text-sm", secondaryTextClass)}>No projects available.</p>
             ) : (
               (analytics?.projects_usage ?? []).map((project) => {
-                const value = project[metric]
+                const value = metricValue(project, metric)
                 const percentage = projectPercentage(value, contributionTotal)
                 return (
                   <div key={project.project_id} className="space-y-1.5">
@@ -616,7 +752,7 @@ export default function AnalyticsPage() {
                         {project.project_name}
                       </span>
                       <span className={cn("shrink-0 tabular-nums", secondaryTextClass)}>
-                        {formatFullCount(value)} <span className="ml-1 font-semibold">{formatPercent(percentage)}</span>
+                        {formatMetricValue(value, metric)} <span className="ml-1 font-semibold">{formatPercent(percentage)}</span>
                       </span>
                     </div>
                     <div className={cn("h-1.5 overflow-hidden rounded-full", isDark ? "bg-white/5" : "bg-slate-100")}>

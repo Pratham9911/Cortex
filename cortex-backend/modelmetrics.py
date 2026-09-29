@@ -6,8 +6,9 @@ duplicating plan limits here.
 """
 
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, Computed, Date, DateTime, Index, Integer, String
+from sqlalchemy import BigInteger, CheckConstraint, Column, Computed, Date, DateTime, Index, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -26,11 +27,16 @@ class UserPack(Base):
     max_projects = Column(Integer, nullable=False)
     daily_token_limit = Column(BigInteger, nullable=False)
     daily_request_limit = Column(Integer, nullable=False)
+    model_name = Column(String(100), nullable=False, default="DeepSeek V4.1 Flash")
+    input_model_cost = Column(Numeric(12, 6), nullable=False, default=0.22)
+    output_model_cost = Column(Numeric(12, 6), nullable=False, default=0.66)
 
     __table_args__ = (
         CheckConstraint("max_projects >= 0", name="ck_user_packs_projects_nonnegative"),
         CheckConstraint("daily_token_limit >= 0", name="ck_user_packs_tokens_nonnegative"),
         CheckConstraint("daily_request_limit >= 0", name="ck_user_packs_requests_nonnegative"),
+        CheckConstraint("input_model_cost >= 0", name="ck_user_packs_input_model_cost_nonnegative"),
+        CheckConstraint("output_model_cost >= 0", name="ck_user_packs_output_model_cost_nonnegative"),
     )
 
 
@@ -66,6 +72,23 @@ class CortexGlobalMetric(Base):
     total_documents_uploaded = Column(Integer, nullable=False)
     total_decisions_made = Column(Integer, nullable=False)
     total_ai_requests = Column(Integer, nullable=False)
+    total_ai_input_cost = Column(
+        Numeric(20, 10),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+    )
+    total_ai_output_cost = Column(
+        Numeric(20, 10),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+    )
+    total_ai_cost = Column(
+        Numeric(20, 10),
+        Computed("total_ai_input_cost + total_ai_output_cost", persisted=True),
+        nullable=False,
+    )
     total_input_tokens = Column(BigInteger, nullable=False)
     total_output_tokens = Column(BigInteger, nullable=False)
     total_tokens = Column(BigInteger, Computed("total_input_tokens + total_output_tokens", persisted=True), nullable=False)
@@ -77,6 +100,9 @@ class CortexGlobalMetric(Base):
         CheckConstraint("total_documents_uploaded >= 0", name="ck_global_metrics_documents_nonnegative"),
         CheckConstraint("total_decisions_made >= 0", name="ck_global_metrics_decisions_nonnegative"),
         CheckConstraint("total_ai_requests >= 0", name="ck_global_metrics_requests_nonnegative"),
+        CheckConstraint("total_ai_input_cost >= 0", name="ck_global_metrics_input_cost_nonnegative"),
+        CheckConstraint("total_ai_output_cost >= 0", name="ck_global_metrics_output_cost_nonnegative"),
+        CheckConstraint("total_ai_cost >= 0", name="ck_global_metrics_cost_nonnegative"),
         CheckConstraint("total_input_tokens >= 0", name="ck_global_metrics_input_tokens_nonnegative"),
         CheckConstraint("total_output_tokens >= 0", name="ck_global_metrics_output_tokens_nonnegative"),
         CheckConstraint("total_tokens = total_input_tokens + total_output_tokens", name="ck_global_metrics_tokens_match"),
@@ -92,6 +118,8 @@ def increment_cortex_global_metrics(
     documents: int = 0,
     decisions: int = 0,
     ai_requests: int = 0,
+    ai_input_cost: Decimal | int = Decimal("0"),
+    ai_output_cost: Decimal | int = Decimal("0"),
     input_tokens: int = 0,
     output_tokens: int = 0,
     metric_date: date | None = None,
@@ -105,6 +133,8 @@ def increment_cortex_global_metrics(
     metric_date = metric_date or datetime.now(timezone.utc).date()
     increments.update({
         "total_ai_requests": ai_requests,
+        "total_ai_input_cost": ai_input_cost,
+        "total_ai_output_cost": ai_output_cost,
         "total_input_tokens": input_tokens,
         "total_output_tokens": output_tokens,
     })
@@ -115,6 +145,8 @@ def increment_cortex_global_metrics(
         "total_documents_uploaded": documents,
         "total_decisions_made": decisions,
         "total_ai_requests": ai_requests,
+        "total_ai_input_cost": ai_input_cost,
+        "total_ai_output_cost": ai_output_cost,
         "total_input_tokens": input_tokens,
         "total_output_tokens": output_tokens,
     }
