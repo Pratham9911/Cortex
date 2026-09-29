@@ -190,7 +190,7 @@ export default function ProjectSettingsContent() {
             <FolderKanban className="size-5" />
           </span>
           <div>
-            <h1 className="text-xl font-bold text-white">General</h1>
+            <h1 className="text-xl font-bold text-white">Settings</h1>
             <p className="mt-1 text-sm text-zinc-400">Manage the name and membership of this project.</p>
           </div>
         </div>

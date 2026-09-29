@@ -5,6 +5,7 @@ import { useTheme } from "next-themes"
 import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/components/auth/protected-route"
+import { ProfileSettingsDialog } from "@/components/settings/profile-settings-dialog"
 import { cn } from "@/lib/utils"
 import {
   Search, Inbox, Bell, LayoutGrid, BarChart3, LineChart,
@@ -66,6 +67,7 @@ function SidebarContent({
   const [mounted, setMounted] = useState(false)
   const [active, setActive] = useState("Dashboard")
   const [profileOpen, setProfileOpen] = useState(false)
+  const [profileSettingsOpen, setProfileSettingsOpen] = useState(false)
   const [teamsExpanded, setTeamsExpanded] = useState(false)
   const [sidebarTeams, setSidebarTeams] = useState<SidebarTeam[]>([])
   const [teamsLoadError, setTeamsLoadError] = useState(false)
@@ -550,7 +552,10 @@ function SidebarContent({
               {/* Sign out / profile settings */}
               <div className={cn("border-t p-1.5 flex flex-col gap-0.5", isDark ? "border-zinc-700/60" : "border-zinc-100")}>
                 <button
-                  onClick={() => setProfileOpen(false)}
+                  onClick={() => {
+                    setProfileOpen(false)
+                    setProfileSettingsOpen(true)
+                  }}
                   className={cn(
                     "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all hover:bg-zinc-500/10",
                     isDark ? "text-zinc-300 hover:text-white" : "text-zinc-600 hover:text-zinc-900"
@@ -640,6 +645,7 @@ function SidebarContent({
 
         </div>
       </div>
+      <ProfileSettingsDialog open={profileSettingsOpen} onOpenChange={setProfileSettingsOpen} />
     </div>
   )
 }

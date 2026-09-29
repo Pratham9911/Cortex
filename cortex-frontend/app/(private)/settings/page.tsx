@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation"
+import ProjectSettingsContent from "@/components/settings/project-settings-content"
 
 export default function SettingsIndexPage() {
-  redirect("/settings/general")
+  return <ProjectSettingsContent />
 }

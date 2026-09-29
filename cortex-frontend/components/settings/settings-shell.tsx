@@ -19,6 +19,7 @@ export function SettingsShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   const isDark = mounted && theme === "dark"
+  const isProfileSettings = pathname.startsWith("/settings/profile")
 
   const navLink = (href: string, label: string, Icon: React.ElementType) => {
     const isActive = pathname === href || pathname.startsWith(`${href}/`)
@@ -46,14 +47,35 @@ export function SettingsShell({ children }: { children: React.ReactNode }) {
         isDark ? "bg-[#0d0f14] text-white" : "bg-[#f8f9fc] text-slate-900"
       )}
     >
-      <aside className="hidden md:flex w-[240px] shrink-0 flex-col border-r border-zinc-800/80 bg-[#161822] p-4 overflow-y-auto dark-scroll">
-        <div className="space-y-1">
-          <p className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">Project settings</p>
-          {SETTINGS_NAV_ITEMS.map((item) => navLink(item.href, item.label, item.icon))}
-        </div>
-      </aside>
+      {isProfileSettings && (
+        <aside className="hidden md:flex w-[240px] shrink-0 flex-col border-r border-zinc-800/80 bg-[#161822] p-4 overflow-y-auto dark-scroll">
+          <div className="space-y-1">
+            <p className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">Profile settings</p>
+            {SETTINGS_NAV_ITEMS.map((item) => navLink(item.href, item.label, item.icon))}
+          </div>
+        </aside>
+      )}
 
       <main className="flex-1 min-w-0 overflow-y-auto dark-scroll">
+        {isProfileSettings && (
+          <nav aria-label="Profile settings" className="flex gap-2 overflow-x-auto border-b border-zinc-800 px-4 py-3 md:hidden">
+            {SETTINGS_NAV_ITEMS.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors",
+                    isActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-800/60 hover:text-white"
+                  )}
+                >
+                  {item.label}
+                </Link>
+              )
+            })}
+          </nav>
+        )}
         <div className="h-full p-6 md:p-8">{children}</div>
       </main>
 

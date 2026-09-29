@@ -402,6 +402,80 @@
   display: none;
 }
 
+.profile-settings-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(113 113 122 / 0.34) transparent;
+  scrollbar-gutter: stable;
+}
+
+.profile-settings-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.profile-settings-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.profile-settings-scroll::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgb(113 113 122 / 0.3);
+}
+
+.profile-settings-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(113 113 122 / 0.52);
+}
+
+.dark .profile-settings-scroll {
+  scrollbar-color: rgb(161 161 170 / 0.28) transparent;
+}
+
+.dark .profile-settings-scroll::-webkit-scrollbar-thumb {
+  background: rgb(161 161 170 / 0.24);
+}
+
+.dark .profile-settings-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(161 161 170 / 0.4);
+}
+
+.profile-settings-content[data-profile-theme="light"] [class~="bg-[#14161d]"],
+.profile-settings-content[data-profile-theme="light"] [class~="bg-[#181a24]"],
+.profile-settings-content[data-profile-theme="light"] [class~="bg-[#12141c]"],
+.profile-settings-content[data-profile-theme="light"] [class~="bg-[#0d0e14]"] {
+  background-color: #fff;
+}
+
+.profile-settings-content[data-profile-theme="light"] [class~="bg-zinc-900"],
+.profile-settings-content[data-profile-theme="light"] [class~="bg-zinc-800"] {
+  background-color: #f4f4f5;
+}
+
+.profile-settings-content[data-profile-theme="light"] [class~="text-white"],
+.profile-settings-content[data-profile-theme="light"] [class~="text-zinc-100"],
+.profile-settings-content[data-profile-theme="light"] [class~="text-zinc-200"],
+.profile-settings-content[data-profile-theme="light"] [class~="text-zinc-300"] {
+  color: #27272a;
+}
+
+.profile-settings-content[data-profile-theme="light"] [class~="text-zinc-400"] {
+  color: #52525b;
+}
+
+.profile-settings-content[data-profile-theme="light"] [class~="text-zinc-500"] {
+  color: #71717a;
+}
+
+.profile-settings-content[data-profile-theme="light"] [class~="border-zinc-800"],
+.profile-settings-content[data-profile-theme="light"] [class~="border-zinc-800/80"],
+.profile-settings-content[data-profile-theme="light"] [class~="border-zinc-800/60"],
+.profile-settings-content[data-profile-theme="light"] [class~="border-zinc-700"] {
+  border-color: #e4e4e7;
+}
+
+.profile-settings-content[data-profile-theme="light"] [class~="divide-zinc-800"] > :not(:last-child) {
+  border-color: #e4e4e7;
+}
+
 .team-overview-scroll {
   scrollbar-width: none;
 }
