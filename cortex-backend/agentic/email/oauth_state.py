@@ -58,3 +58,15 @@ def get_and_pop_user_id_for_state(state_token: str) -> Optional[int]:
     """
     data = get_and_pop_state_data(state_token)
     return data["user_id"] if data else None
+
+
+def invalidate_user_states(user_id: int) -> None:
+    """Remove pending provider authorization states for a deleted account."""
+    with _lock:
+        user_states = [
+            state_token
+            for state_token, state_data in _state_store.items()
+            if state_data.get("user_id") == user_id
+        ]
+        for state_token in user_states:
+            del _state_store[state_token]

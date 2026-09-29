@@ -26,6 +26,9 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     password_hash = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
+    auth_user_id = Column(UUID(as_uuid=True), nullable=True)
+    is_deleted = Column(Boolean, nullable=False, default=False, server_default="false")
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     plan_id = Column(UUID(as_uuid=True), ForeignKey("user_packs.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -845,4 +848,3 @@ class DecisionParticipant(Base):
             name="uq_decision_participant"
         ),
     )
-

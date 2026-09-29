@@ -4,7 +4,6 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import String, cast, func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.dialects.postgresql import insert
 
 from database import SessionLocal
 from dependencies import get_current_user
@@ -26,7 +25,7 @@ from models import (
     DiscussionSTM,
     TeamDiscussion,
 )
-from modelmetrics import CortexGlobalMetric, ProjectPack
+from modelmetrics import increment_cortex_global_metrics, ProjectPack
 
 from routers.audit import create_audit_log
 from routers.teams.discussions.service import delete_team_discussions
@@ -120,8 +119,8 @@ class UpdateProjectMemberRoleRequest(BaseModel):
 
     @validator("role")
     def validate_role(cls, role: str):
-        if role not in {"admin", "member"}:
-            raise ValueError("Role must be admin or member")
+        if role not in {"admin", "member", "owner"}:
+            raise ValueError("Role must be admin, member, or owner")
         return role
 
 
@@ -244,51 +243,7 @@ def create_team(
         detail=f"{user.name} created team '{request.name}'"
     )
 
-    latest_metric = db.query(CortexGlobalMetric).order_by(
-        CortexGlobalMetric.metric_date.desc()
-    ).first()
-    global_metric_insert = insert(CortexGlobalMetric).values(
-        metric_date=func.current_date(),
-        total_projects_created=latest_metric.total_projects_created if latest_metric else 0,
-        total_teams_created=(latest_metric.total_teams_created if latest_metric else 0) + 1,
-        total_documents_uploaded=latest_metric.total_documents_uploaded if latest_metric else 0,
-        total_decisions_made=latest_metric.total_decisions_made if latest_metric else 0,
-        total_ai_requests=latest_metric.total_ai_requests if latest_metric else 0,
-        total_input_tokens=latest_metric.total_input_tokens if latest_metric else 0,
-        total_output_tokens=latest_metric.total_output_tokens if latest_metric else 0,
-    )
-    db.execute(
-        global_metric_insert.on_conflict_do_update(
-            index_elements=[CortexGlobalMetric.metric_date],
-            set_={
-                "total_teams_created": CortexGlobalMetric.total_teams_created + 1,
-                "updated_at": func.now(),
-            },
-        )
-    )
-
-    latest_metric = db.query(CortexGlobalMetric).order_by(
-        CortexGlobalMetric.metric_date.desc()
-    ).first()
-    global_metric_insert = insert(CortexGlobalMetric).values(
-        metric_date=func.current_date(),
-        total_projects_created=latest_metric.total_projects_created if latest_metric else 0,
-        total_teams_created=(latest_metric.total_teams_created if latest_metric else 0) + 1,
-        total_documents_uploaded=latest_metric.total_documents_uploaded if latest_metric else 0,
-        total_decisions_made=latest_metric.total_decisions_made if latest_metric else 0,
-        total_ai_requests=latest_metric.total_ai_requests if latest_metric else 0,
-        total_input_tokens=latest_metric.total_input_tokens if latest_metric else 0,
-        total_output_tokens=latest_metric.total_output_tokens if latest_metric else 0,
-    )
-    db.execute(
-        global_metric_insert.on_conflict_do_update(
-            index_elements=[CortexGlobalMetric.metric_date],
-            set_={
-                "total_teams_created": CortexGlobalMetric.total_teams_created + 1,
-                "updated_at": func.now(),
-            },
-        )
-    )
+    increment_cortex_global_metrics(db, teams=1)
 
     db.commit()
     db.refresh(new_team)
@@ -1200,7 +1155,7 @@ def update_team_member_project_role(
     ).first()
     project = db.query(Project).filter(
         Project.project_id == project_id
-    ).first()
+    ).with_for_update().first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if not requester_membership:
@@ -1227,12 +1182,56 @@ def update_team_member_project_role(
     target_membership = db.query(ProjectMember).filter(
         ProjectMember.project_id == project_id,
         ProjectMember.user_id == target_user_id,
-    ).first()
+    ).with_for_update().first()
     target_user = db.query(User).filter(User.user_id == target_user_id).first()
     if not target_membership or not target_user:
         raise HTTPException(status_code=404, detail="User is not part of this project")
     if project.created_by == target_user_id:
         raise HTTPException(status_code=403, detail="Project owner role cannot be changed")
+
+    if request.role == "owner":
+        if not is_project_owner:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the current project owner can transfer ownership",
+            )
+        if target_membership.role != "admin":
+            raise HTTPException(
+                status_code=400,
+                detail="Ownership can only be transferred to a project admin",
+            )
+
+        former_owner_membership = db.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user_id,
+        ).with_for_update().first()
+        if not former_owner_membership:
+            raise HTTPException(
+                status_code=409,
+                detail="The current project owner does not have a project membership",
+            )
+
+        project.created_by = target_user_id
+        former_owner_membership.role = "admin"
+        actor = db.query(User).filter(User.user_id == user_id).first()
+        actor_name = actor.name if actor else "The previous project owner"
+        create_audit_log(
+            db=db,
+            project_id=project_id,
+            user_id=user_id,
+            action="update",
+            detail=(
+                f"{actor_name} transferred project ownership to {target_user.name}; "
+                "the previous owner remains a project admin"
+            ),
+        )
+        db.commit()
+        return {
+            "message": "Project ownership transferred",
+            "role": target_membership.role,
+            "is_project_owner": True,
+        }
+
     if target_membership.role == request.role:
         return {"message": "Role is unchanged", "role": target_membership.role}
     if target_membership.role == "admin" and not is_project_owner:

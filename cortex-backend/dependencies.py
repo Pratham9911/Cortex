@@ -1,4 +1,5 @@
 from typing import Optional
+from uuid import UUID
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from supabase_client import supabase
@@ -42,6 +43,10 @@ def get_current_user(
     email = sb_user.email
     if not email:
         raise HTTPException(status_code=400, detail="Token does not contain an email address")
+    try:
+        auth_user_id = UUID(str(sb_user.id))
+    except (AttributeError, TypeError, ValueError) as e:
+        raise HTTPException(status_code=401, detail="Authenticated identity is invalid") from e
 
     # Get or create local user
     db = SessionLocal()
@@ -50,26 +55,46 @@ def get_current_user(
         name = metadata.get("name") or metadata.get("full_name") or email.split("@")[0]
         avatar_url = metadata.get("avatar_url")
 
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(User.auth_user_id == auth_user_id).first()
+        if user and user.is_deleted:
+            raise HTTPException(status_code=403, detail="This Cortex account has been deleted.")
+
+        user_by_email = db.query(User).filter(User.email == email).first()
+        if user is None:
+            user = user_by_email
+        elif user_by_email and user_by_email.user_id != user.user_id:
+            raise HTTPException(status_code=403, detail="This email is linked to another Cortex identity.")
+
         if not user:
             user = User(
                 name=name,
                 email=email,
                 password_hash=None,
-                avatar_url=avatar_url
+                avatar_url=avatar_url,
+                auth_user_id=auth_user_id,
             )
             db.add(user)
             db.commit()
             db.refresh(user)
         else:
+            if user.auth_user_id and user.auth_user_id != auth_user_id:
+                raise HTTPException(status_code=403, detail="This email is linked to another Cortex identity.")
+            changed = False
+            if user.auth_user_id is None:
+                user.auth_user_id = auth_user_id
+                changed = True
             # Google metadata is the initial default, not the source of truth
             # after the user has customized their Cortex profile.
             if user.avatar_url is None and avatar_url:
                 user.avatar_url = avatar_url
+                changed = True
+            if changed:
                 db.commit()
-                db.refresh(user)
 
         return user.user_id
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database synchronization error: {str(e)}")

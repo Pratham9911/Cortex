@@ -15,6 +15,10 @@ AVATAR_CACHE_TTL_SECONDS = 120
 _avatar_cache: Dict[str, Dict[str, Any]] = {}
 
 
+def invalidate_avatar_cache(email: str) -> None:
+    _avatar_cache.pop(email.lower(), None)
+
+
 def get_db():
     db = SessionLocal()
     try:

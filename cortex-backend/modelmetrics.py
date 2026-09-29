@@ -7,6 +7,8 @@ duplicating plan limits here.
 
 from sqlalchemy import BigInteger, CheckConstraint, Column, Computed, Date, DateTime, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 from database import Base
@@ -51,7 +53,7 @@ class ProjectPack(Base):
 
 
 class CortexGlobalMetric(Base):
-    """A daily snapshot of lifetime Cortex usage totals."""
+    """Daily totals of Cortex usage."""
 
     __tablename__ = "cortex_global_metrics"
 
@@ -77,4 +79,45 @@ class CortexGlobalMetric(Base):
         CheckConstraint("total_output_tokens >= 0", name="ck_global_metrics_output_tokens_nonnegative"),
         CheckConstraint("total_tokens = total_input_tokens + total_output_tokens", name="ck_global_metrics_tokens_match"),
         Index("ix_cortex_global_metrics_metric_date", "metric_date"),
+    )
+
+
+def increment_cortex_global_metrics(
+    db: Session,
+    *,
+    projects: int = 0,
+    teams: int = 0,
+    documents: int = 0,
+    decisions: int = 0,
+) -> None:
+    increments = {
+        "total_projects_created": projects,
+        "total_teams_created": teams,
+        "total_documents_uploaded": documents,
+        "total_decisions_made": decisions,
+    }
+    values = {
+        "metric_date": func.current_date(),
+        "total_projects_created": projects,
+        "total_teams_created": teams,
+        "total_documents_uploaded": documents,
+        "total_decisions_made": decisions,
+        "total_ai_requests": 0,
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+    }
+    db.execute(
+        insert(CortexGlobalMetric)
+        .values(**values)
+        .on_conflict_do_update(
+            index_elements=[CortexGlobalMetric.metric_date],
+            set_={
+                **{
+                    column: getattr(CortexGlobalMetric, column) + amount
+                    for column, amount in increments.items()
+                    if amount
+                },
+                "updated_at": func.now(),
+            },
+        )
     )

@@ -2,11 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, aliased
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import String, case, cast, func
-from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal
 from routers.audit import create_audit_log
 from models import Project, ProjectMember, User , Team, TeamMember
-from modelmetrics import CortexGlobalMetric, ProjectPack, UserPack
+from modelmetrics import increment_cortex_global_metrics, ProjectPack, UserPack
 from dependencies import get_current_user
 
 
@@ -120,29 +119,7 @@ def create_project(
         detail=f"{user.name} created project '{new_project.name}'"
     )
 
-    latest_metric = db.query(CortexGlobalMetric).order_by(
-        CortexGlobalMetric.metric_date.desc()
-    ).first()
-    global_metric_insert = insert(CortexGlobalMetric).values(
-        metric_date=func.current_date(),
-        total_projects_created=(latest_metric.total_projects_created if latest_metric else 0) + 1,
-        total_teams_created=(latest_metric.total_teams_created if latest_metric else 0) + 1,
-        total_documents_uploaded=latest_metric.total_documents_uploaded if latest_metric else 0,
-        total_decisions_made=latest_metric.total_decisions_made if latest_metric else 0,
-        total_ai_requests=latest_metric.total_ai_requests if latest_metric else 0,
-        total_input_tokens=latest_metric.total_input_tokens if latest_metric else 0,
-        total_output_tokens=latest_metric.total_output_tokens if latest_metric else 0,
-    )
-    db.execute(
-        global_metric_insert.on_conflict_do_update(
-            index_elements=[CortexGlobalMetric.metric_date],
-            set_={
-                "total_projects_created": CortexGlobalMetric.total_projects_created + 1,
-                "total_teams_created": CortexGlobalMetric.total_teams_created + 1,
-                "updated_at": func.now(),
-            },
-        )
-    )
+    increment_cortex_global_metrics(db, projects=1, teams=1)
 
     db.commit()
     db.refresh(new_project)

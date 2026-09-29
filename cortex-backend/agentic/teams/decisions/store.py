@@ -16,12 +16,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 
 from models import Decision, DecisionParticipant, User, TeamMember
+from modelmetrics import increment_cortex_global_metrics
 
 load_dotenv()
 
 FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
 FIREWORKS_EMBEDDING_URL = "https://api.fireworks.ai/inference/v1/embeddings"
 EMBEDDING_MODEL_NAME = "fireworks/qwen3-embedding-8b"
+
+
+def increment_global_decisions_made(db: Session) -> None:
+    increment_cortex_global_metrics(db, decisions=1)
 
 
 def generate_embedding(text_content: str) -> List[float]:
@@ -149,6 +154,9 @@ def store_decision(
                 )
                 db.add(part)
                 added_participants.append({"user_id": user_id, "role": role})
+
+    if status == "approved":
+        increment_global_decisions_made(db)
 
     db.commit()
 

@@ -62,6 +62,9 @@ async def google_callback(
         return RedirectResponse(f"{frontend_url}/settings/connectors?error=invalid_state")
 
     user_id = state_data["user_id"]
+    account = db.query(User).filter(User.user_id == user_id).with_for_update().first()
+    if not account or account.is_deleted:
+        return RedirectResponse(f"{frontend_url}/login?error=account_deleted")
     code_verifier = state_data.get("code_verifier")
 
     try:
@@ -191,6 +194,9 @@ async def github_callback(
         return RedirectResponse(f"{frontend_url}/settings/connectors?error=invalid_github_state")
 
     user_id = state_data["user_id"]
+    account = db.query(User).filter(User.user_id == user_id).with_for_update().first()
+    if not account or account.is_deleted:
+        return RedirectResponse(f"{frontend_url}/login?error=account_deleted")
     client_id = os.getenv("GITHUB_APP_CLIENT_ID")
     client_secret = os.getenv("GITHUB_APP_CLIENT_SECRET")
     redirect_uri = os.getenv("GITHUB_OAUTH_REDIRECT_URI", "http://localhost:8000/api/integrations/github/callback")

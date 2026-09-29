@@ -151,7 +151,7 @@ export default function TeamDetailPage() {
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [removingMember, setRemovingMember] = useState(false)
   const [updatingMemberRole, setUpdatingMemberRole] = useState(false)
-  const [pendingMemberRole, setPendingMemberRole] = useState<"admin" | "member" | null>(null)
+  const [pendingMemberRole, setPendingMemberRole] = useState<"admin" | "member" | "owner" | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteQuery, setInviteQuery] = useState("")
   const [inviteResults, setInviteResults] = useState<SearchUser[]>([])
@@ -557,12 +557,17 @@ export default function TeamDetailPage() {
         current
           ? {
               ...current,
-              role: pendingMemberRole,
+              role: pendingMemberRole === "owner" ? "admin" : pendingMemberRole,
+              is_project_owner: pendingMemberRole === "owner" || current.is_project_owner,
               can_change_role: isProjectOwner || pendingMemberRole === "member",
               can_remove: isProjectOwner || pendingMemberRole === "member",
             }
           : current
       )
+      if (pendingMemberRole === "owner") {
+        setIsProjectOwner(false)
+        setCurrentUserRole("admin")
+      }
       setPendingMemberRole(null)
       await loadTeam()
     } catch (roleError) {
@@ -1081,21 +1086,33 @@ export default function TeamDetailPage() {
                   {pendingMemberRole ? (
                     <div className="space-y-3">
                       <p className="text-sm font-semibold">
-                        {pendingMemberRole === "admin"
+                        {pendingMemberRole === "owner"
+                          ? `Transfer project ownership to ${memberDetails.name}? You will remain a project admin.`
+                          : pendingMemberRole === "admin"
                           ? `Promote ${memberDetails.name} to project admin?`
                           : `Demote ${memberDetails.name} to project member?`}
                       </p>
                       <p className="text-xs text-zinc-500">
-                        This changes their access across the entire project, not only this team.
+                        {pendingMemberRole === "owner"
+                          ? "Only a project admin can receive ownership. This transfer is recorded in the project audit log."
+                          : "This changes their access across the entire project, not only this team."}
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <Button
                           disabled={updatingMemberRole}
                           onClick={updateMemberRole}
-                          className={pendingMemberRole === "member" ? "bg-amber-600 text-white hover:bg-amber-500" : ""}
+                          className={
+                            pendingMemberRole === "member"
+                              ? "bg-amber-600 text-white hover:bg-amber-500"
+                              : pendingMemberRole === "owner"
+                                ? "bg-sky-600 text-white hover:bg-sky-500"
+                                : ""
+                          }
                         >
                           {updatingMemberRole && <Loader2 className="mr-2 size-4 animate-spin" />}
-                          Confirm {pendingMemberRole === "admin" ? "promotion" : "demotion"}
+                          {pendingMemberRole === "owner"
+                            ? "Confirm ownership transfer"
+                            : `Confirm ${pendingMemberRole === "admin" ? "promotion" : "demotion"}`}
                         </Button>
                         <Button
                           variant="outline"
@@ -1126,6 +1143,14 @@ export default function TeamDetailPage() {
                           ? "Demote to member"
                           : "Promote to admin"}
                       </Button>
+                      {isProjectOwner && memberDetails.role === "admin" && (
+                        <Button
+                          variant="outline"
+                          onClick={() => setPendingMemberRole("owner")}
+                        >
+                          Transfer ownership
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

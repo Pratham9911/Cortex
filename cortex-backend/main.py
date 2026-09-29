@@ -8,13 +8,15 @@ from database import SessionLocal, engine
 from models import Base, User
 from modelmetrics import UserPack
 from dependencies import get_current_user
-from routers import auth, projects, documents, teams, folder, inbox, user_profiles, agents, chats_messages, audit, integrations, notification
+from routers import account, auth, projects, documents, teams, folder, inbox, user_profiles, agents, chats_messages, audit, integrations, notification
 from routers.tasks.router import router as tasks_router
 from routers.teams.discussions.router import router as discussions_router
 from routers.teams.chats.router import router as discussion_chats_router
 from migrations.migrate_audit_logs import init_audit_logs_table_and_migrate
 from migrations.migrate_tasks import init_tasks_tables
 from migrations.migrate_notifications import init_notifications_table
+from migrations.migrate_user_account_deletion import init_user_account_deletion_fields
+from migrations.reconcile_today_global_metrics import reconcile_today_global_metrics
 
 
 @asynccontextmanager
@@ -23,6 +25,8 @@ async def lifespan(app: FastAPI):
     init_audit_logs_table_and_migrate()
     init_tasks_tables()
     init_notifications_table()
+    init_user_account_deletion_fields()
+    reconcile_today_global_metrics()
 
     from agentic.checkpointer import init_checkpointer
     await init_checkpointer()
@@ -51,6 +55,7 @@ app.add_middleware(
 )
 
 app.include_router(projects.router)
+app.include_router(account.router)
 app.include_router(auth.router)
 app.include_router(teams.router)
 app.include_router(folder.router)

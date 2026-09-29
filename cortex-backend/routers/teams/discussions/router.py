@@ -522,17 +522,21 @@ def approve_decision(
     decision = db.query(Decision).filter(
         Decision.id == decision_id,
         Decision.team_id == team_id
-    ).first()
+    ).with_for_update().first()
 
     if not decision:
         raise HTTPException(status_code=404, detail="Decision not found")
 
+    was_approved = decision.status == "approved"
     user = db.query(User).filter(User.user_id == user_id).first()
     user_name = user.name if user else "Admin"
 
     decision.status = "approved"
     decision.approved_by = user_id
     decision.approved_at = func.now()
+    if not was_approved:
+        from agentic.teams.decisions.store import increment_global_decisions_made
+        increment_global_decisions_made(db)
 
     # Retrieve current participants list
     participants_rows = db.query(DecisionParticipant, User).join(
@@ -745,11 +749,12 @@ def edit_and_approve_decision(
     decision = db.query(Decision).filter(
         Decision.id == decision_id,
         Decision.team_id == team_id
-    ).first()
+    ).with_for_update().first()
 
     if not decision:
         raise HTTPException(status_code=404, detail="Decision not found")
 
+    was_approved = decision.status == "approved"
     user = db.query(User).filter(User.user_id == user_id).first()
     user_name = user.name if user else "Admin"
     decision.title = body.title
@@ -757,6 +762,9 @@ def edit_and_approve_decision(
     decision.status = "approved"
     decision.approved_by = user_id
     decision.approved_at = func.now()
+    if not was_approved:
+        from agentic.teams.decisions.store import increment_global_decisions_made
+        increment_global_decisions_made(db)
 
     from agentic.teams.decisions.store import generate_embedding
     combined_text = f"{body.title}\n\n{body.description}"
