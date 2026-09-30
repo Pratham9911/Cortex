@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from dependencies import get_current_user
 from models import AiUsageDaily, Project, ProjectMember, User
+from modelmetrics import ProjectStorageDaily
 from services.ai_usage import get_ai_usage_snapshot, get_user_pack
 
 
@@ -212,4 +213,145 @@ def get_my_ai_analytics(
         "daily": daily,
         "projects_usage": contributions,
         "totals": totals,
+    }
+
+
+@router.get("/projects/{project_id}/reports/usage")
+def get_project_usage_report(
+    project_id: int,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    today = datetime.now(timezone.utc).date()
+    end = end_date or today
+    start = start_date or (end - timedelta(days=29))
+    if start > end:
+        raise HTTPException(status_code=422, detail="start_date must be on or before end_date")
+    if (end - start).days > 365:
+        raise HTTPException(status_code=422, detail="Report date range cannot exceed 366 days")
+
+    project = (
+        db.query(Project)
+        .join(ProjectMember, ProjectMember.project_id == Project.project_id)
+        .filter(
+            Project.project_id == project_id,
+            ProjectMember.user_id == user_id,
+        )
+        .first()
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    usage_rows = (
+        db.query(
+            AiUsageDaily.usage_date,
+            func.sum(AiUsageDaily.request_count).label("requests"),
+            func.sum(AiUsageDaily.successful_requests).label("successful_requests"),
+            func.sum(AiUsageDaily.failed_requests).label("failed_requests"),
+            func.sum(AiUsageDaily.input_tokens).label("input_tokens"),
+            func.sum(AiUsageDaily.output_tokens).label("output_tokens"),
+            func.sum(AiUsageDaily.input_cost).label("input_cost"),
+            func.sum(AiUsageDaily.output_cost).label("output_cost"),
+        )
+        .filter(
+            AiUsageDaily.project_id == project_id,
+            AiUsageDaily.usage_date >= start,
+            AiUsageDaily.usage_date <= end,
+        )
+        .group_by(AiUsageDaily.usage_date)
+        .all()
+    )
+    usage_by_date = {
+        row.usage_date: {
+            "requests": int(row.requests or 0),
+            "successful_requests": int(row.successful_requests or 0),
+            "failed_requests": int(row.failed_requests or 0),
+            "input_tokens": int(row.input_tokens or 0),
+            "output_tokens": int(row.output_tokens or 0),
+            "input_cost": float(row.input_cost or 0),
+            "output_cost": float(row.output_cost or 0),
+        }
+        for row in usage_rows
+    }
+
+    storage_before_range = (
+        db.query(ProjectStorageDaily)
+        .filter(
+            ProjectStorageDaily.project_id == project_id,
+            ProjectStorageDaily.date < start,
+        )
+        .order_by(ProjectStorageDaily.date.desc())
+        .first()
+    )
+    storage_rows = (
+        db.query(ProjectStorageDaily)
+        .filter(
+            ProjectStorageDaily.project_id == project_id,
+            ProjectStorageDaily.date >= start,
+            ProjectStorageDaily.date <= end,
+        )
+        .order_by(ProjectStorageDaily.date)
+        .all()
+    )
+    storage_by_date = {row.date: float(row.storage_used_mb) for row in storage_rows}
+    storage_value = (
+        float(storage_before_range.storage_used_mb)
+        if storage_before_range
+        else 0.0
+    )
+
+    daily = []
+    current = start
+    totals = {
+        "requests": 0,
+        "successful_requests": 0,
+        "failed_requests": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "input_cost": 0.0,
+        "output_cost": 0.0,
+    }
+    while current <= end:
+        usage = usage_by_date.get(
+            current,
+            {
+                "requests": 0,
+                "successful_requests": 0,
+                "failed_requests": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "input_cost": 0.0,
+                "output_cost": 0.0,
+            },
+        )
+        storage_value = storage_by_date.get(current, storage_value)
+        totals["requests"] += usage["requests"]
+        totals["successful_requests"] += usage["successful_requests"]
+        totals["failed_requests"] += usage["failed_requests"]
+        totals["input_tokens"] += usage["input_tokens"]
+        totals["output_tokens"] += usage["output_tokens"]
+        totals["input_cost"] += usage["input_cost"]
+        totals["output_cost"] += usage["output_cost"]
+        daily.append({
+            "date": current.isoformat(),
+            **usage,
+            "total_tokens": usage["input_tokens"] + usage["output_tokens"],
+            "total_cost": usage["input_cost"] + usage["output_cost"],
+            "storage_used_mb": storage_value,
+        })
+        current += timedelta(days=1)
+
+    totals["total_tokens"] = totals["input_tokens"] + totals["output_tokens"]
+    totals["total_cost"] = totals["input_cost"] + totals["output_cost"]
+    return {
+        "project_id": project.project_id,
+        "project_name": project.name,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "daily": daily,
+        "totals": totals,
+        "storage_start_mb": daily[0]["storage_used_mb"],
+        "storage_end_mb": daily[-1]["storage_used_mb"],
     }
