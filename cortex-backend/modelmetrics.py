@@ -115,7 +115,7 @@ class ProjectStorageDaily(Base):
 
     __tablename__ = "project_storage_daily"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, index=True)
     project_id = Column(
         Integer,
         ForeignKey("projects.project_id", ondelete="CASCADE"),
@@ -135,6 +135,32 @@ class ProjectStorageDaily(Base):
             "project_id",
             "date",
             name="uq_project_storage_daily_project_date",
+        ),
+    )
+
+
+class ProjectTaskActivityDaily(Base):
+    """Per-project daily snapshots of open and completed task counts."""
+
+    __tablename__ = "project_task_activity_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    date = Column(Date, nullable=False)
+    open_tasks = Column(Integer, nullable=False, default=0, server_default="0")
+    completed_tasks = Column(Integer, nullable=False, default=0, server_default="0")
+
+    __table_args__ = (
+        CheckConstraint("open_tasks >= 0", name="ck_project_task_activity_open_nonnegative"),
+        CheckConstraint("completed_tasks >= 0", name="ck_project_task_activity_completed_nonnegative"),
+        UniqueConstraint(
+            "project_id",
+            "date",
+            name="uq_project_task_activity_daily_project_date",
         ),
     )
 
@@ -173,6 +199,68 @@ def sync_project_storage_snapshot(
             "storage_date": storage_date,
         },
     )
+
+
+def ensure_project_task_activity_snapshot(
+    db: Session,
+    project_id: int,
+) -> date:
+    """Create today's baseline from current task totals if it does not exist."""
+    activity_date = datetime.now(timezone.utc).date()
+    db.execute(
+        text("""
+            INSERT INTO project_task_activity_daily (
+                project_id,
+                date,
+                open_tasks,
+                completed_tasks
+            )
+            SELECT
+                :project_id,
+                :activity_date,
+                COUNT(task.id) FILTER (WHERE task.status <> 'DONE'),
+                COUNT(task.id) FILTER (WHERE task.status = 'DONE')
+            FROM teams AS team
+            LEFT JOIN tasks AS task ON task.team_id = team.team_id
+            WHERE team.project_id = :project_id
+            ON CONFLICT (project_id, date)
+            DO NOTHING
+        """),
+        {
+            "project_id": project_id,
+            "activity_date": activity_date,
+        },
+    )
+    return activity_date
+
+
+def record_project_task_activity_change(
+    db: Session,
+    project_id: int,
+    *,
+    open_delta: int = 0,
+    completed_delta: int = 0,
+    activity_date: date | None = None,
+) -> None:
+    """Apply a task-count change to the baseline initialized before the change."""
+    activity_date = activity_date or datetime.now(timezone.utc).date()
+    result = db.execute(
+        text("""
+            UPDATE project_task_activity_daily
+            SET open_tasks = open_tasks + :open_delta,
+                completed_tasks = completed_tasks + :completed_delta
+            WHERE project_id = :project_id
+              AND date = :activity_date
+        """),
+        {
+            "project_id": project_id,
+            "activity_date": activity_date,
+            "open_delta": open_delta,
+            "completed_delta": completed_delta,
+        },
+    )
+    if result.rowcount != 1:
+        raise RuntimeError("Task activity baseline was not initialized for this project and date")
 
 
 def increment_cortex_global_metrics(

@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from dependencies import get_current_user
+from modelmetrics import (
+    ensure_project_task_activity_snapshot,
+    record_project_task_activity_change,
+)
 from models import Notification, ProjectMember, Subtask, Task, TaskAssignee, Team, TeamMember, User
 
 
@@ -256,6 +260,7 @@ def create_task(project_id: int, team_id: int, payload: TaskInput, user_id: int 
     if payload.due_date < date.today():
         raise HTTPException(status_code=422, detail="Due date must be today or in the future")
     try:
+        activity_date = ensure_project_task_activity_snapshot(db, project_id)
         _validate_assignees(db, team_id, payload.assignee_ids)
         task = Task(team_id=team_id, title=payload.title, description=payload.description, status=payload.status, due_date=payload.due_date, priority=payload.priority, tags=payload.tags, created_by=user_id)
         db.add(task)
@@ -264,6 +269,13 @@ def create_task(project_id: int, team_id: int, payload: TaskInput, user_id: int 
         _notify_new_assignees(db, project_id, task, user_id, set(payload.assignee_ids))
         if task.status == "DONE" and not _all_subtasks_complete(db, task.id):
             raise HTTPException(status_code=422, detail="Complete every subtask before marking a task done")
+        record_project_task_activity_change(
+            db,
+            project_id,
+            open_delta=int(task.status != "DONE"),
+            completed_delta=int(task.status == "DONE"),
+            activity_date=activity_date,
+        )
         db.commit()
         db.refresh(task)
         return {"task": _serialize_task(db, task)}
@@ -289,6 +301,8 @@ def update_task(project_id: int, team_id: int, task_id: int, payload: TaskInput,
     if payload.due_date < date.today() and payload.due_date != task.due_date:
         raise HTTPException(status_code=422, detail="Due date must be today or in the future")
     try:
+        previous_status = task.status
+        activity_date = ensure_project_task_activity_snapshot(db, project_id)
         task.title, task.description = payload.title, payload.description
         task.status, task.due_date, task.priority, task.tags = payload.status, payload.due_date, payload.priority, payload.tags
         _replace_task_relations(db, task, payload)
@@ -296,6 +310,16 @@ def update_task(project_id: int, team_id: int, task_id: int, payload: TaskInput,
         db.flush()
         if task.status == "DONE" and not _all_subtasks_complete(db, task.id):
             raise HTTPException(status_code=422, detail="Complete every subtask before marking a task done")
+        if previous_status != task.status:
+            previous_completed = previous_status == "DONE"
+            current_completed = task.status == "DONE"
+            record_project_task_activity_change(
+                db,
+                project_id,
+                open_delta=int(not current_completed) - int(not previous_completed),
+                completed_delta=int(current_completed) - int(previous_completed),
+                activity_date=activity_date,
+            )
         db.commit()
         db.refresh(task)
         return {"task": _serialize_task(db, task)}
@@ -311,7 +335,16 @@ def update_task(project_id: int, team_id: int, task_id: int, payload: TaskInput,
 def delete_task(project_id: int, team_id: int, task_id: int, user_id: int = Depends(get_current_user), db: Session = Depends(get_db)):
     _require_admin(db, project_id, team_id, user_id)
     task = _task_or_404(db, team_id, task_id)
+    activity_date = ensure_project_task_activity_snapshot(db, project_id)
     db.delete(task)
+    db.flush()
+    if task.status != "DONE":
+        record_project_task_activity_change(
+            db,
+            project_id,
+            open_delta=-1,
+            activity_date=activity_date,
+        )
     db.commit()
 
 
@@ -322,7 +355,20 @@ def update_task_status(project_id: int, team_id: int, task_id: int, payload: Sta
         raise HTTPException(status_code=403, detail="Only assignees can update this task")
     if payload.status == "DONE" and not _all_subtasks_complete(db, task.id):
         raise HTTPException(status_code=422, detail="Complete every subtask before marking a task done")
+    previous_status = task.status
+    activity_date = ensure_project_task_activity_snapshot(db, project_id)
     task.status = payload.status
+    db.flush()
+    if previous_status != task.status:
+        previous_completed = previous_status == "DONE"
+        current_completed = task.status == "DONE"
+        record_project_task_activity_change(
+            db,
+            project_id,
+            open_delta=int(not current_completed) - int(not previous_completed),
+            completed_delta=int(current_completed) - int(previous_completed),
+            activity_date=activity_date,
+        )
     db.commit()
     db.refresh(task)
     return {"task": _serialize_task(db, task)}
@@ -336,9 +382,22 @@ def update_subtask_completion(project_id: int, team_id: int, task_id: int, subta
     subtask = db.query(Subtask).filter(Subtask.id == subtask_id, Subtask.task_id == task.id).first()
     if not subtask:
         raise HTTPException(status_code=404, detail="Subtask not found")
+    previous_status = task.status
+    activity_date = None
+    if previous_status == "DONE" and not payload.is_completed:
+        activity_date = ensure_project_task_activity_snapshot(db, project_id)
     subtask.is_completed = payload.is_completed
     if task.status == "DONE" and not payload.is_completed:
         task.status = "IN_PROGRESS"
+    db.flush()
+    if previous_status != task.status:
+        record_project_task_activity_change(
+            db,
+            project_id,
+            open_delta=1,
+            completed_delta=-1,
+            activity_date=activity_date,
+        )
     db.commit()
     db.refresh(task)
     return {"task": _serialize_task(db, task)}
