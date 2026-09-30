@@ -1,0 +1,35 @@
+from sqlalchemy import text
+
+from database import engine
+
+
+def init_project_storage_daily() -> None:
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS project_storage_daily (
+                id BIGSERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL
+                    REFERENCES projects(project_id) ON DELETE CASCADE,
+                date DATE NOT NULL,
+                storage_used_mb NUMERIC(24, 12) NOT NULL DEFAULT 0
+                    CHECK (storage_used_mb >= 0),
+                CONSTRAINT uq_project_storage_daily_project_date
+                    UNIQUE (project_id, date)
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO project_storage_daily (project_id, date, storage_used_mb)
+            SELECT
+                project.project_id,
+                (NOW() AT TIME ZONE 'UTC')::date,
+                COALESCE(SUM(version.file_size)::numeric / 1048576, 0)
+            FROM projects AS project
+            LEFT JOIN documents AS document
+                ON document.project_id = project.project_id
+            LEFT JOIN document_versions AS version
+                ON version.document_id = document.document_id
+               AND version.status = 'completed'
+            GROUP BY project.project_id
+            ON CONFLICT (project_id, date)
+            DO UPDATE SET storage_used_mb = EXCLUDED.storage_used_mb
+        """))

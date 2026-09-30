@@ -9,7 +9,11 @@ from document_acl import can_download_document, can_search_document, is_owner_ov
 from dependencies import get_current_user
 from task_queue.ingestion_queue import enqueue_document_ingestion
 from models import User, Project, ProjectMember, Document, DocumentVersion , DocumentChunk , Team , Folder, TeamMember
-from modelmetrics import increment_cortex_global_metrics, ProjectPack
+from modelmetrics import (
+    ProjectPack,
+    increment_cortex_global_metrics,
+    sync_project_storage_snapshot,
+)
 from supabase_client import supabase
 from routers.audit import create_audit_log
 from services.audit_service import AuditService
@@ -1839,11 +1843,13 @@ def delete_document_version(
     # Remember whether deleted version was active
     # ----------------------------------------
     was_active = version.is_active
-    
+
     # ----------------------------------------
     # Delete version
     # ----------------------------------------
     db.delete(version)
+    db.flush()
+    sync_project_storage_snapshot(db, document.project_id)
     AuditService.record_event(
         db=db,
         project_id=document.project_id,
@@ -3117,6 +3123,22 @@ def bulk_permanent_delete_document_versions(
     storage_cleanup_failed_count = len(
         storage_cleanup_failed_paths
     )
+
+    try:
+        sync_project_storage_snapshot(db, project_id)
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        logger.exception(
+            "Could not update project storage after permanent deletion: "
+            "project_id=%s version_ids=%s",
+            project_id,
+            deleted_version_ids,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Versions were deleted, but project storage metrics could not be updated.",
+        ) from error
 
     # ------------------------------------------------------------------
     # 11. Response

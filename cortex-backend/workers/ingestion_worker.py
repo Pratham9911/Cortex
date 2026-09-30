@@ -30,6 +30,7 @@ from supabase import create_client
 from sqlalchemy import text, func
 from database import SessionLocal
 
+from modelmetrics import sync_project_storage_snapshot
 from models import (
     DocumentVersion,
     DocumentChunk,
@@ -103,6 +104,14 @@ async def process(job, job_token):
             raise RuntimeError(
                 f"DocumentVersion {version_id} not found"
             )
+
+        if version.status == "completed":
+            return {
+                "status": "completed",
+                "document_id": document_id,
+                "version_id": version_id,
+                "already_processed": True,
+            }
 
         version.status = "processing"
 
@@ -376,6 +385,8 @@ async def process(job, job_token):
         latest_completed_version.activated_at = (
             func.now()
         )
+
+        sync_project_storage_snapshot(db, project_id)
 
         db.flush()
 

@@ -8,7 +8,7 @@ duplicating plan limits here.
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, Computed, Date, DateTime, Index, Integer, Numeric, String
+from sqlalchemy import BigInteger, CheckConstraint, Column, Computed, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -107,6 +107,71 @@ class CortexGlobalMetric(Base):
         CheckConstraint("total_output_tokens >= 0", name="ck_global_metrics_output_tokens_nonnegative"),
         CheckConstraint("total_tokens = total_input_tokens + total_output_tokens", name="ck_global_metrics_tokens_match"),
         Index("ix_cortex_global_metrics_metric_date", "metric_date"),
+    )
+
+
+class ProjectStorageDaily(Base):
+    """Per-project daily snapshots of successfully ingested document storage."""
+
+    __tablename__ = "project_storage_daily"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.project_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    date = Column(Date, nullable=False)
+    storage_used_mb = Column(
+        Numeric(24, 12),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+    )
+
+    __table_args__ = (
+        CheckConstraint("storage_used_mb >= 0", name="ck_project_storage_nonnegative"),
+        UniqueConstraint(
+            "project_id",
+            "date",
+            name="uq_project_storage_daily_project_date",
+        ),
+    )
+
+
+def sync_project_storage_snapshot(
+    db: Session,
+    project_id: int,
+    *,
+    storage_date: date | None = None,
+) -> None:
+    """Replace today's snapshot with the project's successfully ingested storage."""
+    storage_date = storage_date or datetime.now(timezone.utc).date()
+    db.execute(
+        text("""
+            INSERT INTO project_storage_daily (
+                project_id,
+                date,
+                storage_used_mb
+            )
+            SELECT
+                :project_id,
+                :storage_date,
+                COALESCE((
+                    SELECT SUM(version.file_size)::numeric / 1048576
+                    FROM documents AS document
+                    JOIN document_versions AS version
+                        ON version.document_id = document.document_id
+                    WHERE document.project_id = :project_id
+                      AND version.status = 'completed'
+                ), 0)
+            ON CONFLICT (project_id, date)
+            DO UPDATE SET storage_used_mb = EXCLUDED.storage_used_mb
+        """),
+        {
+            "project_id": project_id,
+            "storage_date": storage_date,
+        },
     )
 
 

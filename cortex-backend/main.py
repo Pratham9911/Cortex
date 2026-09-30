@@ -18,6 +18,7 @@ from migrations.migrate_notifications import init_notifications_table
 from migrations.migrate_user_account_deletion import init_user_account_deletion_fields
 from migrations.migrate_ai_usage_daily import init_ai_usage_daily_table
 from migrations.migrate_ai_model_costs import init_ai_model_costs
+from migrations.migrate_project_storage_daily import init_project_storage_daily
 from migrations.reconcile_today_global_metrics import reconcile_today_global_metrics
 
 
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
     init_user_account_deletion_fields()
     init_ai_usage_daily_table()
     init_ai_model_costs()
+    init_project_storage_daily()
     reconcile_today_global_metrics()
 
     from agentic.checkpointer import init_checkpointer
