@@ -1,18 +1,21 @@
 import os
 import json
 
-from groq import Groq
+from langchain_fireworks import ChatFireworks
 
+FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
+MAIN_MODEL = os.getenv("MAIN_MODEL", "accounts/fireworks/models/gpt-oss-120b")
 
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
+client = ChatFireworks(
+    model=MAIN_MODEL,
+    temperature=0,
+    api_key=FIREWORKS_API_KEY,
 )
 
 
 def rewrite_query(query: str):
 
-    prompt = f"""
-You are a query rewriting agent for an enterprise RAG system.
+    prompt = f"""You are a query rewriting agent for an enterprise RAG system.
 
 Your job is to improve retrieval quality while preserving the user's original meaning.
 
@@ -48,33 +51,25 @@ Output:
 User Query:
 {query}
 """
-    response = client.chat.completions.create(
-        model=os.getenv("MAIN_MODEL"),
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0,
-        response_format={"type": "json_object"}
-    )
 
     VALID_FALLBACK = query
 
     try:
+        response = client.invoke(prompt)
+        content = response.content if hasattr(response, "content") else str(response)
 
-        result = json.loads(
-            response.choices[0].message.content
-        )
+        # Strip markdown code fences if present
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+            content = content.strip()
 
-        rewritten_query = result.get(
-            "rewritten_query",
-            VALID_FALLBACK
-        )
+        result = json.loads(content)
+        rewritten_query = result.get("rewritten_query", VALID_FALLBACK)
 
     except Exception:
-
         rewritten_query = VALID_FALLBACK
 
     return {

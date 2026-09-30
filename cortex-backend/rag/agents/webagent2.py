@@ -1,262 +1,181 @@
 
 import os
-from groq import Groq
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
+FIREWORKS_NORMAL_MODEL = os.getenv("MAIN_MODEL", "accounts/fireworks/models/gpt-oss-120b")
 
-# System prompt used on the first attempt.
-# Keeps the answer focused and structured beautifully.
-_CONCISE_SYSTEM = (
-    "You are a helpful assistant with web search access. "
-    "Answer the user's question accurately and format your response using rich standard Markdown "
+_SYNTHESIS_SYSTEM = (
+    "You are a helpful assistant. "
+    "Using the web search snippets provided, write a clear and well-structured answer "
+    "to the user's question. "
+    "Format your response using rich standard Markdown "
     "(such as **bold text**, tables, bulleted or numbered lists, blockquotes, and headings like ###). "
-    "Make the layout visually clean and highly structured. Keep your response under 400 words. "
-    "Do not repeat search snippets verbatim."
+    "Keep your response under 400 words. "
+    "Do not repeat snippets verbatim."
 )
 
-# Tighter prompt used on the 413 retry — forces Groq to fetch less.
-_TIGHTER_SYSTEM = (
-    "Answer in 3-5 sentences maximum using clean standard Markdown (e.g. lists, bold text). Be brief."
-)
 
-# Fallback model used when compound search itself is too large.
-_FALLBACK_MODEL = "openai/gpt-oss-20b"
+def _synthesize_with_fireworks(query: str, snippets: list[dict]) -> str:
+    """
+    Fallback: when Tavily returns results but no pre-built answer,
+    synthesize one using Fireworks LLM.
+    """
+    import json
+    import urllib.request
 
-
-def _is_413(exc: Exception) -> bool:
-    """Return True if the exception is a 413 Request Entity Too Large."""
-    msg = str(exc)
-    return "413" in msg or "request_too_large" in msg or "Request Entity Too Large" in msg
-
-
-def _call_groq(client: Groq, system: str, query: str, model: str, max_tokens: int):
-    """Single blocking Groq call. Raises on error."""
-    messages = []
-    if system:                          # skip when empty — keeps request smaller
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": query})
-
-    return client.chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=max_tokens,
+    context = "\n\n".join(
+        f"[{i+1}] {s.get('title', '')}\n{s.get('snippet', '')}"
+        for i, s in enumerate(snippets)
     )
 
-
-def _obj_to_dict(obj) -> dict:
-    """
-    Convert a Groq SDK Pydantic model (or plain object) to a plain dict.
-    Priority: model_dump() -> .dict() -> vars() -> dir()-scan.
-    """
-    # Pydantic v2
-    if hasattr(obj, "model_dump"):
-        try:
-            return obj.model_dump()
-        except Exception:
-            pass
-    # Pydantic v1
-    if hasattr(obj, "dict"):
-        try:
-            return obj.dict()
-        except Exception:
-            pass
-    # Plain Python object
-    try:
-        d = vars(obj)
-        if d:
-            return d
-    except TypeError:
-        pass
-    # Last resort: dir()-based scan
-    return {
-        k: getattr(obj, k)
-        for k in dir(obj)
-        if not k.startswith("_") and not callable(getattr(obj, k, None))
+    payload = {
+        "model": FIREWORKS_NORMAL_MODEL,
+        "temperature": 0.2,
+        "max_tokens": 1024,
+        "messages": [
+            {"role": "system", "content": _SYNTHESIS_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    f"Web search results for: {query}\n\n"
+                    f"{context}\n\n"
+                    f"Answer the question: {query}"
+                ),
+            },
+        ],
     }
 
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {FIREWORKS_API_KEY}",
+    }
 
-def _extract_sources(message) -> list:
+    req = urllib.request.Request(
+        "https://api.fireworks.ai/inference/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+
+    return data["choices"][0]["message"]["content"].strip()
+
+
+def run_tavily_web_search(query: str):
     """
-    Pull search_results from executed_tools.
-    Structure from Groq SDK (discovered via debug):
-      tool -> model_dump() -> {"output": {"search_results": [
-        {"title": "...", "url": "...", "content": "...", "score": 0.8},
-        ...
-      ]}}
-    """
-    sources = []
-    executed_tools = getattr(message, "executed_tools", None) or []
+    Generator that yields SSE-ready dicts for the RAG pipeline:
 
-    for tool in executed_tools:
-        tool_dict = _obj_to_dict(tool)
+        {"type": "status",  "step": "web_search",   "message": "..."}
+        {"type": "sources", "step": "web_sources",  "sources": [...]}
+        {"type": "final",   "intent": "web_search", "answer": "...", "sources": [...]}
 
-        # Results are nested under output.search_results
-        output = tool_dict.get("output") or {}
-        if isinstance(output, dict):
-            search_results = output.get("search_results") or []
-        else:
-            # output may itself be a Pydantic object
-            search_results = getattr(output, "search_results", []) or []
+    On failure yields:
+        {"type": "error", "message": "..."}
 
-        for r in search_results:
-            d = r if isinstance(r, dict) else _obj_to_dict(r)
-
-            title   = d.get("title", "")
-            url     = d.get("url", "")
-            snippet = d.get("content", "") or d.get("snippet", "")
-            score   = d.get("score", 0.0)
-
-            if title or url:
-                sources.append({
-                    "title":   str(title)[:200],
-                    "url":     str(url),
-                    "snippet": str(snippet)[:300],
-                    "score":   float(score) if score is not None else 0.0
-                })
-
-    import re
-    if not sources and getattr(message, "reasoning", None):
-        reasoning = message.reasoning
-        blocks = re.split(r'Title:', reasoning)
-        for block in blocks[1:]:
-            lines = block.strip().split('\n')
-            if not lines: continue
-            title = lines[0].strip()
-            url = ""
-            snippet = ""
-            score = 0.0
-            
-            for line in lines[1:]:
-                line = line.strip()
-                if line.startswith('URL:'):
-                    url = line[4:].strip()
-                elif line.startswith('Content:'):
-                    snippet = line[8:].strip()
-                elif line.startswith('Score:'):
-                    try:
-                        score = float(line[6:].strip())
-                    except ValueError:
-                        pass
-            
-            if title or url:
-                sources.append({
-                    "title": str(title)[:200],
-                    "url": str(url),
-                    "snippet": str(snippet)[:300],
-                    "score": float(score)
-                })
-
-    sources.sort(key=lambda x: x.get("score", 0.0), reverse=True)
-
-    return sources
-
-
-def run_groq_web_search(query: str):
-    """
-    Generator that yields SSE-ready dicts:
-
-        {"type": "status",  "step": "groq_search",  "message": "..."}
-        {"type": "status",  "step": "groq_retry",   "message": "..."}   <- on 413
-        {"type": "status",  "step": "groq_fallback","message": "..."}   <- on 2nd 413
-        {"type": "sources", "step": "groq_sources",  "sources": [...]}
-        {"type": "final",   "answer": "..."}
-
-    Retry strategy
-    ──────────────
-    Attempt 1  compound-beta-mini  NO system prompt  (smallest possible request)
-    Attempt 2  compound-beta-mini  brief system prompt, max_tokens=800  (on 413)
-    Attempt 3  llama-3.3-70b       no web search  (on 2nd 413)
+    The caller (handle_web_search in handlers.py) catches "error" and falls
+    back to the Tinyfish manual search.
     """
 
-    if not GROQ_API_KEY:
+    if not TAVILY_API_KEY:
         yield {
             "type": "error",
-            "message": "GROQ_API_KEY environment variable is not set."
+            "message": "TAVILY_API_KEY environment variable is not set.",
         }
         return
 
-    client = Groq(api_key=GROQ_API_KEY)
-
-    # ── Attempt 1 ────────────────────────────────────────────────────
+    # ── Status ────────────────────────────────────────────────────────
     yield {
         "type": "status",
-        "step": "groq_search",
-        "message": f"Searching {query}"
+        "step": "web_search",
+        "message": f"Searching the web for: {query}",
     }
 
     try:
-        response = _call_groq(
-            client,
-            system="",           # No system prompt — keeps request minimal
+        from tavily import TavilyClient
+
+        tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
+
+        search_results = tavily_client.search(
             query=query,
-            model="compound-beta-mini",
-            max_tokens=800,
+            include_answer="advanced",
+            search_depth="fast",
+            include_raw_content=False,
+            include_favicon=True,
+            max_results=5,
         )
 
-    except Exception as e1:
-
-        if not _is_413(e1):
-            yield {"type": "error", "message": f"Groq API error: {e1}"}
-            return
-
-        # ── Attempt 2: tighter prompt ────────────────────────────────
+    except Exception as exc:
         yield {
-            "type": "status",
-            "step": "groq_retry",
-            "message": "Search context was large, retrying with focused search..."
+            "type": "error",
+            "message": f"Tavily search failed: {exc}",
         }
+        return
 
-        try:
-            response = _call_groq(
-                client,
-                system=_TIGHTER_SYSTEM,
-                query=query,
-                model="compound-beta-mini",
-                max_tokens=800,   # Needs headroom so executed_tools are included
+    # ── Parse sources ─────────────────────────────────────────────────
+    sources = []
+    for result in search_results.get("results", []):
+        title = result.get("title", "")
+        url = result.get("url", "")
+        snippet = result.get("content", "") or result.get("snippet", "")
+        score = result.get("score", 0.0)
+        favicon = result.get("favicon", "")
+
+        if title or url:
+            sources.append(
+                {
+                    "title": str(title)[:200],
+                    "url": str(url),
+                    "snippet": str(snippet)[:400],
+                    "score": float(score) if score is not None else 0.0,
+                    "favicon": str(favicon) if favicon else "",
+                }
             )
 
-        except Exception as e2:
+    # Sort by relevance score descending
+    sources.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
-            if not _is_413(e2):
-                yield {"type": "error", "message": f"Groq API error: {e2}"}
-                return
+    # ── Get / synthesize answer ───────────────────────────────────────
+    answer = search_results.get("answer") or ""
 
-            # ── Attempt 3: plain LLM fallback (no web search) ────────
-            yield {
-                "type": "status",
-                "step": "groq_fallback",
-                "message": "Answering from model knowledge (web search unavailable for this query)..."
-            }
-
+    if not answer:
+        if sources:
+            # Tavily gave results but no pre-built answer — synthesize
             try:
-                response = _call_groq(
-                    client,
-                    system=(
-                        "Answer the user's question using your training knowledge. "
-                        "Be concise and clear."
-                    ),
-                    query=query,
-                    model=_FALLBACK_MODEL,
-                    max_tokens=600,
-                )
-            except Exception as e3:
-                yield {"type": "error", "message": f"Groq API error: {e3}"}
+                answer = _synthesize_with_fireworks(query, sources)
+            except Exception as exc:
+                yield {
+                    "type": "error",
+                    "message": f"Answer synthesis failed: {exc}",
+                }
                 return
+        else:
+            # No results at all
+            yield {
+                "type": "error",
+                "message": "Tavily returned no results for this query.",
+            }
+            return
 
-    # ── Emit sources (compound model only) ───────────────────────────
-    message = response.choices[0].message
-    sources = _extract_sources(message)
+    # ── Emit sources ──────────────────────────────────────────────────
     if sources:
         yield {
             "type": "sources",
-            "step": "groq_sources",
-            "sources": sources
+            "step": "web_sources",
+            "sources": sources,
         }
 
     # ── Emit final answer ─────────────────────────────────────────────
     yield {
-        "type": "final",    
+        "type": "final",
         "intent": "web_search",
-        "answer": message.content or "",
-        "sources": sources
+        "answer": answer,
+        "sources": sources,
     }
+
+
+# Backwards-compatible alias — nothing else in the codebase should break
+run_groq_web_search = run_tavily_web_search

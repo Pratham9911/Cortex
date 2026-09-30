@@ -1,11 +1,15 @@
 import os
 import json
 
-from groq import Groq
+from langchain_fireworks import ChatFireworks
 
+FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
+MAIN_MODEL = os.getenv("MAIN_MODEL", "accounts/fireworks/models/gpt-oss-120b")
 
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY2")
+client = ChatFireworks(
+    model=MAIN_MODEL,
+    temperature=0,
+    api_key=FIREWORKS_API_KEY,
 )
 
 
@@ -14,8 +18,7 @@ def validate_answer(
     answer: str
 ):
 
-    prompt = f"""
-You are an answer validation agent for an enterprise RAG system.
+    prompt = f"""You are an answer validation agent for an enterprise RAG system.
 
 Your job is to determine whether the answer actually answers the user's question.
 
@@ -51,23 +54,19 @@ Generated Answer:
 {answer}
 """
 
-    response = client.chat.completions.create(
-        model=os.getenv("MAIN_MODEL"),
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0,
-        response_format={"type": "json_object"}
-    )
-
     try:
+        response = client.invoke(prompt)
+        content = response.content if hasattr(response, "content") else str(response)
 
-        result = json.loads(
-            response.choices[0].message.content
-        )
+        # Strip markdown code fences if present
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+            content = content.strip()
+
+        result = json.loads(content)
 
         decision = result.get("decision")
 
@@ -81,5 +80,3 @@ Generated Answer:
         return {
             "decision": "yes"
         }
-    
-    

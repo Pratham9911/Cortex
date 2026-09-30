@@ -155,12 +155,12 @@ def _run_manual_web_search(query):
 
 
 def handle_web_search(query):
-    from rag.agents.webagent2 import run_groq_web_search
+    from rag.agents.webagent2 import run_tavily_web_search
 
     failed = False
     try:
-        for event in run_groq_web_search(query):
-            if event.get("type") == "error" or event.get("step") == "groq_fallback":
+        for event in run_tavily_web_search(query):
+            if event.get("type") == "error":
                 failed = True
                 break
             yield event
@@ -171,7 +171,7 @@ def handle_web_search(query):
         yield {
             "type": "status",
             "step": "web_fallback",
-            "message": "Groq search context too large or hit an error. Switching to manual web search..."
+            "message": "Tavily web search unavailable or hit an error. Switching to manual web search..."
         }
         yield from _run_manual_web_search(query)
 
