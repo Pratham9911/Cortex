@@ -1,11 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, aliased
 from pydantic import BaseModel, Field, validator
+from datetime import date, datetime, timedelta, timezone
+
 from sqlalchemy import String, case, cast, func
 from database import SessionLocal
 from routers.audit import create_audit_log
-from models import Project, ProjectMember, User , Team, TeamMember
-from modelmetrics import increment_cortex_global_metrics, ProjectPack, UserPack
+from models import Document, DocumentVersion, Project, ProjectMember, Task, User, Team, TeamMember
+from modelmetrics import (
+    ProjectStorageDaily,
+    ProjectTaskActivityDaily,
+    increment_cortex_global_metrics,
+    ProjectPack,
+    UserPack,
+)
 from dependencies import get_current_user
 
 
@@ -224,6 +232,219 @@ def list_projects(
         }
         for project in projects
     ]
+
+
+@router.get("/projects/{project_id}/dashboard")
+def get_project_dashboard(
+    project_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    membership = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id,
+    ).first()
+    if not membership:
+        raise HTTPException(status_code=403, detail="Access denied to this project")
+
+    project = db.query(Project).filter(Project.project_id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    team_count = db.query(func.count(Team.team_id)).filter(
+        Team.project_id == project_id
+    ).scalar() or 0
+    document_count = db.query(func.count(Document.document_id)).filter(
+        Document.project_id == project_id
+    ).scalar() or 0
+    open_task_count = db.query(func.count(Task.id)).join(
+        Team, Team.team_id == Task.team_id
+    ).filter(
+        Team.project_id == project_id,
+        Task.status != "DONE",
+    ).scalar() or 0
+    completed_task_count = db.query(func.count(Task.id)).join(
+        Team, Team.team_id == Task.team_id
+    ).filter(
+        Team.project_id == project_id,
+        Task.status == "DONE",
+    ).scalar() or 0
+
+    members = db.query(
+        ProjectMember.user_id,
+        ProjectMember.role,
+        ProjectMember.joined_at,
+        User.name,
+        User.email,
+        User.avatar_url,
+    ).join(
+        User, User.user_id == ProjectMember.user_id
+    ).filter(
+        ProjectMember.project_id == project_id,
+        User.is_deleted.is_(False),
+    ).all()
+    member_by_id = {
+        row.user_id: {
+            "user_id": row.user_id,
+            "name": row.name,
+            "email": row.email,
+            "avatar_url": row.avatar_url,
+            "role": row.role,
+            "joined_at": row.joined_at.isoformat() if row.joined_at else None,
+            "is_project_owner": row.user_id == project.created_by,
+        }
+        for row in members
+        if row.user_id == project.created_by or row.role == "admin"
+    }
+
+    if project.created_by not in member_by_id:
+        owner = db.query(User).filter(
+            User.user_id == project.created_by,
+            User.is_deleted.is_(False),
+        ).first()
+        if owner:
+            member_by_id[owner.user_id] = {
+                "user_id": owner.user_id,
+                "name": owner.name,
+                "email": owner.email,
+                "avatar_url": owner.avatar_url,
+                "role": "admin",
+                "joined_at": None,
+                "is_project_owner": True,
+            }
+
+    admin_list = sorted(
+        member_by_id.values(),
+        key=lambda item: (not item["is_project_owner"], item["name"].casefold()),
+    )
+    member_count = db.query(func.count(ProjectMember.id)).join(
+        User, User.user_id == ProjectMember.user_id
+    ).filter(
+        ProjectMember.project_id == project_id,
+        User.is_deleted.is_(False),
+    ).scalar() or 0
+    admin_count = len(admin_list)
+
+    project_pack = db.query(ProjectPack).filter(
+        ProjectPack.id == project.plan_id
+    ).first() if project.plan_id else None
+    storage_snapshot = db.query(ProjectStorageDaily).filter(
+        ProjectStorageDaily.project_id == project_id
+    ).order_by(ProjectStorageDaily.date.desc()).first()
+    if storage_snapshot:
+        storage_used_mb = float(storage_snapshot.storage_used_mb)
+    else:
+        storage_bytes = db.query(func.coalesce(func.sum(DocumentVersion.file_size), 0)).join(
+            Document, Document.document_id == DocumentVersion.document_id
+        ).filter(
+            Document.project_id == project_id,
+            DocumentVersion.status == "completed",
+        ).scalar() or 0
+        storage_used_mb = float(storage_bytes) / 1048576
+
+    today = datetime.now(timezone.utc).date()
+    history_start = today - timedelta(days=89)
+    range_start = datetime.combine(history_start, datetime.min.time(), tzinfo=timezone.utc)
+    range_end = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    history = db.query(ProjectTaskActivityDaily).filter(
+        ProjectTaskActivityDaily.project_id == project_id,
+        ProjectTaskActivityDaily.date >= history_start,
+        ProjectTaskActivityDaily.date <= today,
+    ).order_by(ProjectTaskActivityDaily.date.asc()).all()
+    if history:
+        task_counts = {
+            item.date: {
+                "open_tasks": item.open_tasks,
+                "completed_tasks": item.completed_tasks,
+            }
+            for item in history
+        }
+        activity_date = history[0].date
+        # Preserve the recorded daily snapshot; live totals only seed today if absent.
+        if today not in task_counts:
+            task_counts[today] = {
+                "open_tasks": int(open_task_count),
+                "completed_tasks": int(completed_task_count),
+            }
+        latest_counts = task_counts[activity_date]
+        daily_task_activity = []
+        while activity_date <= today:
+            latest_counts = task_counts.get(activity_date, latest_counts)
+            daily_task_activity.append({
+                "date": activity_date.isoformat(),
+                **latest_counts,
+            })
+            activity_date += timedelta(days=1)
+        history_start_date = history[0].date.isoformat()
+    else:
+        daily_task_activity = [{
+            "date": today.isoformat(),
+            "open_tasks": int(open_task_count),
+            "completed_tasks": int(completed_task_count),
+        }]
+        history_start_date = today.isoformat()
+
+    team_created_rows = db.query(Team.created_at).filter(
+        Team.project_id == project_id,
+        Team.created_at >= range_start,
+        Team.created_at < range_end,
+    ).all()
+    document_created_rows = db.query(Document.created_at).filter(
+        Document.project_id == project_id,
+        Document.created_at >= range_start,
+        Document.created_at < range_end,
+    ).all()
+
+    def utc_date(value: datetime | None) -> date | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).date()
+
+    team_created_by_date: dict[date, int] = {}
+    for row in team_created_rows:
+        created_date = utc_date(row.created_at)
+        if created_date:
+            team_created_by_date[created_date] = team_created_by_date.get(created_date, 0) + 1
+    documents_created_by_date: dict[date, int] = {}
+    for row in document_created_rows:
+        created_date = utc_date(row.created_at)
+        if created_date:
+            documents_created_by_date[created_date] = documents_created_by_date.get(created_date, 0) + 1
+
+    created_activity = []
+    activity_date = history_start
+    while activity_date <= today:
+        created_activity.append({
+            "date": activity_date.isoformat(),
+            "teams_created": team_created_by_date.get(activity_date, 0),
+            "documents_created": documents_created_by_date.get(activity_date, 0),
+        })
+        activity_date += timedelta(days=1)
+
+    return {
+        "project": {
+            "project_id": project.project_id,
+            "name": project.name,
+            "created_at": project.created_at.isoformat() if project.created_at else None,
+        },
+        "summary": {
+            "team_count": int(team_count),
+            "document_count": int(document_count),
+            "open_tasks": int(open_task_count),
+            "completed_tasks": int(completed_task_count),
+            "member_count": int(member_count),
+            "admin_count": int(admin_count),
+            "storage_used_mb": storage_used_mb,
+            "storage_limit_mb": int(project_pack.max_storage_mb) if project_pack else None,
+        },
+        "admins": admin_list,
+        "task_activity": daily_task_activity,
+        "created_activity": created_activity,
+        "task_history_start_date": history_start_date,
+        "task_snapshot_count": len(history),
+    }
 
 class UpdateProjectRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
