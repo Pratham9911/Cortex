@@ -1,4 +1,10 @@
-# Cortex Architecture
+<h1>
+  <img src="../cortex-frontend/public/cortex_icon.png"
+       width="56"
+       valign="middle"
+       alt="Cortex Logo">
+  Cortex Architecture
+</h1>
 
 Cortex is structured around several core modules that work together to provide secure knowledge management, AI-powered retrieval, and team collaboration.
 
