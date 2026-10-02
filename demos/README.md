@@ -1,4 +1,10 @@
-# Cortex Demo
+<h1>
+  <img src="../cortex-frontend/public/cortex_icon.png"
+       width="56"
+       valign="middle"
+       alt="Cortex Logo">
+  Cortex Demo
+</h1>
 
 A quick look at the Cortex interface and core workflows.
 
