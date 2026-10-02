@@ -28,8 +28,26 @@ def init_project_task_activity_daily() -> None:
             SELECT
                 project.project_id,
                 (NOW() AT TIME ZONE 'UTC')::date,
-                COUNT(task.id) FILTER (WHERE task.status <> 'DONE'),
-                COUNT(task.id) FILTER (WHERE task.status = 'DONE')
+                COALESCE(
+                    (
+                        SELECT activity.open_tasks
+                        FROM project_task_activity_daily AS activity
+                        WHERE activity.project_id = project.project_id
+                          AND activity.date < (NOW() AT TIME ZONE 'UTC')::date
+                        ORDER BY activity.date DESC
+                        LIMIT 1
+                    ),
+                    COUNT(task.id) FILTER (WHERE task.status <> 'DONE')
+                ),
+                GREATEST(
+                    COALESCE((
+                        SELECT MAX(activity.completed_tasks)
+                        FROM project_task_activity_daily AS activity
+                        WHERE activity.project_id = project.project_id
+                          AND activity.date < (NOW() AT TIME ZONE 'UTC')::date
+                    ), 0),
+                    COUNT(task.id) FILTER (WHERE task.status = 'DONE')
+                )
             FROM projects AS project
             LEFT JOIN teams AS team
                 ON team.project_id = project.project_id
@@ -37,4 +55,35 @@ def init_project_task_activity_daily() -> None:
                 ON task.team_id = team.team_id
             GROUP BY project.project_id
             ON CONFLICT (project_id, date) DO NOTHING
+        """))
+        connection.execute(text("""
+            WITH cumulative_activity AS (
+                SELECT
+                    id,
+                    MAX(completed_tasks) OVER (
+                        PARTITION BY project_id
+                        ORDER BY date
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) AS completed_tasks_to_date
+                FROM project_task_activity_daily
+            )
+            UPDATE project_task_activity_daily AS activity
+            SET completed_tasks = cumulative_activity.completed_tasks_to_date
+            FROM cumulative_activity
+            WHERE activity.id = cumulative_activity.id
+              AND activity.completed_tasks < cumulative_activity.completed_tasks_to_date
+        """))
+        connection.execute(text("""
+            UPDATE project_task_activity_daily AS activity
+            SET completed_tasks = GREATEST(
+                activity.completed_tasks,
+                (
+                    SELECT COUNT(task.id)
+                    FROM teams AS team
+                    LEFT JOIN tasks AS task ON task.team_id = team.team_id
+                    WHERE team.project_id = activity.project_id
+                      AND task.status = 'DONE'
+                )
+            )
+            WHERE activity.date = (NOW() AT TIME ZONE 'UTC')::date
         """))

@@ -140,7 +140,7 @@ class ProjectStorageDaily(Base):
 
 
 class ProjectTaskActivityDaily(Base):
-    """Per-project daily snapshots of open and completed task counts."""
+    """Per-project daily open counts and cumulative completed-task totals."""
 
     __tablename__ = "project_task_activity_daily"
 
@@ -205,7 +205,7 @@ def ensure_project_task_activity_snapshot(
     db: Session,
     project_id: int,
 ) -> date:
-    """Create today's baseline from current task totals if it does not exist."""
+    """Create today's baseline by carrying forward the last known daily totals."""
     activity_date = datetime.now(timezone.utc).date()
     db.execute(
         text("""
@@ -218,13 +218,68 @@ def ensure_project_task_activity_snapshot(
             SELECT
                 :project_id,
                 :activity_date,
-                COUNT(task.id) FILTER (WHERE task.status <> 'DONE'),
-                COUNT(task.id) FILTER (WHERE task.status = 'DONE')
-            FROM teams AS team
-            LEFT JOIN tasks AS task ON task.team_id = team.team_id
-            WHERE team.project_id = :project_id
+                COALESCE(
+                    (
+                        SELECT activity.open_tasks
+                        FROM project_task_activity_daily AS activity
+                        WHERE activity.project_id = :project_id
+                          AND activity.date < :activity_date
+                        ORDER BY activity.date DESC
+                        LIMIT 1
+                    ),
+                    (
+                        SELECT COUNT(task.id)
+                        FROM teams AS team
+                        LEFT JOIN tasks AS task ON task.team_id = team.team_id
+                        WHERE team.project_id = :project_id
+                          AND task.status <> 'DONE'
+                    ),
+                    0
+                ),
+                GREATEST(
+                    COALESCE((
+                        SELECT MAX(activity.completed_tasks)
+                        FROM project_task_activity_daily AS activity
+                        WHERE activity.project_id = :project_id
+                          AND activity.date < :activity_date
+                    ), 0),
+                    COALESCE((
+                        SELECT COUNT(task.id)
+                        FROM teams AS team
+                        LEFT JOIN tasks AS task ON task.team_id = team.team_id
+                        WHERE team.project_id = :project_id
+                          AND task.status = 'DONE'
+                    ), 0)
+                )
             ON CONFLICT (project_id, date)
             DO NOTHING
+        """),
+        {
+            "project_id": project_id,
+            "activity_date": activity_date,
+        },
+    )
+    db.execute(
+        text("""
+            UPDATE project_task_activity_daily AS today
+            SET completed_tasks = GREATEST(
+                today.completed_tasks,
+                COALESCE((
+                    SELECT MAX(previous.completed_tasks)
+                    FROM project_task_activity_daily AS previous
+                    WHERE previous.project_id = :project_id
+                      AND previous.date < :activity_date
+                ), today.completed_tasks),
+                COALESCE((
+                    SELECT COUNT(task.id)
+                    FROM teams AS team
+                    LEFT JOIN tasks AS task ON task.team_id = team.team_id
+                    WHERE team.project_id = :project_id
+                      AND task.status = 'DONE'
+                ), 0)
+            )
+            WHERE today.project_id = :project_id
+              AND today.date = :activity_date
         """),
         {
             "project_id": project_id,
@@ -248,7 +303,7 @@ def record_project_task_activity_change(
         text("""
             UPDATE project_task_activity_daily
             SET open_tasks = open_tasks + :open_delta,
-                completed_tasks = completed_tasks + :completed_delta
+                completed_tasks = completed_tasks + GREATEST(:completed_delta, 0)
             WHERE project_id = :project_id
               AND date = :activity_date
         """),

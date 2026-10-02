@@ -317,7 +317,7 @@ def update_task(project_id: int, team_id: int, task_id: int, payload: TaskInput,
                 db,
                 project_id,
                 open_delta=int(not current_completed) - int(not previous_completed),
-                completed_delta=int(current_completed) - int(previous_completed),
+                completed_delta=int(current_completed and not previous_completed),
                 activity_date=activity_date,
             )
         db.commit()
@@ -366,7 +366,7 @@ def update_task_status(project_id: int, team_id: int, task_id: int, payload: Sta
             db,
             project_id,
             open_delta=int(not current_completed) - int(not previous_completed),
-            completed_delta=int(current_completed) - int(previous_completed),
+            completed_delta=int(current_completed and not previous_completed),
             activity_date=activity_date,
         )
     db.commit()
@@ -395,7 +395,6 @@ def update_subtask_completion(project_id: int, team_id: int, task_id: int, subta
             db,
             project_id,
             open_delta=1,
-            completed_delta=-1,
             activity_date=activity_date,
         )
     db.commit()

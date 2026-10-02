@@ -123,31 +123,6 @@ function ReportSkeleton({ isDark }: { isDark: boolean }) {
   )
 }
 
-function Stat({
-  label,
-  value,
-  detail,
-  icon: Icon,
-  isDark,
-}: {
-  label: string
-  value: string
-  detail?: string
-  icon: typeof Database
-  isDark: boolean
-}) {
-  return (
-    <div className={cn("rounded-xl border p-4", isDark ? "border-white/[0.07] bg-white/[0.025]" : "border-slate-100 bg-slate-50/80")}>
-      <div className="flex items-center justify-between gap-3">
-        <p className={cn("text-xs font-medium", isDark ? "text-zinc-400" : "text-slate-500")}>{label}</p>
-        <Icon className={cn("size-4", isDark ? "text-zinc-500" : "text-slate-400")} />
-      </div>
-      <p className={cn("mt-2 text-2xl font-bold tabular-nums", isDark ? "text-white" : "text-slate-950")}>{value}</p>
-      {detail && <p className={cn("mt-1 text-xs", isDark ? "text-zinc-500" : "text-slate-500")}>{detail}</p>}
-    </div>
-  )
-}
-
 export default function ReportsPage() {
   const { theme } = useTheme()
   const isDark = theme === "dark"
@@ -382,39 +357,54 @@ export default function ReportsPage() {
 
           <section className={cn("rounded-2xl border p-4 sm:p-6", panelClass)}>
             <div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className={cn("grid size-8 place-items-center rounded-lg", isDark ? "bg-emerald-400/10 text-emerald-300" : "bg-emerald-50 text-emerald-700")}>
-                    <Sparkles className="size-4" />
-                  </span>
-                  <h2 className={cn("text-base font-semibold", isDark ? "text-zinc-100" : "text-slate-900")}>AI usage</h2>
+              <div className="flex flex-1 flex-col justify-between gap-4 sm:flex-row sm:items-start">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={cn("grid size-8 place-items-center rounded-lg", isDark ? "bg-emerald-400/10 text-emerald-300" : "bg-emerald-50 text-emerald-700")}>
+                      <Sparkles className="size-4" />
+                    </span>
+                    <h2 className={cn("text-base font-semibold", isDark ? "text-zinc-100" : "text-slate-900")}>AI usage</h2>
+                  </div>
+                  <p className={cn("mt-2 text-xs", textSecondary)}>Combined across project members · {formatDay(startDate)} – {formatDay(endDate)} UTC</p>
                 </div>
-                <p className={cn("mt-2 text-xs", textSecondary)}>Combined across project members · {formatDay(startDate)} – {formatDay(endDate)} UTC</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {METRICS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setMetric(item.id)}
+                      className={cn(
+                        "rounded-lg px-3 py-2 text-xs font-semibold transition-colors",
+                        metric === item.id
+                          ? isDark ? "bg-zinc-800 text-white shadow-sm" : "bg-slate-100 text-slate-950"
+                          : isDark ? "text-zinc-400 hover:text-zinc-200" : "text-slate-500 hover:text-slate-800",
+                      )}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {METRICS.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setMetric(item.id)}
-                    className={cn(
-                      "rounded-lg px-3 py-2 text-xs font-semibold transition-colors",
-                      metric === item.id
-                        ? isDark ? "bg-zinc-800 text-white shadow-sm" : "bg-slate-100 text-slate-950"
-                        : isDark ? "text-zinc-400 hover:text-zinc-200" : "text-slate-500 hover:text-slate-800",
-                    )}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+              <div className="text-left sm:min-w-36 sm:text-right">
+                {metric === "requests" ? (
+                  <>
+                    <p className={cn("text-xs font-medium", textSecondary)}>Total requests</p>
+                    <p className={cn("mt-1 text-xl font-semibold tabular-nums", isDark ? "text-white" : "text-slate-950")}>{loading ? "—" : formatCount(totals?.requests ?? 0)}</p>
+                    <p className={cn("mt-1 text-xs", textSecondary)}>{formatCount(totals?.successful_requests ?? 0)} successful · {formatCount(totals?.failed_requests ?? 0)} failed</p>
+                  </>
+                ) : metric === "cost" ? (
+                  <>
+                    <p className={cn("text-xs font-medium", textSecondary)}>Total cost</p>
+                    <p className={cn("mt-1 text-xl font-semibold tabular-nums", isDark ? "text-white" : "text-slate-950")}>{loading ? "—" : formatCurrency(totals?.total_cost ?? 0)}</p>
+                    <p className={cn("mt-1 text-xs", textSecondary)}>{formatCurrency(totals?.input_cost ?? 0)} input · {formatCurrency(totals?.output_cost ?? 0)} output</p>
+                  </>
+                ) : (
+                  <>
+                    <p className={cn("text-xs font-medium", textSecondary)}>{metric === "total_tokens" ? "Total tokens" : metric === "input_tokens" ? "Input tokens" : "Output tokens"}</p>
+                    <p className={cn("mt-1 text-xl font-semibold tabular-nums", isDark ? "text-white" : "text-slate-950")}>{loading ? "—" : formatCount(totals?.[metric] ?? 0)}</p>
+                  </>
+                )}
               </div>
-            </div>
-
-            <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Stat label="Requests" value={loading ? "—" : formatCount(totals?.requests ?? 0)} detail={`${formatCount(totals?.successful_requests ?? 0)} successful · ${formatCount(totals?.failed_requests ?? 0)} failed`} icon={BarChart3} isDark={isDark} />
-              <Stat label="Input tokens" value={loading ? "—" : formatCount(totals?.input_tokens ?? 0)} icon={Sparkles} isDark={isDark} />
-              <Stat label="Output tokens" value={loading ? "—" : formatCount(totals?.output_tokens ?? 0)} icon={Sparkles} isDark={isDark} />
-              <Stat label="Total cost" value={loading ? "—" : formatCurrency(totals?.total_cost ?? 0)} detail={`${formatCurrency(totals?.input_cost ?? 0)} input · ${formatCurrency(totals?.output_cost ?? 0)} output`} icon={Database} isDark={isDark} />
             </div>
 
             <div className="h-[300px] w-full sm:h-[360px]">

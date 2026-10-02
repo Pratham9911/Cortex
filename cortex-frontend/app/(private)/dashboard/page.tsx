@@ -43,6 +43,8 @@ type TaskActivity = {
   day_label?: string
 }
 
+type TaskRangePreset = "14" | "30" | "90" | "custom"
+
 type DashboardData = {
   project: {
     project_id: number
@@ -61,7 +63,7 @@ type DashboardData = {
   }
   admins: DashboardMember[]
   task_activity: TaskActivity[]
-  task_history_start_date: string
+  task_history_start_date: string | null
   task_snapshot_count: number
 }
 
@@ -77,6 +79,16 @@ function formatDay(date: string) {
     day: "numeric",
     timeZone: "UTC",
   })
+}
+
+function utcDateString(date: Date) {
+  return date.toISOString().slice(0, 10)
+}
+
+function dateDaysAgo(days: number) {
+  const date = new Date()
+  date.setUTCDate(date.getUTCDate() - days)
+  return utcDateString(date)
 }
 
 function formatStorage(value: number) {
@@ -229,6 +241,16 @@ export default function DashboardPage() {
   const [error, setError] = useState("")
   const [refreshIndex, setRefreshIndex] = useState(0)
   const [selectedMember, setSelectedMember] = useState<DashboardMember | null>(null)
+  const [taskRangePreset, setTaskRangePreset] = useState<TaskRangePreset>("14")
+  const [taskRangeStart, setTaskRangeStart] = useState(() => dateDaysAgo(13))
+  const [taskRangeEnd, setTaskRangeEnd] = useState(() => utcDateString(new Date()))
+
+  useEffect(() => {
+    if (taskRangePreset === "custom") return
+    const days = Number(taskRangePreset)
+    setTaskRangeEnd(utcDateString(new Date()))
+    setTaskRangeStart(dateDaysAgo(days - 1))
+  }, [taskRangePreset])
 
   useEffect(() => {
     const selectedProjectId = localStorage.getItem("selected_project_id") ?? ""
@@ -244,6 +266,11 @@ export default function DashboardPage() {
       setLoading(false)
       return
     }
+    if (!taskRangeStart || !taskRangeEnd || taskRangeStart > taskRangeEnd) {
+      setError("Choose a valid task chart date range.")
+      setLoading(false)
+      return
+    }
     const controller = new AbortController()
     const loadDashboard = async () => {
       const token = localStorage.getItem("access_token") || localStorage.getItem("token")
@@ -255,7 +282,11 @@ export default function DashboardPage() {
       setLoading(true)
       setError("")
       try {
-        const response = await fetch(`${API_URL}/projects/${projectId}/dashboard`, {
+        const params = new URLSearchParams({
+          start_date: taskRangeStart,
+          end_date: taskRangeEnd,
+        })
+        const response = await fetch(`${API_URL}/projects/${projectId}/dashboard?${params}`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
           signal: controller.signal,
@@ -275,22 +306,10 @@ export default function DashboardPage() {
     }
     void loadDashboard()
     return () => controller.abort()
-  }, [projectId, projectLoading, refreshIndex])
+  }, [projectId, projectLoading, refreshIndex, taskRangeStart, taskRangeEnd])
 
   const chartData = useMemo(
-    () => {
-      const snapshots = dashboard?.task_activity ?? []
-      const points = snapshots.length > 0
-        ? snapshots
-        : dashboard
-          ? [{
-              date: new Date().toISOString().slice(0, 10),
-              open_tasks: dashboard.summary.open_tasks,
-              completed_tasks: dashboard.summary.completed_tasks,
-            }]
-          : []
-      return points.map((point) => ({ ...point, day_label: formatDay(point.date) }))
-    },
+    () => (dashboard?.task_activity ?? []).map((point) => ({ ...point, day_label: formatDay(point.date) })),
     [dashboard],
   )
   if (projectLoading) return <DashboardSkeleton isDark={isDark} />
@@ -361,7 +380,7 @@ export default function DashboardPage() {
 
           <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,0.8fr)]">
             <article className={cn("min-w-0 rounded-2xl border p-5 sm:p-6", panelClass)}>
-              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+              <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
                 <div>
                   <div className="flex items-center gap-2">
                     <span className={cn("grid size-8 place-items-center rounded-lg border", isDark ? "border-white/10 bg-white/[0.04] text-zinc-300" : "border-slate-200 bg-slate-50 text-slate-700")}>
@@ -372,14 +391,52 @@ export default function DashboardPage() {
                     </h2>
                   </div>
                   <p className={cn("mt-2 text-xs", secondaryText)}>
-                    {dashboard.task_snapshot_count <= 1
-                      ? "Current open and completed totals · Daily history is starting to build"
-                      : `Open and completed tasks over time · History from ${formatDay(dashboard.task_history_start_date)}`}
+                    Open and completed tasks by day in the selected range
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="Task chart date range"
+                      value={taskRangePreset}
+                      onChange={(event) => setTaskRangePreset(event.target.value as TaskRangePreset)}
+                      className={cn("h-9 rounded-lg border px-2.5 text-xs outline-none focus:ring-2 focus:ring-inset", isDark ? "border-white/10 bg-[#17191b] text-zinc-200 focus:ring-white/30" : "border-slate-200 bg-white text-slate-700 focus:ring-slate-400")}
+                    >
+                      <option value="14">Last 14 days</option>
+                      <option value="30">Last 30 days</option>
+                      <option value="90">Last 90 days</option>
+                      <option value="custom">Custom range</option>
+                    </select>
+                    {taskRangePreset === "custom" && (
+                      <>
+                        <label className={cn("flex items-center gap-2 text-xs", secondaryText)}>
+                          From
+                          <input
+                            aria-label="Task chart start date"
+                            type="date"
+                            value={taskRangeStart}
+                            max={taskRangeEnd || utcDateString(new Date())}
+                            onChange={(event) => setTaskRangeStart(event.target.value)}
+                            className={cn("h-9 rounded-lg border px-2 text-xs outline-none focus:ring-2 focus:ring-inset", isDark ? "border-white/10 bg-[#17191b] text-zinc-200 focus:ring-white/30" : "border-slate-200 bg-white text-slate-700 focus:ring-slate-400")}
+                          />
+                        </label>
+                        <label className={cn("flex items-center gap-2 text-xs", secondaryText)}>
+                          To
+                          <input
+                            aria-label="Task chart end date"
+                            type="date"
+                            value={taskRangeEnd}
+                            min={taskRangeStart}
+                            max={utcDateString(new Date())}
+                            onChange={(event) => setTaskRangeEnd(event.target.value)}
+                            className={cn("h-9 rounded-lg border px-2 text-xs outline-none focus:ring-2 focus:ring-inset", isDark ? "border-white/10 bg-[#17191b] text-zinc-200 focus:ring-white/30" : "border-slate-200 bg-white text-slate-700 focus:ring-slate-400")}
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-4">
+                <div className="flex flex-col gap-3 sm:items-end">
                   <span className={cn("text-xs tabular-nums", isDark ? "text-zinc-300" : "text-slate-700")}>
-                    {dashboard.summary.open_tasks} open · {dashboard.summary.completed_tasks} completed
+                    Overall: {formatCount(dashboard.summary.open_tasks)} open now · {formatCount(dashboard.summary.completed_tasks)} completed to date
                   </span>
                   <div className="flex flex-wrap items-center gap-4 text-xs">
                     <span className={cn("inline-flex items-center gap-2", isDark ? "text-zinc-300" : "text-slate-700")}><i className="h-0.5 w-4 bg-black dark:bg-white" />Open Tasks</span>

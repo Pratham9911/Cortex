@@ -237,6 +237,8 @@ def list_projects(
 @router.get("/projects/{project_id}/dashboard")
 def get_project_dashboard(
     project_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
     user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -344,45 +346,81 @@ def get_project_dashboard(
 
     today = datetime.now(timezone.utc).date()
     history_start = today - timedelta(days=89)
+    chart_start = start_date or today - timedelta(days=13)
+    chart_end = end_date or today
+    if chart_start > chart_end:
+        raise HTTPException(status_code=422, detail="Start date must be on or before end date")
+    if chart_end > today:
+        raise HTTPException(status_code=422, detail="End date cannot be in the future")
+
     range_start = datetime.combine(history_start, datetime.min.time(), tzinfo=timezone.utc)
     range_end = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-    history = db.query(ProjectTaskActivityDaily).filter(
+    previous_snapshot = db.query(ProjectTaskActivityDaily).filter(
         ProjectTaskActivityDaily.project_id == project_id,
-        ProjectTaskActivityDaily.date >= history_start,
-        ProjectTaskActivityDaily.date <= today,
+        ProjectTaskActivityDaily.date < chart_start,
+    ).order_by(ProjectTaskActivityDaily.date.desc()).first()
+    previous_completed_total = db.query(
+        func.max(ProjectTaskActivityDaily.completed_tasks)
+    ).filter(
+        ProjectTaskActivityDaily.project_id == project_id,
+        ProjectTaskActivityDaily.date < chart_start,
+    ).scalar()
+    chart_snapshots = db.query(ProjectTaskActivityDaily).filter(
+        ProjectTaskActivityDaily.project_id == project_id,
+        ProjectTaskActivityDaily.date >= chart_start,
+        ProjectTaskActivityDaily.date <= chart_end,
     ).order_by(ProjectTaskActivityDaily.date.asc()).all()
-    if history:
-        task_counts = {
-            item.date: {
-                "open_tasks": item.open_tasks,
-                "completed_tasks": item.completed_tasks,
-            }
-            for item in history
-        }
-        activity_date = history[0].date
-        # Preserve the recorded daily snapshot; live totals only seed today if absent.
-        if today not in task_counts:
-            task_counts[today] = {
-                "open_tasks": int(open_task_count),
-                "completed_tasks": int(completed_task_count),
-            }
-        latest_counts = task_counts[activity_date]
-        daily_task_activity = []
-        while activity_date <= today:
-            latest_counts = task_counts.get(activity_date, latest_counts)
-            daily_task_activity.append({
+
+    task_activity = []
+    if previous_snapshot or chart_snapshots:
+        if previous_snapshot:
+            activity_date = chart_start
+            open_tasks_for_day = previous_snapshot.open_tasks
+            completed_tasks_for_day = max(
+                previous_snapshot.completed_tasks,
+                int(previous_completed_total or 0),
+            )
+        else:
+            activity_date = chart_snapshots[0].date
+            open_tasks_for_day = chart_snapshots[0].open_tasks
+            completed_tasks_for_day = chart_snapshots[0].completed_tasks
+        snapshots_by_date = {snapshot.date: snapshot for snapshot in chart_snapshots}
+        while activity_date <= chart_end:
+            snapshot = snapshots_by_date.get(activity_date)
+            if snapshot:
+                open_tasks_for_day = snapshot.open_tasks
+                completed_tasks_for_day = max(
+                    completed_tasks_for_day,
+                    snapshot.completed_tasks,
+                )
+            if activity_date == today:
+                completed_tasks_for_day = max(
+                    completed_tasks_for_day,
+                    int(completed_task_count),
+                )
+            task_activity.append({
                 "date": activity_date.isoformat(),
-                **latest_counts,
+                "open_tasks": open_tasks_for_day,
+                "completed_tasks": completed_tasks_for_day,
             })
             activity_date += timedelta(days=1)
-        history_start_date = history[0].date.isoformat()
-    else:
-        daily_task_activity = [{
+    elif chart_start <= today <= chart_end:
+        task_activity = [{
             "date": today.isoformat(),
             "open_tasks": int(open_task_count),
             "completed_tasks": int(completed_task_count),
         }]
-        history_start_date = today.isoformat()
+
+    completed_history_total = db.query(
+        func.max(ProjectTaskActivityDaily.completed_tasks)
+    ).filter(
+        ProjectTaskActivityDaily.project_id == project_id,
+        ProjectTaskActivityDaily.date <= today,
+    ).scalar()
+    completed_history_total = max(
+        int(completed_history_total or 0),
+        int(completed_task_count),
+    )
 
     team_created_rows = db.query(Team.created_at).filter(
         Team.project_id == project_id,
@@ -433,17 +471,17 @@ def get_project_dashboard(
             "team_count": int(team_count),
             "document_count": int(document_count),
             "open_tasks": int(open_task_count),
-            "completed_tasks": int(completed_task_count),
+            "completed_tasks": int(completed_history_total),
             "member_count": int(member_count),
             "admin_count": int(admin_count),
             "storage_used_mb": storage_used_mb,
             "storage_limit_mb": int(project_pack.max_storage_mb) if project_pack else None,
         },
         "admins": admin_list,
-        "task_activity": daily_task_activity,
+        "task_activity": task_activity,
         "created_activity": created_activity,
-        "task_history_start_date": history_start_date,
-        "task_snapshot_count": len(history),
+        "task_history_start_date": task_activity[0]["date"] if task_activity else None,
+        "task_snapshot_count": len(chart_snapshots),
     }
 
 class UpdateProjectRequest(BaseModel):
