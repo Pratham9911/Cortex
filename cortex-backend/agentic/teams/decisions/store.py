@@ -13,7 +13,7 @@ from typing import List, Optional, Union, Dict, Any
 import requests
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
+from sqlalchemy import text
 
 from models import Decision, DecisionParticipant, User, TeamMember
 from modelmetrics import increment_cortex_global_metrics
