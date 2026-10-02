@@ -1858,7 +1858,12 @@ def delete_document_version(
         resource_id=version.version_id,
         action="delete",
         actor_user_id=user_id,
-        metadata={"document_id": document.document_id, "version_number": version_number},
+        metadata={
+            "document_id": document.document_id,
+            "document_name": document.title,
+            "file_name": version.file_name,
+            "version_number": version_number,
+        },
         description=f"User {{user:{user_id}}} permanently deleted version {version_number} of document {{document:{document.document_id}}}"
     )
     
@@ -2019,7 +2024,12 @@ def soft_delete_document_version(
         actor_user_id=user_id,
         before={"is_deleted": False},
         after={"is_deleted": True},
-        metadata={"document_id": document.document_id, "version_number": version_number},
+        metadata={
+            "document_id": document.document_id,
+            "document_name": document.title,
+            "file_name": version.file_name,
+            "version_number": version_number,
+        },
         description=f"User {{user:{user_id}}} moved version {version_number} of document {{document:{document.document_id}}} to trash"
     )
 
@@ -2695,7 +2705,12 @@ def bulk_restore_document_versions(
                 resource_id=version.version_id,
                 action="system",
                 actor_user_id=user_id,
-                metadata={"document_id": doc.document_id, "version_number": version.version_number},
+                metadata={
+                    "document_id": doc.document_id,
+                    "document_name": doc.title,
+                    "file_name": version.file_name,
+                    "version_number": version.version_number,
+                },
                 description=f"User {{user:{user_id}}} restored version {version.version_number} of document {{document:{doc.document_id}}} from trash"
             )
 
@@ -2990,7 +3005,12 @@ def bulk_permanent_delete_document_versions(
                 resource_id=version.version_id,
                 action="delete",
                 actor_user_id=user_id,
-                metadata={"document_id": doc.document_id, "version_number": version.version_number},
+                metadata={
+                    "document_id": doc.document_id,
+                    "document_name": doc.title,
+                    "file_name": version.file_name,
+                    "version_number": version.version_number,
+                },
                 description=f"User {{user:{user_id}}} permanently deleted version {version.version_number} of document {{document:{doc.document_id}}}"
             )
 

@@ -140,7 +140,7 @@ def create_folder(
         resource_id=folder.folder_id,
         action="create",
         actor_user_id=user_id,
-        after={"name": folder.name, "allowed_team_ids": parsed_team_ids},
+        after={"name": folder.name, "allowed_team_ids": folder.allowed_team_ids},
         metadata={"folder_name": folder.name},
         description=f"User {{user:{user_id}}} created folder {{folder:{folder.folder_id}}}"
     )

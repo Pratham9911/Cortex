@@ -112,6 +112,7 @@ def _build_audit_query(
                 func.lower(User.name).like(term),
                 func.lower(AuditLog.metadata_["filename"].as_string()).like(term),
                 func.lower(AuditLog.metadata_["file_name"].as_string()).like(term),
+                func.lower(AuditLog.metadata_["document_name"].as_string()).like(term),
                 func.lower(AuditLog.metadata_["folder_name"].as_string()).like(term),
                 func.lower(AuditLog.metadata_["target_folder_name"].as_string()).like(term)
             )
@@ -191,7 +192,9 @@ def _format_audit_log_items(db: Session, rows):
             doc_id = int(log.metadata_["document_id"])
 
         resource_name = None
-        if log.metadata_ and log.metadata_.get("filename"):
+        if log.metadata_ and log.metadata_.get("document_name"):
+            resource_name = log.metadata_["document_name"]
+        elif log.metadata_ and log.metadata_.get("filename"):
             resource_name = log.metadata_["filename"]
         elif log.metadata_ and log.metadata_.get("file_name"):
             resource_name = log.metadata_["file_name"]
@@ -226,7 +229,12 @@ def _format_audit_log_items(db: Session, rows):
 
         def _doc_repl(m):
             did = int(m.group(1))
-            return f"'{doc_file_name_map.get(did) or doc_map.get(did, resource_name)}'"
+            document_name = (
+                log.metadata_.get("document_name")
+                if log.metadata_ and str(log.metadata_.get("document_id")) == str(did)
+                else None
+            )
+            return f"'{document_name or doc_file_name_map.get(did) or doc_map.get(did) or resource_name or 'Document'}'"
 
         desc = re.sub(r"\{document:(\d+)\}", _doc_repl, desc)
 
@@ -247,9 +255,18 @@ def _format_audit_log_items(db: Session, rows):
             desc = re.sub(rf"\bUser\s+{log.actor_user_id}\b", actor_name, desc, flags=re.IGNORECASE)
         desc = re.sub(r"\bUser\s+\d+\b", actor_name, desc, flags=re.IGNORECASE)
 
-        if doc_id and (doc_id in doc_map or doc_id in doc_file_name_map):
-            d_name = doc_file_name_map.get(doc_id) or doc_map.get(doc_id)
-            desc = re.sub(rf"\bdocument\s+{doc_id}\b", f"'{d_name}'", desc, flags=re.IGNORECASE)
+        if doc_id and (
+            (log.metadata_ or {}).get("document_name")
+            or doc_id in doc_map
+            or doc_id in doc_file_name_map
+        ):
+            d_name = (
+                (log.metadata_ or {}).get("document_name")
+                or doc_file_name_map.get(doc_id)
+                or doc_map.get(doc_id)
+            )
+            if d_name:
+                desc = re.sub(rf"\bdocument\s+{doc_id}\b", f"'{d_name}'", desc, flags=re.IGNORECASE)
 
         if log.resource_type == "folder" and log.resource_id and str(log.resource_id).isdigit():
             f_id = int(log.resource_id)
