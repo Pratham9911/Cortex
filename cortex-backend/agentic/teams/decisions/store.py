@@ -14,14 +14,41 @@ import requests
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
+from sqlalchemy.dialects.postgresql import insert
 
 from models import Decision, DecisionParticipant, User, TeamMember
+from modelmetrics import CortexGlobalMetric
 
 load_dotenv()
 
 FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
 FIREWORKS_EMBEDDING_URL = "https://api.fireworks.ai/inference/v1/embeddings"
 EMBEDDING_MODEL_NAME = "fireworks/qwen3-embedding-8b"
+
+
+def _increment_global_decision_metric(db: Session) -> None:
+    latest_metric = db.query(CortexGlobalMetric).order_by(
+        CortexGlobalMetric.metric_date.desc()
+    ).first()
+    metric_insert = insert(CortexGlobalMetric).values(
+        metric_date=func.current_date(),
+        total_projects_created=latest_metric.total_projects_created if latest_metric else 0,
+        total_teams_created=latest_metric.total_teams_created if latest_metric else 0,
+        total_documents_uploaded=latest_metric.total_documents_uploaded if latest_metric else 0,
+        total_decisions_made=(latest_metric.total_decisions_made if latest_metric else 0) + 1,
+        total_ai_requests=latest_metric.total_ai_requests if latest_metric else 0,
+        total_input_tokens=latest_metric.total_input_tokens if latest_metric else 0,
+        total_output_tokens=latest_metric.total_output_tokens if latest_metric else 0,
+    )
+    db.execute(
+        metric_insert.on_conflict_do_update(
+            index_elements=[CortexGlobalMetric.metric_date],
+            set_={
+                "total_decisions_made": CortexGlobalMetric.total_decisions_made + 1,
+                "updated_at": func.now(),
+            },
+        )
+    )
 
 
 def generate_embedding(text_content: str) -> List[float]:
@@ -150,6 +177,7 @@ def store_decision(
                 db.add(part)
                 added_participants.append({"user_id": user_id, "role": role})
 
+    _increment_global_decision_metric(db)
     db.commit()
 
     participant_notice = ""
