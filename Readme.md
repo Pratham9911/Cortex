@@ -3,166 +3,72 @@
        width="56"
        valign="middle"
        alt="Cortex Logo">
-  Cortex <small>— Internal AI Knowledge &amp; Decision System</small>
+  Cortex <small>— Internal AI Knowledge & Decision System</small>
 </h1>
 
-Cortex is a structured AI system designed to **ingest knowledge, retrieve relevant context, generate answers, and explain them with trust**.
 
-It focuses on **clarity, reliability, and actionable intelligence**, not just raw AI responses.
-
----
-
-#  What Cortex Does
-
-* 📥 Ingests structured internal knowledge
-* 🔍 Retrieves relevant information using embeddings
-* 🧠 Generates answers using controlled reasoning
-* 🔎 Explains *why* an answer was generated
-* ⚙️ Maintains reliability through logging & system design
-
----
-
-# 🏗️ System Architecture
-
-## 🔹 System Design
-
-![System Design](cortex-frontend/public/diagram/cortexArchitecture.png)
-
----
-
-## System Evaluation Results
-
-<p align="center">
-  <img src="cortex-backend/rag/evaluation/Observations/Hybrid_Rerankers.png" width="750">
+<p>
+  Cortex is an internal AI system for organizing team knowledge, retrieving relevant context,
+  generating grounded answers, and preserving decisions with source-aware AI.
 </p>
 
-**[Detailed Evaluation Report](cortex-backend/rag/evaluation/readme.md)**
+
+![Cortex Landing Page](demos/pics/Cortex_LandingPage.png)
 
 ---
 
-# 🧱 The 4 Core System Pillars
+# 🏗️ Architecture
 
-Cortex is built strictly on **four pillars**.
-Everything in the system belongs to one of these.
+Cortex combines document management, asynchronous ingestion, hybrid retrieval, AI generation, and team knowledge workflows.
 
----
+<p align="center">
+  <img src="architecture/Cortex_Architecture.png" width="900" alt="Cortex Architecture">
+</p>
 
-## 1️⃣ Knowledge Ingestion
-
-**Goal:** Bring clean, structured knowledge into the system.
-
-### ✅ Includes
-
-* Document upload (PDF, Markdown, Text)
-* Versioning (v1, v2, v3…)
-* Metadata (source, author, team, timestamp)
-* Intelligent semantic chunking
-
-### ❌ Excludes
-
-* OCR / image parsing
-* Web scraping
-* Real-time collaboration
-
-📌 **Rule:**
-
-> If knowledge is not ingested cleanly, AI quality does not matter.
+For the detailed architecture and individual modules, see [`architecture/README.md`](./architecture/README.md).
 
 ---
 
-## 2️⃣ AI Retrieval & Reasoning
+# 📊 Retrieval Evaluation
 
-**Goal:** Find the right information and generate accurate answers.
+Cortex's retrieval pipeline was evaluated on a benchmark of **125+ questions**, comparing retrieval approaches using Recall@7, MRR, and nDCG@7.
 
-### ✅ Includes
+<p align="center">
+  <img src="cortex-backend/rag/evaluation/Observations/Hybrid_Rerankers.png"
+       width="750"
+       alt="Cortex Retrieval Evaluation">
+</p>
 
-* Embeddings & vector search
-* Top-k retrieval with thresholds
-* Context window management
-* Handling empty / partial results
+| Metric | Baseline | Hybrid + Reranking |
+|---|---:|---:|
+| Recall@7 | 89.9% | **94.6%** |
+| MRR | 0.756 | **0.902** |
+| nDCG@7 | 0.758 | **0.884** |
 
-### ❌ Excludes
+The evaluation compares retrieval quality before and after combining semantic search, keyword search, RRF fusion, and reranking.
 
-* Model training / fine-tuning
-* Multi-agent systems
 
-📌 **Rule:**
-
-> Retrieval quality matters more than model size.
-
----
-
-## 3️⃣ Explainability & Trust (Core Differentiator)
-
-**Goal:** Make every AI answer understandable and reliable.
-
-### ✅ Includes
-
-* Source attribution (docs + chunks)
-* Confidence scoring
-* Explanation of reasoning
-* Clear uncertainty handling
-
-### ❌ Excludes
-
-* Complex academic XAI
-* Heavy visualization tools
-
-📌 **Rule:**
-
-> An answer without explanation is a system failure.
-
----
-
-## 4️⃣ Engineering & Ops
-
-**Goal:** Ensure the system is stable, testable, and deployable.
-
-### ✅ Includes
-
-* API-first backend
-* Basic authentication
-* Logging (retrieval + generation)
-* Monitoring & CI/CD
-* Unit & integration tests
-
-### ❌ Excludes
-
-* Mobile apps
-* Enterprise auth systems
-
-📌 **Rule:**
-
-> If it can’t be deployed or tested, it doesn’t exist.
+[Detailed evaluation →](./cortex-backend/rag/evaluation/readme.md)
 
 ---
 
 # 🧩 Tech Stack
 
-* **Frontend:** React
-* **Backend:** Express / Node.js
-* **Database:** PostgreSQL
-* **Graph DB:** Neo4j
-* **Queue:** Redis / BullMQ
-* **AI Layer:** Embeddings + LLM APIs
+| Layer | Technologies |
+|---|---|
+| **Frontend** | Next.js, React, TypeScript |
+| **Backend** | Python, FastAPI |
+| **Database** | PostgreSQL, pgvector |
+| **Storage** | Supabase Storage |
+| **Queue & Workers** | Redis, BullMQ |
+| **AI / LLM** | Fireworks APIs |
+| **AI Frameworks** | LangChain, LangGraph |
+| **Search** | pgvector semantic search, PostgreSQL full-text search |
+| **Infrastructure** | Docker, Vercel, Render |
+| **Development** | Git, GitHub |
 
 ---
 
-# 🎯 Vision
-
-Cortex is not just an AI chatbot.
-It is a **decision system** that transforms raw data into:
-
-* structured knowledge
-* explainable insights
-* actionable outputs
-
----
-
-# 📌 Final Note
-
-Cortex is built with a clear philosophy:
-
-> **Clarity > Complexity**
-> **Trust > Raw AI Power**
-> **Structure > Chaos**
+<p align="center">
+  <sub>Built as a system-first approach to internal AI knowledge and decision management.</sub>
+</p>
