@@ -17,40 +17,82 @@
 
 ---
 
-# 🏗️ Architecture
-
-Cortex combines document management, asynchronous ingestion, hybrid retrieval, AI generation, and team knowledge workflows.
+## 🏗️ Architecture
 
 <p align="center">
-  <img src="architecture/Cortex_Architecture.png" width="900" alt="Cortex Architecture">
+  <strong>A system built around knowledge, retrieval, and intelligent decision support.</strong>
 </p>
 
-For the detailed architecture and individual modules, see [`architecture/README.md`](./architecture/README.md).
+<p align="center">
+  Cortex connects secure document management, asynchronous ingestion,
+  hybrid retrieval, AI generation, and team knowledge into one system.
+</p>
+
+<br>
+
+<p align="center">
+  <img
+    src="architecture/Cortex_Architecture.png"
+    width="950"
+    alt="Cortex Architecture Overview"
+  >
+</p>
+
+<br>
+
+<p align="center">
+  <a href="./architecture/Readme.md">
+    <strong>Explore the detailed architecture →</strong>
+  </a>
+</p>
 
 ---
 
-# 📊 Retrieval Evaluation
-
-Cortex's retrieval pipeline was evaluated on a benchmark of **125+ questions**, comparing retrieval approaches using Recall@7, MRR, and nDCG@7.
+## 📊 Retrieval Evaluation
 
 <p align="center">
-  <img src="cortex-backend/rag/evaluation/Observations/Hybrid_Rerankers.png"
-       width="750"
-       alt="Cortex Retrieval Evaluation">
+  <strong>Measuring retrieval quality, not just generation quality.</strong>
 </p>
 
-| Metric | Baseline | Hybrid + Reranking |
-|---|---:|---:|
-| Recall@7 | 89.9% | **94.6%** |
-| MRR | 0.756 | **0.902** |
-| nDCG@7 | 0.758 | **0.884** |
+<p align="center">
+  Cortex was evaluated on a benchmark of <strong>125+ questions</strong>
+  using retrieval metrics including Recall@7, MRR, and nDCG@7.
+</p>
 
-The evaluation compares retrieval quality before and after combining semantic search, keyword search, RRF fusion, and reranking.
+<br>
 
+<p align="center">
+  <img
+    src="cortex-backend/rag/evaluation/Observations/Hybrid_Rerankers.png"
+    width="820"
+    alt="Cortex Retrieval Evaluation"
+  >
+</p>
 
-[Detailed evaluation →](./cortex-backend/rag/evaluation/readme.md)
+<details>
+<summary><strong>What was evaluated?</strong></summary>
 
----
+<br>
+
+The evaluation compares retrieval approaches across:
+
+- Semantic retrieval
+- Keyword retrieval
+- Hybrid retrieval with RRF
+- Reranking
+
+The final pipeline improved the measured retrieval metrics on the evaluation benchmark.
+
+</details>
+
+<br>
+
+<p align="center">
+  <a href="./cortex-backend/rag/evaluation/readme.md">
+    <strong>View the detailed evaluation →</strong>
+  </a>
+</p>
+
 
 # 🧩 Tech Stack
 
