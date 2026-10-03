@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import type { FormEvent, ReactNode } from "react"
 import { useTheme } from "next-themes"
 import { useAuth } from "@/components/auth/protected-route"
+import { UserAvatarContents } from "@/components/teams/user-avatar-contents"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -32,14 +33,6 @@ export default function AccountSettingsContent() {
   const [deletingAccount, setDeletingAccount] = useState(false)
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const deletePhrase = "DELETE MY ACCOUNT"
-  const initials = user?.name
-    ?.trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase() || "CX"
 
   useEffect(() => {
     setName(user?.name || "")
@@ -181,9 +174,7 @@ export default function AccountSettingsContent() {
               <p className="mt-1 text-xs text-zinc-500">Your Google profile image is currently read-only.</p>
             </div>
             <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-zinc-700 bg-zinc-800 text-sm font-bold text-white">
-              {user?.avatar_url ? (
-                <img src={user.avatar_url} alt={`${user.name || "User"} avatar`} className="size-full object-cover" />
-              ) : initials}
+              <UserAvatarContents name={user?.name} avatarUrl={user?.avatar_url || undefined} />
             </div>
           </div>
           <form onSubmit={saveName} className="space-y-2 py-4">

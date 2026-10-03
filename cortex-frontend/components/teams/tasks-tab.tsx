@@ -146,6 +146,7 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false, init
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null)
+  const [viewMode, setViewMode] = useState<"BOARD" | "LIST">("BOARD")
   const [filterOpen, setFilterOpen] = useState(false)
   const [priorityFilter, setPriorityFilter] = useState<Priority | "ALL">("ALL")
   const [sortBy, setSortBy] = useState<"DUE_DATE" | "PRIORITY">("DUE_DATE")
@@ -276,8 +277,73 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false, init
     } catch (error) { setTaskError(error instanceof Error ? error.message : "Could not update subtask") }
   }
 
-  return <section className="min-w-0 space-y-5">{taskError && <p className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-300">{taskError}</p>}<div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4 dark:border-zinc-800"><div className="flex items-center gap-1 sm:gap-2"><Button variant="ghost" size="sm" className={cn("h-9 rounded-none border-b-2 px-2 font-semibold", isDark ? "border-white text-white hover:bg-transparent" : "border-black text-black hover:bg-transparent")}><LayoutGrid className="size-4" />Board view</Button><Button variant="ghost" size="sm" className={cn("h-9 rounded-none px-2", isDark ? "text-zinc-500 hover:bg-transparent hover:text-zinc-200" : "text-slate-500 hover:bg-transparent hover:text-slate-900")}><List className="size-4" />List view</Button></div><div className="flex flex-wrap items-center gap-2"><div className="relative"><Button variant="outline" size="sm" onClick={() => setFilterOpen((open) => !open)} className={cn("rounded-md", filterOpen && (isDark ? "border-white bg-white text-black" : "border-black bg-black text-white"))}><SlidersHorizontal className="size-3.5" />Filter <ChevronDown className="size-3.5" /></Button>{filterOpen && <div className={cn("absolute right-0 z-20 mt-2 w-64 border p-3 shadow-lg", isDark ? "border-zinc-700 bg-[#191919]" : "border-slate-200 bg-white")}><p className="text-xs font-semibold">Show priority</p><Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as Priority | "ALL")}><SelectTrigger className="mt-2 w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ALL">All priorities</SelectItem><SelectItem value="HIGH">High priority</SelectItem><SelectItem value="MEDIUM">Medium priority</SelectItem><SelectItem value="LOW">Low priority</SelectItem></SelectContent></Select><p className="mt-4 text-xs font-semibold">Sort tasks</p><Select value={sortBy} onValueChange={(value) => setSortBy(value as "DUE_DATE" | "PRIORITY")}><SelectTrigger className="mt-2 w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="DUE_DATE">Due date, nearest first</SelectItem><SelectItem value="PRIORITY">Priority, highest first</SelectItem></SelectContent></Select></div>}</div>{canManage && <Button size="sm" onClick={() => setNewTaskStatus("TODO")} className={cn("rounded-md", isDark ? "bg-white text-black hover:bg-zinc-200" : "bg-black text-white hover:bg-zinc-800")}><Plus className="size-4" />New task</Button>}</div></div>
-    <div className="grid items-start gap-4 xl:grid-cols-3">{columns.map((column) => { const columnTasks = filteredTasks.filter((task) => task.status === column.status); return <div key={column.status} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedTaskId) moveTask(draggedTaskId, column.status); setDraggedTaskId(null) }} className="min-h-[460px] p-0"><div className="mb-3 flex items-center justify-between py-2"><h2 className="flex items-center gap-2 text-sm font-semibold"><span className={cn("size-2 rounded-full", column.dotClass)} />{column.title}<span className={cn("flex size-5 items-center justify-center rounded-full text-[10px] font-bold", column.status === "TODO" ? (isDark ? "bg-white text-black" : "bg-slate-900 text-white") : column.status === "IN_PROGRESS" ? (isDark ? "bg-amber-300 text-black" : "bg-amber-400 text-white") : (isDark ? "bg-emerald-300 text-black" : "bg-emerald-500 text-white"))}>{columnTasks.length}</span></h2>{canManage && <Button variant="ghost" size="icon" onClick={() => setNewTaskStatus(column.status)} className="size-7"><Plus className="size-4" /></Button>}</div><div className="space-y-3">{columnTasks.map((task) => <TaskCard key={task.id} task={task} members={people} isDark={isDark} onOpen={() => setSelectedTaskId(task.id)} onDragStart={() => setDraggedTaskId(task.id)} onMemberClick={openMemberDetails} onOverflowClick={() => setAssigneeListTaskId(task.id)} />)}{canManage && <button type="button" onClick={() => setNewTaskStatus(column.status)} className={cn("flex w-full items-center justify-center gap-1.5 border border-dashed py-2.5 text-xs font-medium transition-colors", isDark ? "border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:bg-zinc-900" : "border-slate-300 text-slate-500 hover:border-slate-400 hover:bg-white")}><Plus className="size-3.5" />Add task</button>}</div></div> })}</div>
+  return <section className="min-w-0 space-y-5">{taskError && <p className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-300">{taskError}</p>}<div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4 dark:border-zinc-800"><div className="flex items-center gap-1 sm:gap-2">
+    <Button type="button" variant="ghost" size="sm" onClick={() => setViewMode("BOARD")} aria-pressed={viewMode === "BOARD"} className={cn("h-9 rounded-none border-b-2 px-2", viewMode === "BOARD" ? "font-semibold" : "border-transparent", isDark ? (viewMode === "BOARD" ? "border-white text-white hover:bg-transparent" : "text-zinc-500 hover:bg-transparent hover:text-zinc-200") : (viewMode === "BOARD" ? "border-black text-black hover:bg-transparent" : "text-slate-500 hover:bg-transparent hover:text-slate-900"))}><LayoutGrid className="size-4" />Board view</Button>
+    <Button type="button" variant="ghost" size="sm" onClick={() => setViewMode("LIST")} aria-pressed={viewMode === "LIST"} className={cn("h-9 rounded-none border-b-2 px-2", viewMode === "LIST" ? "font-semibold" : "border-transparent", isDark ? (viewMode === "LIST" ? "border-white text-white hover:bg-transparent" : "text-zinc-500 hover:bg-transparent hover:text-zinc-200") : (viewMode === "LIST" ? "border-black text-black hover:bg-transparent" : "text-slate-500 hover:bg-transparent hover:text-slate-900"))}><List className="size-4" />List view</Button>
+  </div><div className="flex flex-wrap items-center gap-2"><div className="relative"><Button type="button" variant="outline" size="sm" aria-expanded={filterOpen} onClick={() => setFilterOpen((open) => !open)} className={cn("rounded-md", filterOpen && (isDark ? "!border-zinc-500 !bg-white !text-black hover:!bg-zinc-100 hover:!text-black" : "!border-black !bg-black !text-white hover:!bg-zinc-800 hover:!text-white"))}><SlidersHorizontal className="size-3.5" />Filter <ChevronDown className="size-3.5" /></Button>{filterOpen && <div className={cn("absolute right-0 z-20 mt-2 w-64 border p-3 shadow-lg", isDark ? "border-zinc-700 bg-[#191919]" : "border-slate-200 bg-white")}><p className="text-xs font-semibold">Show priority</p><Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as Priority | "ALL")}><SelectTrigger className="mt-2 w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ALL">All priorities</SelectItem><SelectItem value="HIGH">High priority</SelectItem><SelectItem value="MEDIUM">Medium priority</SelectItem><SelectItem value="LOW">Low priority</SelectItem></SelectContent></Select><p className="mt-4 text-xs font-semibold">Sort tasks</p><Select value={sortBy} onValueChange={(value) => setSortBy(value as "DUE_DATE" | "PRIORITY")}><SelectTrigger className="mt-2 w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="DUE_DATE">Due date, nearest first</SelectItem><SelectItem value="PRIORITY">Priority, highest first</SelectItem></SelectContent></Select></div>}</div>{canManage && <Button size="sm" onClick={() => setNewTaskStatus("TODO")} className={cn("rounded-md", isDark ? "bg-white text-black hover:bg-zinc-200" : "bg-black text-white hover:bg-zinc-800")}><Plus className="size-4" />New task</Button>}</div></div>
+    {viewMode === "BOARD" ? (
+      <div className="grid items-start gap-4 xl:grid-cols-3">{columns.map((column) => { const columnTasks = filteredTasks.filter((task) => task.status === column.status); return <div key={column.status} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedTaskId) moveTask(draggedTaskId, column.status); setDraggedTaskId(null) }} className="min-h-[460px] p-0"><div className="mb-3 flex items-center justify-between py-2"><h2 className="flex items-center gap-2 text-sm font-semibold"><span className={cn("size-2 rounded-full", column.dotClass)} />{column.title}<span className={cn("flex size-5 items-center justify-center rounded-full text-[10px] font-bold", column.status === "TODO" ? (isDark ? "bg-white text-black" : "bg-slate-900 text-white") : column.status === "IN_PROGRESS" ? (isDark ? "bg-amber-300 text-black" : "bg-amber-400 text-white") : (isDark ? "bg-emerald-300 text-black" : "bg-emerald-500 text-white"))}>{columnTasks.length}</span></h2>{canManage && <Button variant="ghost" size="icon" onClick={() => setNewTaskStatus(column.status)} className="size-7"><Plus className="size-4" /></Button>}</div><div className="space-y-3">{columnTasks.map((task) => <TaskCard key={task.id} task={task} members={people} isDark={isDark} onOpen={() => setSelectedTaskId(task.id)} onDragStart={() => setDraggedTaskId(task.id)} onMemberClick={openMemberDetails} onOverflowClick={() => setAssigneeListTaskId(task.id)} />)}{canManage && <button type="button" onClick={() => setNewTaskStatus(column.status)} className={cn("flex w-full items-center justify-center gap-1.5 border border-dashed py-2.5 text-xs font-medium transition-colors", isDark ? "border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:bg-zinc-900" : "border-slate-300 text-slate-500 hover:border-slate-400 hover:bg-white")}><Plus className="size-3.5" />Add task</button>}</div></div> })}</div>
+    ) : (
+      <div className={cn("overflow-hidden rounded-xl border", isDark ? "border-zinc-800 bg-[#151515]" : "border-slate-200 bg-white")}>
+        <div className={cn("hidden grid-cols-[minmax(220px,1.8fr)_minmax(120px,0.8fr)_minmax(100px,0.65fr)_minmax(140px,0.9fr)_minmax(130px,0.8fr)] gap-4 border-b px-5 py-3 text-[11px] font-semibold uppercase tracking-wider md:grid", isDark ? "border-zinc-800 bg-white/[0.025] text-zinc-500" : "border-slate-100 bg-slate-50/80 text-slate-500")}>
+          <span>Task</span><span>Status</span><span>Priority</span><span>Due date</span><span>Progress & assignees</span>
+        </div>
+        {filteredTasks.length === 0 ? (
+          <div className={cn("px-5 py-14 text-center", isDark ? "text-zinc-400" : "text-slate-500")}>
+            <ListChecks className="mx-auto size-6 opacity-50" />
+            <p className="mt-2 text-sm font-medium">No tasks match this view</p>
+            <p className="mt-1 text-xs">Try a different priority filter or add a task to this team.</p>
+          </div>
+        ) : (
+          <div className={cn("divide-y", isDark ? "divide-zinc-800" : "divide-slate-100")}>
+            {filteredTasks.map((task) => {
+              const progress = progressFor(task)
+              const statusLabel = columns.find((column) => column.status === task.status)?.title ?? task.status
+              const isOverdue = task.status !== "DONE" && task.due_date < today
+              return (
+                <article
+                  key={task.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open task: ${task.title}`}
+                  onClick={() => setSelectedTaskId(task.id)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      setSelectedTaskId(task.id)
+                    }
+                  }}
+                  className={cn("grid cursor-pointer gap-4 px-4 py-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:px-5 md:grid-cols-[minmax(220px,1.8fr)_minmax(120px,0.8fr)_minmax(100px,0.65fr)_minmax(140px,0.9fr)_minmax(130px,0.8fr)] md:items-center", isDark ? "hover:bg-white/[0.025]" : "hover:bg-slate-50/70")}
+                >
+                  <div className="min-w-0">
+                    <button type="button" onClick={() => setSelectedTaskId(task.id)} className={cn("block max-w-full truncate text-left text-sm font-semibold hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", isDark ? "text-zinc-100" : "text-slate-900")}>{task.title}</button>
+                    {task.description && <p className={cn("mt-1 line-clamp-1 text-xs", isDark ? "text-zinc-500" : "text-slate-500")}>{task.description}</p>}
+                    {task.tags.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{task.tags.slice(0, 3).map((tag) => <span key={tag} className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", tagStyleFor(task.id, tag, isDark))}>{tag}</span>)}</div>}
+                  </div>
+                  <div>
+                    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", task.status === "DONE" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : task.status === "IN_PROGRESS" ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : isDark ? "bg-zinc-800 text-zinc-300" : "bg-slate-100 text-slate-600")}>
+                      <span className={cn("size-1.5 rounded-full", columns.find((column) => column.status === task.status)?.dotClass)} />{statusLabel}
+                    </span>
+                  </div>
+                  <div><span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", priorityStyle[task.priority])}>{task.priority[0] + task.priority.slice(1).toLowerCase()}</span></div>
+                  <div className={cn("flex items-center gap-2 text-xs", isOverdue ? "text-rose-600 dark:text-rose-300" : isDark ? "text-zinc-400" : "text-slate-600")}>
+                    <CalendarDays className="size-3.5 shrink-0" /><span>{formatDueDate(task.due_date)}</span>{isOverdue && <span className="rounded bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-semibold">Overdue</span>}
+                  </div>
+                  <div className="flex items-center justify-between gap-3 md:block">
+                    <div className="min-w-0 flex-1 md:mb-2">
+                      <div className={cn("mb-1 flex items-center justify-between text-[10px]", isDark ? "text-zinc-500" : "text-slate-500")}><span>{progress.complete}/{progress.total} subtasks</span><span>{progress.percent}%</span></div>
+                      <Progress value={progress.percent} className={cn("h-1.5 rounded-full", isDark ? "bg-zinc-800 [&_[data-slot=progress-indicator]]:bg-white" : "bg-slate-100 [&_[data-slot=progress-indicator]]:bg-black")} />
+                    </div>
+                    <AvatarStack assigneeIds={task.assignees} members={people} isDark={isDark} interactive onMemberClick={openMemberDetails} onOverflowClick={() => setAssigneeListTaskId(task.id)} />
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )}
     <Sheet open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTaskId(null)}>
       <SheetContent side="right" className={cn("w-full gap-0 overflow-y-auto p-0 sm:max-w-[600px]", isDark ? "border-zinc-800 bg-[#151515] text-white" : "border-slate-200 bg-white")}>
         {selectedTask && (() => {

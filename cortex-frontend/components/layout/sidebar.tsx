@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import {
   Search, Inbox, Bell, LayoutGrid, BarChart3, LineChart,
   Bot, FileText, Building2, Trash2, Sparkles,
-  Sliders, Moon, Sun, HelpCircle, ChevronsUpDown,
+  Moon, Sun, HelpCircle, ChevronsUpDown,
   PanelLeftClose, PanelLeftOpen, LogOut, User, X, Settings, ClipboardList,
   ChevronRight,
 } from "lucide-react"
@@ -480,7 +480,6 @@ function SidebarContent({
 
               {/* Settings rows */}
               <div className="p-1.5 flex flex-col gap-0.5">
-                <NavRow id="Preferences" label="Preferences" icon={Sliders} />
                 <NavRow
                   id="DarkMode"
                   label="Dark mode"
