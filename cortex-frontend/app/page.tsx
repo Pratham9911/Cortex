@@ -33,8 +33,8 @@ export default function Home() {
       <MetricsSection />
       <IntegrationsSection />
       <SecuritySection />
-      <DevelopersSection />
-      <TestimonialsSection />
+      {/* <DevelopersSection /> */}
+      {/* <TestimonialsSection /> */}
       <PricingSection />
       <CtaSection />
       <FooterSection />

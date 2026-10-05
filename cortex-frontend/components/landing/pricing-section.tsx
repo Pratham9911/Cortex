@@ -1,65 +1,120 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, Check } from "lucide-react";
+import Link from "next/link";
 
-const plans = [
-  {
-    name: "Starter",
-    description: "For individuals and small projects",
-    price: { monthly: 0, annual: 0 },
-    features: [
-      "Up to 3 projects",
-      "1GB storage",
-      "Community support",
-      "Basic analytics",
-      "SSL certificates",
-    ],
-    cta: "Start free",
-    popular: false,
-  },
-  {
-    name: "Pro",
-    description: "For growing teams and businesses",
-    price: { monthly: 29, annual: 24 },
-    features: [
-      "Unlimited projects",
-      "100GB storage",
-      "Priority support",
-      "Advanced analytics",
-      "Custom domains",
-      "Team collaboration",
-      "API access",
-    ],
-    cta: "Start trial",
-    popular: true,
-  },
-  {
-    name: "Enterprise",
-    description: "For large-scale operations",
-    price: { monthly: null, annual: null },
-    features: [
-      "Everything in Pro",
-      "Unlimited storage",
-      "24/7 dedicated support",
-      "Custom integrations",
-      "SLA guarantee",
-      "On-premise option",
-      "Security audit",
-      "Custom contracts",
-    ],
-    cta: "Contact sales",
-    popular: false,
-  },
-];
+type PricingPlan = {
+  name: string;
+  max_projects: number | null;
+  daily_token_limit: number | null;
+  daily_request_limit: number | null;
+  max_members: number | null;
+  max_storage_mb: number | null;
+  max_teams: number | null;
+  max_documents: number | null;
+};
+
+function isPricingPlan(value: unknown): value is PricingPlan {
+  if (typeof value !== "object" || value === null) return false;
+
+  const isNullableNonnegativeInteger = (field: unknown) =>
+    field === null ||
+    (typeof field === "number" && Number.isSafeInteger(field) && field >= 0);
+
+  return (
+    "name" in value &&
+    typeof value.name === "string" &&
+    "max_projects" in value &&
+    isNullableNonnegativeInteger(value.max_projects) &&
+    "daily_token_limit" in value &&
+    isNullableNonnegativeInteger(value.daily_token_limit) &&
+    "daily_request_limit" in value &&
+    isNullableNonnegativeInteger(value.daily_request_limit) &&
+    "max_members" in value &&
+    isNullableNonnegativeInteger(value.max_members) &&
+    "max_storage_mb" in value &&
+    isNullableNonnegativeInteger(value.max_storage_mb) &&
+    "max_teams" in value &&
+    isNullableNonnegativeInteger(value.max_teams) &&
+    "max_documents" in value &&
+    isNullableNonnegativeInteger(value.max_documents)
+  );
+}
+
+function isPricingResponse(value: unknown): value is { plans: PricingPlan[] } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "plans" in value &&
+    Array.isArray(value.plans) &&
+    value.plans.every(isPricingPlan)
+  );
+}
+
+const formatCount = (value: number | null) =>
+  value === null ? "—" : value.toLocaleString();
+
+const formatTokens = (value: number | null) =>
+  value === null
+    ? "—"
+    : new Intl.NumberFormat("en", {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }).format(value);
+
+const formatStorage = (value: number | null) => {
+  if (value === null) return "—";
+  if (value >= 1024) {
+    return `${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(value / 1024)} GB`;
+  }
+  return `${value.toLocaleString()} MB`;
+};
+
+function getPlanFeatures(plan: PricingPlan) {
+  return [
+    plan.max_projects !== null && `Projects: ${formatCount(plan.max_projects)}`,
+    plan.daily_token_limit !== null && `Daily AI tokens: ${formatTokens(plan.daily_token_limit)}`,
+    plan.daily_request_limit !== null && `AI requests/day: ${formatCount(plan.daily_request_limit)}`,
+    plan.max_storage_mb !== null && `Project storage: ${formatStorage(plan.max_storage_mb)}`,
+    plan.max_teams !== null && `Teams/project: ${formatCount(plan.max_teams)}`,
+    plan.max_members !== null && `Members/project: ${formatCount(plan.max_members)}`,
+    plan.max_documents !== null && `Documents/project: ${formatCount(plan.max_documents)}`,
+  ].filter((feature): feature is string => feature !== null && feature !== false);
+}
 
 export function PricingSection() {
-  const [isAnnual, setIsAnnual] = useState(true);
+  const [plans, setPlans] = useState<PricingPlan[] | null>(null);
+  const [hasError, setHasError] = useState(false);
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadPlans = async () => {
+      try {
+        const response = await fetch(`${apiUrl}/public/pricing`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Pricing request failed.");
+
+        const data: unknown = await response.json();
+        if (!isPricingResponse(data)) throw new Error("Pricing response was invalid.");
+
+        setPlans(data.plans);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setHasError(true);
+      }
+    };
+
+    void loadPlans();
+    return () => controller.abort();
+  }, [apiUrl]);
 
   return (
     <section id="pricing" className="relative py-32 lg:py-40 border-t border-foreground/10">
-      <div className="max-w-7xl mx-auto px-6 lg:px-12">
-        {/* Header */}
+      <div className="max-w-5xl mx-auto px-6 lg:px-12">
         <div className="max-w-3xl mb-20">
           <span className="font-mono text-xs tracking-widest text-muted-foreground uppercase block mb-6">
             Pricing
@@ -70,113 +125,74 @@ export function PricingSection() {
             <span className="text-stroke">pricing</span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-xl">
-            Start free and scale as you grow. No hidden fees, no surprises.
+            Start free with Cortex. Pro features are coming soon.
           </p>
         </div>
 
-        {/* Billing Toggle */}
-        <div className="flex items-center gap-4 mb-16">
-          <span
-            className={`text-sm transition-colors ${
-              !isAnnual ? "text-foreground" : "text-muted-foreground"
-            }`}
-          >
-            Monthly
-          </span>
-          <button
-            onClick={() => setIsAnnual(!isAnnual)}
-            className="relative w-14 h-7 bg-foreground/10 rounded-full p-1 transition-colors hover:bg-foreground/20"
-          >
-            <div
-              className={`w-5 h-5 bg-foreground rounded-full transition-transform duration-300 ${
-                isAnnual ? "translate-x-7" : "translate-x-0"
-              }`}
-            />
-          </button>
-          <span
-            className={`text-sm transition-colors ${
-              isAnnual ? "text-foreground" : "text-muted-foreground"
-            }`}
-          >
-            Annual
-          </span>
-          {isAnnual && (
-            <span className="ml-2 px-2 py-1 bg-foreground text-primary-foreground text-xs font-mono">
-              Save 17%
-            </span>
-          )}
-        </div>
+        {hasError ? (
+          <p role="alert" className="text-sm text-muted-foreground">
+            Pricing plans are unavailable right now.
+          </p>
+        ) : plans === null ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            Loading pricing plans…
+          </p>
+        ) : plans.length === 0 ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            No pricing plans are currently available.
+          </p>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-px bg-foreground/10">
+            {plans.map((plan, index) => {
+              const isPro = plan.name.toLowerCase() === "pro";
+              const features = getPlanFeatures(plan);
 
-        {/* Pricing Cards */}
-        <div className="grid md:grid-cols-3 gap-px bg-foreground/10">
-          {plans.map((plan, idx) => (
-            <div
-              key={plan.name}
-              className={`relative p-8 lg:p-12 bg-background ${
-                plan.popular ? "md:-my-4 md:py-12 lg:py-16 border-2 border-foreground" : ""
-              }`}
-            >
-              {plan.popular && (
-                <span className="absolute -top-3 left-8 px-3 py-1 bg-foreground text-primary-foreground text-xs font-mono uppercase tracking-widest">
-                  Most Popular
-                </span>
-              )}
-
-              {/* Plan Header */}
-              <div className="mb-8">
-                <span className="font-mono text-xs text-muted-foreground">
-                  {String(idx + 1).padStart(2, "0")}
-                </span>
-                <h3 className="font-display text-3xl text-foreground mt-2">{plan.name}</h3>
-                <p className="text-sm text-muted-foreground mt-2">{plan.description}</p>
-              </div>
-
-              {/* Price */}
-              <div className="mb-8 pb-8 border-b border-foreground/10">
-                {plan.price.monthly !== null ? (
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-display text-5xl lg:text-6xl text-foreground">
-                      ${isAnnual ? plan.price.annual : plan.price.monthly}
+              return (
+                <div
+                  key={plan.name}
+                  className={`relative p-8 lg:p-12 bg-background ${
+                    isPro ? "md:-my-4 md:py-12 lg:py-16 border-2 border-foreground" : ""
+                  }`}
+                >
+                  {isPro && (
+                    <span className="absolute -top-3 left-8 px-3 py-1 bg-foreground text-primary-foreground text-xs font-mono uppercase tracking-widest">
+                      Coming Soon
                     </span>
-                    <span className="text-muted-foreground">/month</span>
+                  )}
+
+                  <div className="mb-8">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <h3 className="font-display text-3xl text-foreground mt-2">{plan.name.toUpperCase()}</h3>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {!isPro && "Start free with Cortex."}
+                    </p>
                   </div>
-                ) : (
-                  <span className="font-display text-4xl text-foreground">Custom</span>
-                )}
-              </div>
 
-              {/* Features */}
-              <ul className="space-y-4 mb-10">
-                {plan.features.map((feature) => (
-                  <li key={feature} className="flex items-start gap-3">
-                    <Check className="w-4 h-4 text-foreground mt-0.5 shrink-0" />
-                    <span className="text-sm text-muted-foreground">{feature}</span>
-                  </li>
-                ))}
-              </ul>
+                  <ul className="space-y-4 mb-10">
+                    {features.map((feature) => (
+                      <li key={feature} className="flex items-start gap-3">
+                        <Check className="w-4 h-4 text-foreground mt-0.5 shrink-0" />
+                        <span className="text-sm text-muted-foreground">{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
 
-              {/* CTA */}
-              <button
-                className={`w-full py-4 flex items-center justify-center gap-2 text-sm font-medium transition-all group ${
-                  plan.popular
-                    ? "bg-foreground text-primary-foreground hover:bg-foreground/90"
-                    : "border border-foreground/20 text-foreground hover:border-foreground hover:bg-foreground/5"
-                }`}
-              >
-                {plan.cta}
-                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Bottom Note */}
-        <p className="mt-12 text-center text-sm text-muted-foreground">
-          All plans include automatic updates, HTTPS, and DDoS protection.{" "}
-          <a href="#" className="underline underline-offset-4 hover:text-foreground transition-colors">
-            Compare all features
-          </a>
-        </p>
+                  {!isPro && (
+                    <Link
+                      href="/login"
+                      className="w-full py-4 flex items-center justify-center gap-2 text-sm font-medium transition-all group bg-foreground text-primary-foreground hover:bg-foreground/90"
+                    >
+                      Start for free
+                      <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                    </Link>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </section>
   );

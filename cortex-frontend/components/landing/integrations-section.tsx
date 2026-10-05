@@ -2,19 +2,19 @@
 
 import { useEffect, useState, useRef } from "react";
 
-const integrations = [
-  { name: "GitHub", category: "Version Control" },
-  { name: "Slack", category: "Communication" },
-  { name: "Stripe", category: "Payments" },
-  { name: "PostgreSQL", category: "Database" },
-  { name: "Redis", category: "Cache" },
-  { name: "AWS", category: "Cloud" },
-  { name: "MongoDB", category: "Database" },
-  { name: "Vercel", category: "Hosting" },
-  { name: "Figma", category: "Design" },
-  { name: "Linear", category: "Project Management" },
-  { name: "Notion", category: "Documentation" },
-  { name: "OpenAI", category: "AI/ML" },
+const capabilities = [
+  { name: "Documents", category: "Project knowledge" },
+  { name: "Team Knowledge", category: "Shared organizational context" },
+  { name: "Discussions", category: "Team conversations" },
+  { name: "Cortex Agent", category: "AI-powered assistance" },
+  { name: "Web Search", category: "External research" },
+  { name: "Decisions", category: "Organizational memory" },
+  { name: "Teams", category: "Team-based access" },
+  { name: "Tasks", category: "Team work tracking" },
+  { name: "Sources", category: "Explainable answers" },
+  { name: "RAG Search", category: "Context-aware retrieval" },
+  { name: "GitHub", category: "Code and repository context" },
+  { name: "Gmail", category: "Email assistance" },
 ];
 
 export function IntegrationsSection() {
@@ -44,16 +44,16 @@ export function IntegrationsSection() {
         >
           <span className="inline-flex items-center gap-3 text-sm font-mono text-muted-foreground mb-6">
             <span className="w-8 h-px bg-foreground/30" />
-            Integrations
+            Cortex capabilities
             <span className="w-8 h-px bg-foreground/30" />
           </span>
           <h2 className="text-4xl lg:text-6xl font-display tracking-tight mb-6">
-            Works with everything
+            Knowledge that works
             <br />
-            you already use.
+            with your team.
           </h2>
           <p className="text-xl text-muted-foreground">
-            200+ pre-built integrations. Connect your entire stack in minutes.
+            From documents to discussions to decisions — Cortex keeps your team&apos;s context connected and accessible.
           </p>
         </div>
 
@@ -61,18 +61,18 @@ export function IntegrationsSection() {
       
       {/* Full-width marquees outside container */}
       <div className="w-full mb-6">
-        <div className="flex gap-6 marquee">
+        <div className="flex gap-6 marquee-reverse">
           {[...Array(2)].map((_, setIndex) => (
             <div key={setIndex} className="flex gap-6 shrink-0">
-              {integrations.map((integration) => (
+              {capabilities.map((capability) => (
                 <div
-                  key={`${integration.name}-${setIndex}`}
+                  key={`${capability.name}-${setIndex}`}
                   className="shrink-0 px-8 py-6 border border-foreground/10 hover:border-foreground/30 hover:bg-foreground/[0.02] transition-all duration-300 group"
                 >
                   <div className="text-lg font-medium group-hover:translate-x-1 transition-transform">
-                    {integration.name}
+                    {capability.name}
                   </div>
-                  <div className="text-sm text-muted-foreground">{integration.category}</div>
+                  <div className="text-sm text-muted-foreground">{capability.category}</div>
                 </div>
               ))}
             </div>
@@ -82,18 +82,18 @@ export function IntegrationsSection() {
       
       {/* Reverse marquee */}
       <div className="w-full">
-        <div className="flex gap-6 marquee-reverse">
+        <div className="flex gap-6 marquee">
           {[...Array(2)].map((_, setIndex) => (
             <div key={setIndex} className="flex gap-6 shrink-0">
-              {[...integrations].reverse().map((integration) => (
+              {[...capabilities].reverse().map((capability) => (
                 <div
-                  key={`${integration.name}-reverse-${setIndex}`}
+                  key={`${capability.name}-reverse-${setIndex}`}
                   className="shrink-0 px-8 py-6 border border-foreground/10 hover:border-foreground/30 hover:bg-foreground/[0.02] transition-all duration-300 group"
                 >
                   <div className="text-lg font-medium group-hover:translate-x-1 transition-transform">
-                    {integration.name}
+                    {capability.name}
                   </div>
-                  <div className="text-sm text-muted-foreground">{integration.category}</div>
+                  <div className="text-sm text-muted-foreground">{capability.category}</div>
                 </div>
               ))}
             </div>

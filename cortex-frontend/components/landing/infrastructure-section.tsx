@@ -68,7 +68,7 @@ export function InfrastructureSection() {
           </div>
           <div className="mt-4"><Tag>SECURITY</Tag></div>
           <RevealText className="mt-5 text-4xl md:text-5xl font-light tracking-tight leading-[1.05]">
-            {"Enterprise-grade\nfrom day one."}
+            {"Every agent action.\nIn plain sight."}
           </RevealText>
         </div>
 
@@ -77,14 +77,14 @@ export function InfrastructureSection() {
           {/* Left side — descriptions */}
           <div className="space-y-6">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Every action is logged, every decision is traceable. Built for teams that need compliance without compromise.
+              Follow what Cortex agents do as they work: what they searched, which tools they used, and the queries they ran.
             </p>
 
             <div className="space-y-4">
               {[
-                { label: "SOC 2 Type II", desc: "Independently audited security controls" },
-                { label: "Full Audit Trail", desc: "Every decision logged with full traceability" },
-                { label: "Real-time Observability", desc: "Monitor, debug, and replay any execution" },
+                { label: "Agent activity", desc: "See when an agent is activated and what it does next" },
+                { label: "Search context", desc: "Know when Cortex searches project knowledge or the web" },
+                { label: "Traceable queries", desc: "See the queries and actions behind an agent’s work" },
               ].map((item) => (
                 <div key={item.label} className="flex gap-4">
                   <div className="w-1 bg-foreground/10 rounded-full shrink-0" />
@@ -96,9 +96,9 @@ export function InfrastructureSection() {
               ))}
             </div>
 
-            {/* Compliance badges — vertical stack */}
+            {/* Examples of activity shown in the trail */}
             <div className="pt-4 flex flex-col gap-2">
-              {["SOC 2", "GDPR", "HIPAA Ready", "ISO 27001"].map((badge) => (
+              {["Project knowledge searched", "Web searched", "Gmail agent activated", "Query searched"].map((badge) => (
                 <div key={badge} className="flex items-center gap-2 text-xs text-muted-foreground/60">
                   <span className="w-1 h-1 rounded-full bg-foreground/25" />
                   {badge}
@@ -112,11 +112,11 @@ export function InfrastructureSection() {
             <div className="text-xs text-muted-foreground tracking-widest uppercase mb-4">Live Audit Trail</div>
             <div className="space-y-2">
               {[
-                { time: "12:34:21", action: "agent_executed", status: "success" },
-                { time: "12:34:18", action: "decision_logged", status: "success" },
-                { time: "12:34:15", action: "tool_called", status: "success" },
-                { time: "12:34:12", action: "memory_updated", status: "success" },
-                { time: "12:34:09", action: "output_generated", status: "success" },
+                { time: "12:34:21", action: "Gmail agent activated", detail: "Inbox assistant", status: "success" },
+                { time: "12:34:18", action: "Project knowledge searched", detail: "Q3 launch plan", status: "success" },
+                { time: "12:34:15", action: "Web searched", detail: "Market trends 2026", status: "success" },
+                { time: "12:34:12", action: "Query searched", detail: "Renewal dates", status: "success" },
+                { time: "12:34:09", action: "Task updated", detail: "Follow up with Acme", status: "success" },
               ].map((log, i) => (
                 <div
                   key={i}
@@ -126,7 +126,9 @@ export function InfrastructureSection() {
                   }}
                 >
                   <span className="text-[10px] text-muted-foreground font-mono min-w-[60px]">{log.time}</span>
-                  <span className="text-[11px] text-muted-foreground/80 font-light flex-1">{log.action}</span>
+                  <span className="text-[11px] text-muted-foreground/80 font-light flex-1">
+                    {log.action} <span className="text-muted-foreground/50">· {log.detail}</span>
+                  </span>
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500/60 group-hover:bg-green-500 transition-colors" />
                 </div>
               ))}

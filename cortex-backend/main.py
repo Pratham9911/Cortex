@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import String, cast, func, text
 from database import SessionLocal, engine
 from models import Base, User
-from modelmetrics import UserPack
+from modelmetrics import CortexGlobalMetric, ProjectPack, UserPack
 from dependencies import get_current_user
 from routers import account, ai_usage, auth, projects, documents, teams, folder, inbox, user_profiles, agents, chats_messages, audit, integrations, notification
 from routers.tasks.router import router as tasks_router
@@ -92,6 +92,57 @@ def get_db():
 @app.get("/")
 def read_root():
     return {"message": "Cortex Backend is running!"}
+
+
+@app.get("/public/metrics")
+def get_public_metrics(db: Session = Depends(get_db)):
+    totals = db.query(
+        func.coalesce(func.sum(CortexGlobalMetric.total_ai_requests), 0).label("total_ai_requests"),
+        func.coalesce(func.sum(CortexGlobalMetric.total_projects_created), 0).label("total_projects_created"),
+        func.coalesce(func.sum(CortexGlobalMetric.total_teams_created), 0).label("total_teams_created"),
+        func.coalesce(func.sum(CortexGlobalMetric.total_documents_uploaded), 0).label("total_documents_uploaded"),
+        func.coalesce(func.sum(CortexGlobalMetric.total_decisions_made), 0).label("total_decisions_made"),
+        func.coalesce(func.sum(CortexGlobalMetric.total_tokens), 0).label("total_tokens"),
+    ).one()
+    return {key: int(getattr(totals, key)) for key in totals._fields}
+
+
+@app.get("/public/pricing")
+def get_public_pricing(db: Session = Depends(get_db)):
+    user_packs = (
+        db.query(UserPack)
+        .filter(func.lower(cast(UserPack.name, String)).in_(("free", "pro")))
+        .all()
+    )
+    project_packs = (
+        db.query(ProjectPack)
+        .filter(func.lower(cast(ProjectPack.name, String)).in_(("free", "pro")))
+        .all()
+    )
+    user_packs_by_name = {pack.name.lower(): pack for pack in user_packs}
+    project_packs_by_name = {pack.name.lower(): pack for pack in project_packs}
+    plan_names = sorted(
+        user_packs_by_name.keys() | project_packs_by_name.keys(),
+        key=lambda name: (name != "free", name),
+    )
+
+    return {
+        "plans": [
+            {
+                "name": (
+                    user_packs_by_name.get(name) or project_packs_by_name[name]
+                ).name,
+                "max_projects": getattr(user_packs_by_name.get(name), "max_projects", None),
+                "daily_token_limit": getattr(user_packs_by_name.get(name), "daily_token_limit", None),
+                "daily_request_limit": getattr(user_packs_by_name.get(name), "daily_request_limit", None),
+                "max_members": getattr(project_packs_by_name.get(name), "max_members", None),
+                "max_storage_mb": getattr(project_packs_by_name.get(name), "max_storage_mb", None),
+                "max_teams": getattr(project_packs_by_name.get(name), "max_teams", None),
+                "max_documents": getattr(project_packs_by_name.get(name), "max_documents", None),
+            }
+            for name in plan_names
+        ]
+    }
 
 
 # ── Temporary WebSocket Endpoint for Team Discussions Testing ──

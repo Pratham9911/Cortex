@@ -5,26 +5,26 @@ import { useEffect, useRef, useState } from "react";
 const features = [
   {
     number: "01",
-    title: "Instant Deployment",
-    description: "Push to production in seconds. Our edge network ensures your applications load instantly, anywhere in the world.",
+    title: "AI-Powered Generation",
+    description: "Generate useful answers and content from your team’s knowledge, with Cortex agents that help move work forward.",
     visual: "deploy",
   },
   {
     number: "02",
-    title: "AI-Native Workflows",
-    description: "Build intelligent applications with built-in AI capabilities. From inference to training, everything scales automatically.",
+    title: "Agents Across Your Workflow",
+    description: "Cortex agents work alongside your team across connected projects and workflows, carrying shared context into the next task.",
     visual: "ai",
   },
   {
     number: "03",
-    title: "Real-time Collaboration",
-    description: "Work together seamlessly. Live preview, instant feedback, and version control that actually makes sense.",
+    title: "People and Agents, Together",
+    description: "Collaborate with your team and Cortex agents in shared projects, keeping tasks, context, and conversations connected.",
     visual: "collab",
   },
   {
     number: "04",
-    title: "Enterprise Security",
-    description: "Bank-grade encryption, SOC 2 compliance, and granular access controls. Your data stays yours.",
+    title: "Every Action, Audited",
+    description: "Keep a clear record of activity across your projects, so your team can see what changed and who did it.",
     visual: "security",
   },
 ];
