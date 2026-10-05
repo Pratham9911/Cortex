@@ -405,7 +405,7 @@ export function AgentInspector() {
     setFinalResult(null)
 
     const token = localStorage.getItem("access_token")
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
     const url = `${apiUrl}/projects/${projectId}/agent?question=${encodeURIComponent(queryText)}`
 
     const headers: Record<string, string> = {}
@@ -435,7 +435,7 @@ export function AgentInspector() {
     setHitlDecision(decision)
 
     const token = localStorage.getItem("access_token")
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
     let url = `${apiUrl}/projects/${projectId}/agent/${hitlPermission.thread_id}/resume?decision=${decision}`
     if (hitlFeedback.trim()) {
       url += `&feedback=${encodeURIComponent(hitlFeedback.trim())}`

@@ -35,7 +35,7 @@ export function DiscussionsTab({
   onOpenMemberDetails?: (member: { user_id: number; name?: string; avatar_url?: string } | number) => void
 }) {
   const { user } = useAuth()
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const isAdmin = userRole === "admin"
 
   const getAuthToken = () => {

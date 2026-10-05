@@ -54,7 +54,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   const syncBackendUser = async (token: string, avatarUrl?: string) => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL!
       const response = await fetch(`${apiUrl}/me`, {
         headers: {
           Authorization: `Bearer ${token}`,

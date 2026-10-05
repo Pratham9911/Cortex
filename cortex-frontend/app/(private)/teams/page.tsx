@@ -91,7 +91,7 @@ export default function TeamsPage() {
   
   useEffect(() => { setMounted(true) }, [])
   const isDark = mounted && theme === "dark"
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
 
   const [teams, setTeams] = useState<Team[]>([])
   const [query, setQuery] = useState("")

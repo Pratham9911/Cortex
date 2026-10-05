@@ -38,7 +38,7 @@ export function ReactionDetailsDialog({
   currentUserId: number
   onUndoReaction: (message: ChatMessage, emoji: string) => Promise<void>
 }) {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const [reactors, setReactors] = useState<Reactor[]>([])
   const [loading, setLoading] = useState(false)
   const [undoing, setUndoing] = useState(false)

@@ -155,7 +155,7 @@ export function TeamTaskOverlays({
   editingTask: Task | null
   onEditorOpenChange: (open: boolean, next?: { status?: TaskStatus; task?: Task | null }) => void
 }) {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const people = members
   const [taskError, setTaskError] = useState("")
   const [deleteConfirm, setDeleteConfirm] = useState(false)

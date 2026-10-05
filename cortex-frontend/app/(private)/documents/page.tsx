@@ -116,7 +116,7 @@ export default function DocumentsPage() {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   const isDark = mounted && theme === "dark"
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
 
   // ── Core data ───────────────────────────────────────────────────────────────
   const [folders, setFolders]               = useState<FolderItem[]>([])

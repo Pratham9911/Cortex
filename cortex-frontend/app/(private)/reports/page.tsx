@@ -51,7 +51,7 @@ type ProjectReport = {
   totals: Omit<DailyReport, "date" | "storage_used_mb">
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const API_URL = process.env.NEXT_PUBLIC_API_URL!
 const METRICS: { id: Metric; label: string }[] = [
   { id: "total_tokens", label: "Total tokens" },
   { id: "input_tokens", label: "Input tokens" },

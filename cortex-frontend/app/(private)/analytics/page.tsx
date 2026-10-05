@@ -270,7 +270,7 @@ export default function AnalyticsPage() {
 
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/me/ai-analytics?${params}`,
+        `${process.env.NEXT_PUBLIC_API_URL!}/me/ai-analytics?${params}`,
         {
           headers: { Authorization: ["Bearer", token].join(" ") },
           cache: "no-store",

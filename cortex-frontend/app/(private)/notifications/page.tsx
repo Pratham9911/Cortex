@@ -35,7 +35,7 @@ export default function NotificationsPage() {
   const router = useRouter()
   const { theme } = useTheme()
   const isDark = theme === "dark"
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")

@@ -80,7 +80,7 @@ export function FilesTab({
     avatar_url?: string
   }) => void
 }) {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const [files, setFiles] = useState<TeamDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")

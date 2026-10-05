@@ -124,7 +124,7 @@ export default function AuditLogsPage() {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   const isDark = mounted && theme === "dark"
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
 
   // Core Filters State
   const [query, setQuery] = useState("")

@@ -93,7 +93,7 @@ function SidebarContent({
   const isDark = mounted && theme === "dark"
   const planName = user?.plan_name || "Free"
   const isPro = planName.toUpperCase() === "PRO"
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
 
   useEffect(() => {
     let cancelled = false

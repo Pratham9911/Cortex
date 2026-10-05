@@ -108,7 +108,7 @@ export function EditDecisionModal({
       try {
         const token = localStorage.getItem("access_token") || localStorage.getItem("token")
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/members`,
+          `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/members`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }
@@ -150,8 +150,8 @@ export function EditDecisionModal({
     try {
       const token = localStorage.getItem("access_token") || localStorage.getItem("token")
       const url = messageId && discussionId
-        ? `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal`
-        : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${decisionId}`
+        ? `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal`
+        : `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/decisions/${decisionId}`
 
       const res = await fetch(url, {
         method: "PUT",
@@ -198,7 +198,7 @@ export function EditDecisionModal({
     try {
       const token = localStorage.getItem("access_token") || localStorage.getItem("token")
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${decisionId}/edit-approve`,
+        `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/decisions/${decisionId}/edit-approve`,
         {
           method: "PUT",
           headers: {

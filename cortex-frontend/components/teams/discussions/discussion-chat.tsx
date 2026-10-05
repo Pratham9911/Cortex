@@ -47,7 +47,7 @@ export function DiscussionChat({
   onOpenMemberDetails?: (member: { user_id: number; name?: string; avatar_url?: string } | number) => void
 }) {
   const { user } = useAuth()
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const isAdmin = userRole === "admin"
 
   const getAuthToken = () => {
@@ -359,7 +359,7 @@ export function DiscussionChat({
     const token = getAuthToken()
     if (!token) return
 
-    const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const rawApiUrl = process.env.NEXT_PUBLIC_API_URL!
     const wsUrl =
       rawApiUrl.replace(/^http/, "ws") +
       `/ws/discussions/${activeDiscussion.id}?token=${encodeURIComponent(token)}`

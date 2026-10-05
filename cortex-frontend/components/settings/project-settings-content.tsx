@@ -42,7 +42,7 @@ export default function ProjectSettingsContent() {
   const [projectError, setProjectError] = useState("")
   const [projectMessage, setProjectMessage] = useState("")
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
   const selectedProjectId =
     typeof window !== "undefined" ? Number(localStorage.getItem("selected_project_id")) : null

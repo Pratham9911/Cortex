@@ -33,7 +33,7 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
   const preFullPageCollapsedRef = useRef<boolean | null>(null)
   const { theme } = useTheme()
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const inbox = useInboxController({ apiUrl })
 
   useEffect(() => {

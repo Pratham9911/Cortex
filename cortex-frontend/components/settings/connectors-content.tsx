@@ -23,7 +23,7 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null)
   const [connectorFilter, setConnectorFilter] = useState<"all" | "connected" | "not_connected">("all")
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
 
   useEffect(() => {

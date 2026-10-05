@@ -143,7 +143,7 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false, init
   const people = members.length ? members : fallbackMembers
   const [tasks, setTasks] = useState<Task[]>([])
   const [taskError, setTaskError] = useState("")
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<"BOARD" | "LIST">("BOARD")

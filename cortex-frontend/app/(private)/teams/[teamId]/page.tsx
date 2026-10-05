@@ -135,7 +135,7 @@ export default function TeamDetailPage() {
   const { user } = useAuth()
   const { theme } = useTheme()
   const isDark = theme === "dark"
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const [teamName, setTeamName] = useState("Team")
   const [teamDescription, setTeamDescription] = useState("")
   const [teamTags, setTeamTags] = useState<string[]>([])

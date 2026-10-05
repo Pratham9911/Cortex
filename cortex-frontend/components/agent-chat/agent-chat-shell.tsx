@@ -102,7 +102,7 @@ export function AgentChatShell() {
     }
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/me/ai-usage?project_id=${projectId}`,
+        `${process.env.NEXT_PUBLIC_API_URL!}/me/ai-usage?project_id=${projectId}`,
         { headers: { Authorization: ["Bearer", token].join(" ") }, cache: "no-store" }
       )
       if (!response.ok) throw new Error("Could not load AI usage.")

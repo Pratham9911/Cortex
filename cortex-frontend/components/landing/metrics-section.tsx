@@ -89,7 +89,7 @@ export function MetricsSection() {
   const [metrics, setMetrics] = useState<{ value: number; label: string }[] | null>(null);
   const [metricsError, setMetricsError] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!;
 
   useEffect(() => {
     const observer = new IntersectionObserver(

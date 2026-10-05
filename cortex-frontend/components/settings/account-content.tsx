@@ -31,7 +31,7 @@ export default function AccountSettingsContent() {
   const [deleteError, setDeleteError] = useState("")
   const [ownedProjects, setOwnedProjects] = useState<{ project_id: number; name: string }[]>([])
   const [deletingAccount, setDeletingAccount] = useState(false)
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const deletePhrase = "DELETE MY ACCOUNT"
 
   useEffect(() => {

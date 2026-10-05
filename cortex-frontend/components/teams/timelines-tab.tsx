@@ -57,7 +57,7 @@ export function TimelinesTab({
   canManage?: boolean
   onOpenMemberDetails: (member: TeamMember) => void
 }) {
-  const api = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const api = process.env.NEXT_PUBLIC_API_URL!
   const scrollerRef = useRef<HTMLDivElement>(null)
   const prependAdjustRef = useRef(0)
   const loadingEdgeRef = useRef<"left" | "right" | null>(null)

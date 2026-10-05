@@ -105,7 +105,7 @@ export function DecisionProposalCard({
       try {
         const token = localStorage.getItem("access_token") || localStorage.getItem("token")
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/members`,
+          `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/members`,
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if (res.ok) {
@@ -145,7 +145,7 @@ export function DecisionProposalCard({
       try {
         const token = localStorage.getItem("access_token") || localStorage.getItem("token")
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/status`,
+          `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/status`,
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if (res.ok) {
@@ -172,8 +172,8 @@ export function DecisionProposalCard({
     try {
       const token = localStorage.getItem("access_token") || localStorage.getItem("token")
       const url = messageId && discussionId
-        ? `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal/approve`
-        : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/approve`
+        ? `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal/approve`
+        : `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/approve`
 
       const res = await fetch(url, {
         method: "POST",
@@ -207,8 +207,8 @@ export function DecisionProposalCard({
     try {
       const token = localStorage.getItem("access_token") || localStorage.getItem("token")
       const url = messageId && discussionId
-        ? `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal/reject`
-        : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/reject`
+        ? `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/discussions/${discussionId}/messages/${messageId}/proposal/reject`
+        : `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/teams/${teamId}/decisions/${realDecisionId}/reject`
 
       const res = await fetch(url, {
         method: "POST",

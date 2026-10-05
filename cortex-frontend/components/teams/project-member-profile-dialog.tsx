@@ -48,7 +48,7 @@ export function ProjectMemberProfileDialog({
       setMember(null)
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/members/${userId}/details`,
+          `${process.env.NEXT_PUBLIC_API_URL!}/projects/${projectId}/members/${userId}/details`,
           {
             headers: { Authorization: `Bearer ${token}` },
             cache: "no-store",

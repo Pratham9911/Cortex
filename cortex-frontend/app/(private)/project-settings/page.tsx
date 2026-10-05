@@ -34,7 +34,7 @@ export default function ProjectSettingsPage() {
   const [error, setError] = useState("")
 
   const isDark = theme === "dark"
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
   const selectedProjectId = typeof window !== "undefined" ? Number(localStorage.getItem("selected_project_id")) : null
 

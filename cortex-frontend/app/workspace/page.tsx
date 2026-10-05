@@ -79,7 +79,7 @@ function WorkspaceContent() {
   const router = useRouter()
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!
 
   const [mounted, setMounted] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])

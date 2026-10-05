@@ -281,7 +281,7 @@ export function AgentInspector() {
     setProjectSources([])
 
     const token = localStorage.getItem("access_token")
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
     const url = `${apiUrl}/projects/${projectId}/agent?question=${encodeURIComponent(queryText)}`
     const headers: Record<string, string> = {}
     if (token) headers.Authorization = `Bearer ${token}`
@@ -300,7 +300,7 @@ export function AgentInspector() {
     setHitlDecision(decision)
     setIsSubmittingDecision(true)
     const token = localStorage.getItem("access_token")
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
     let url = `${apiUrl}/projects/${projectId}/agent/${hitlPermission.thread_id}/resume?decision=${decision}`
     if (hitlFeedback.trim()) url += `&feedback=${encodeURIComponent(hitlFeedback.trim())}`
     const headers: Record<string, string> = {}

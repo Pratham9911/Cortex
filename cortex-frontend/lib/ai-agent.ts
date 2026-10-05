@@ -1,6 +1,6 @@
 import type { ChatSession, Message, MessageSources } from "@/components/agent-chat/types"
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const apiUrl = process.env.NEXT_PUBLIC_API_URL!
 
 type ApiChat = {
   chat_id: number

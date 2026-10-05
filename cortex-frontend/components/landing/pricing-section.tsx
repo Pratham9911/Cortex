@@ -86,7 +86,7 @@ function getPlanFeatures(plan: PricingPlan) {
 export function PricingSection() {
   const [plans, setPlans] = useState<PricingPlan[] | null>(null);
   const [hasError, setHasError] = useState(false);
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL!;
 
   useEffect(() => {
     const controller = new AbortController();
