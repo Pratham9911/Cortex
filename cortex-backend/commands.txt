@@ -2,5 +2,7 @@ cd cortex-backend
 venv\Scripts\activate
 uvicorn main:app --reload    
 
+python workers/ingestion_worker.py
+
 cd cortex-frontend
 npm run dev
