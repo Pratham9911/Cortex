@@ -167,7 +167,7 @@ export function TeamTaskOverlays({
   const [draftAssignees, setDraftAssignees] = useState<number[]>([])
   const [draftTags, setDraftTags] = useState<string[]>([])
   const [draftTag, setDraftTag] = useState("")
-  const [draftSubtasks, setDraftSubtasks] = useState<string[]>([])
+  const [draftSubtasks, setDraftSubtasks] = useState<Array<{ id?: number; title: string; is_completed?: boolean }>>([])
   const [draftSubtask, setDraftSubtask] = useState("")
   const [draggedDraftSubtaskIndex, setDraggedDraftSubtaskIndex] = useState<number | null>(null)
   const [memberQuery, setMemberQuery] = useState("")
@@ -194,7 +194,7 @@ export function TeamTaskOverlays({
       setDraftDueDate(task.due_date)
       setDraftAssignees(task.assignees)
       setDraftTags(task.tags)
-      setDraftSubtasks(task.subtasks.map((subtask) => subtask.title))
+      setDraftSubtasks(task.subtasks.map((subtask) => ({ id: subtask.id, title: subtask.title, is_completed: subtask.is_completed })))
     } else {
       setDraftTitle("")
       setDraftDescription("")
@@ -213,11 +213,11 @@ export function TeamTaskOverlays({
   const appendDraftSubtask = () => {
     const title = draftSubtask.trim()
     if (!title) return
-    setDraftSubtasks((current) => [...current, title])
+    setDraftSubtasks((current) => [...current, { title, is_completed: false }])
     setDraftSubtask("")
   }
-  const updateDraftSubtask = (index: number, title: string) => setDraftSubtasks((current) => current.map((item, itemIndex) => (itemIndex === index ? title : item)))
-  const insertDraftSubtask = (index: number) => setDraftSubtasks((current) => [...current.slice(0, index), "", ...current.slice(index)])
+  const updateDraftSubtask = (index: number, title: string) => setDraftSubtasks((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, title } : item)))
+  const insertDraftSubtask = (index: number) => setDraftSubtasks((current) => [...current.slice(0, index), { title: "", is_completed: false }, ...current.slice(index)])
   const reorderDraftSubtasks = (fromIndex: number, toIndex: number) =>
     setDraftSubtasks((current) => {
       if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= current.length || toIndex >= current.length) return current
@@ -230,9 +230,9 @@ export function TeamTaskOverlays({
 
   const saveTask = async () => {
     setCreateAttempted(true)
-    const normalizedSubtasks = draftSubtasks.map((title) => title.trim())
+    const normalizedSubtasks = draftSubtasks.map((item) => ({ ...item, title: item.title.trim() }))
     const status = editingTask?.status || editorStatus
-    if (!status || !draftTitle.trim() || !draftDueDate || (!editingTask && draftDueDate < today) || normalizedSubtasks.length === 0 || normalizedSubtasks.some((title) => !title)) return
+    if (!status || !draftTitle.trim() || !draftDueDate || (!editingTask && draftDueDate < today) || normalizedSubtasks.length === 0 || normalizedSubtasks.some((item) => !item.title)) return
     try {
       const { token, projectId } = getTaskContext()
       const payload = {
@@ -243,7 +243,12 @@ export function TeamTaskOverlays({
         priority: draftPriority,
         assignee_ids: draftAssignees,
         tags: draftTags,
-        subtasks: normalizedSubtasks.map((title, index) => ({ title, position: index + 1 })),
+        subtasks: normalizedSubtasks.map((item, index) => ({
+          ...(item.id ? { id: item.id } : {}),
+          title: item.title,
+          is_completed: item.is_completed ?? false,
+          position: index + 1,
+        })),
       }
       const response = await fetch(taskUrl(projectId, editingTask ? `/${editingTask.id}` : ""), {
         method: editingTask ? "PATCH" : "POST",
@@ -571,7 +576,7 @@ export function TeamTaskOverlays({
                     <span draggable title="Drag to reorder" onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedDraftSubtaskIndex(index) }} onDragEnd={() => setDraggedDraftSubtaskIndex(null)} className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-zinc-500 active:cursor-grabbing">
                       <GripVertical className="size-4" />
                     </span>
-                    <Input value={subtask} maxLength={80} aria-label={`Subtask ${index + 1}`} onChange={(event) => updateDraftSubtask(index, event.target.value)} placeholder="Describe this subtask" className={cn("h-8 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0", isDark ? "text-white placeholder:text-zinc-600" : "text-slate-900 placeholder:text-slate-400")} />
+                    <Input value={subtask.title} maxLength={80} aria-label={`Subtask ${index + 1}`} onChange={(event) => updateDraftSubtask(index, event.target.value)} placeholder="Describe this subtask" className={cn("h-8 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0", isDark ? "text-white placeholder:text-zinc-600" : "text-slate-900 placeholder:text-slate-400")} />
                     <div className="flex shrink-0 items-center">
                       <Button type="button" variant="ghost" size="icon" title="Insert subtask below" onClick={() => insertDraftSubtask(index + 1)} className="size-7"><Plus className="size-3.5" /></Button>
                       <Button type="button" variant="ghost" size="icon" title="Remove subtask" onClick={() => removeDraftSubtask(index)} className="size-7 text-rose-500 hover:text-rose-600"><Trash2 className="size-3.5" /></Button>
@@ -580,7 +585,7 @@ export function TeamTaskOverlays({
                 ))}
               </div>
               {createAttempted && draftSubtasks.length === 0 && <p className="mt-2 text-xs text-rose-500">Add at least one subtask before creating a task.</p>}
-              {createAttempted && draftSubtasks.some((subtask) => !subtask.trim()) && <p className="mt-2 text-xs text-rose-500">Complete or remove every blank subtask before saving.</p>}
+              {createAttempted && draftSubtasks.some((subtask) => !subtask.title.trim()) && <p className="mt-2 text-xs text-rose-500">Complete or remove every blank subtask before saving.</p>}
             </div>
           </div>
           <div className={cn("flex justify-end gap-2 border-t px-6 py-4", isDark ? "border-zinc-800" : "border-slate-200")}>

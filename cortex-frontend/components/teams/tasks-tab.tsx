@@ -165,7 +165,7 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false, init
   const [draftAssignees, setDraftAssignees] = useState<number[]>([])
   const [draftTags, setDraftTags] = useState<string[]>([])
   const [draftTag, setDraftTag] = useState("")
-  const [draftSubtasks, setDraftSubtasks] = useState<string[]>([])
+  const [draftSubtasks, setDraftSubtasks] = useState<Array<{ id?: number; title: string; is_completed?: boolean }>>([])
   const [draftSubtask, setDraftSubtask] = useState("")
   const [draggedDraftSubtaskIndex, setDraggedDraftSubtaskIndex] = useState<number | null>(null)
   const [memberQuery, setMemberQuery] = useState("")
@@ -213,11 +213,11 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false, init
   const appendDraftSubtask = () => {
     const title = draftSubtask.trim()
     if (!title) return
-    setDraftSubtasks((current) => [...current, title])
+    setDraftSubtasks((current) => [...current, { title, is_completed: false }])
     setDraftSubtask("")
   }
-  const updateDraftSubtask = (index: number, title: string) => setDraftSubtasks((current) => current.map((item, itemIndex) => itemIndex === index ? title : item))
-  const insertDraftSubtask = (index: number) => setDraftSubtasks((current) => [...current.slice(0, index), "", ...current.slice(index)])
+  const updateDraftSubtask = (index: number, title: string) => setDraftSubtasks((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, title } : item))
+  const insertDraftSubtask = (index: number) => setDraftSubtasks((current) => [...current.slice(0, index), { title: "", is_completed: false }, ...current.slice(index)])
   const reorderDraftSubtasks = (fromIndex: number, toIndex: number) => setDraftSubtasks((current) => {
     if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= current.length || toIndex >= current.length) return current
     const next = [...current]
@@ -228,11 +228,25 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false, init
   const removeDraftSubtask = (index: number) => setDraftSubtasks((current) => current.filter((_, itemIndex) => itemIndex !== index))
   const createTask = async () => {
     setCreateAttempted(true)
-    const normalizedSubtasks = draftSubtasks.map((title) => title.trim())
-    if (!newTaskStatus || !draftTitle.trim() || !draftDueDate || (!editingTaskId && draftDueDate < today) || normalizedSubtasks.length === 0 || normalizedSubtasks.some((title) => !title)) return
+    const normalizedSubtasks = draftSubtasks.map((item) => ({ ...item, title: item.title.trim() }))
+    if (!newTaskStatus || !draftTitle.trim() || !draftDueDate || (!editingTaskId && draftDueDate < today) || normalizedSubtasks.length === 0 || normalizedSubtasks.some((item) => !item.title)) return
     try {
       const { token, projectId } = getTaskContext()
-      const payload = { title: draftTitle.trim(), description: draftDescription.trim(), status: newTaskStatus, due_date: draftDueDate, priority: draftPriority, assignee_ids: draftAssignees, tags: draftTags, subtasks: normalizedSubtasks.map((title, index) => ({ title, position: index + 1 })) }
+      const payload = {
+        title: draftTitle.trim(),
+        description: draftDescription.trim(),
+        status: newTaskStatus,
+        due_date: draftDueDate,
+        priority: draftPriority,
+        assignee_ids: draftAssignees,
+        tags: draftTags,
+        subtasks: normalizedSubtasks.map((item, index) => ({
+          ...(item.id ? { id: item.id } : {}),
+          title: item.title,
+          is_completed: item.is_completed ?? false,
+          position: index + 1,
+        })),
+      }
       const response = await fetch(taskUrl(projectId, editingTaskId ? `/${editingTaskId}` : ""), { method: editingTaskId ? "PATCH" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data?.detail || "Could not save task")
@@ -241,7 +255,7 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false, init
       setDraftTitle(""); setDraftDescription(""); setDraftPriority("MEDIUM"); setDraftDueDate(""); setDraftAssignees([]); setDraftTags([]); setDraftTag(""); setDraftSubtasks([]); setDraftSubtask(""); setMemberQuery(""); setCreateAttempted(false); setEditingTaskId(null); setNewTaskStatus(null); setSelectedTaskId(savedTask.id); setTaskError("")
     } catch (error) { setTaskError(error instanceof Error ? error.message : "Could not save task") }
   }
-  const openEditTask = (task: Task) => { setEditingTaskId(task.id); setDraftTitle(task.title); setDraftDescription(task.description); setDraftPriority(task.priority); setDraftDueDate(task.due_date); setDraftAssignees(task.assignees); setDraftTags(task.tags); setDraftSubtasks(task.subtasks.map((subtask) => subtask.title)); setNewTaskStatus(task.status); setSelectedTaskId(null) }
+  const openEditTask = (task: Task) => { setEditingTaskId(task.id); setDraftTitle(task.title); setDraftDescription(task.description); setDraftPriority(task.priority); setDraftDueDate(task.due_date); setDraftAssignees(task.assignees); setDraftTags(task.tags); setDraftSubtasks(task.subtasks.map((subtask) => ({ id: subtask.id, title: subtask.title, is_completed: subtask.is_completed }))); setNewTaskStatus(task.status); setSelectedTaskId(null) }
   const openMemberDetails = async (member: TeamMember) => {
     setMemberDetailsOpen(true)
     setMemberDetails({ ...member, teams: [] })
@@ -439,10 +453,10 @@ export function TasksTab({ isDark, members = [], teamId, canManage = false, init
             <label className="mb-2 block text-sm font-medium">Subtasks</label>
             <div className="flex gap-2"><Input value={draftSubtask} maxLength={80} onChange={(event) => setDraftSubtask(event.target.value)} placeholder="Add a subtask at the end" onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); appendDraftSubtask() } }} className={isDark ? "border-zinc-700 bg-zinc-900" : ""} /><Button type="button" variant="outline" disabled={!draftSubtask.trim()} onClick={appendDraftSubtask}>Add</Button></div>
             <div className="mt-3 space-y-2">
-              {draftSubtasks.map((subtask, index) => <div key={index} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedDraftSubtaskIndex !== null) reorderDraftSubtasks(draggedDraftSubtaskIndex, index); setDraggedDraftSubtaskIndex(null) }} className={cn("flex items-center gap-2 rounded-lg border p-2 transition-colors", draggedDraftSubtaskIndex === index && "border-dashed opacity-60", isDark ? "border-zinc-800 bg-zinc-900/70" : "border-slate-200 bg-slate-50")}><span draggable title="Drag to reorder" onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedDraftSubtaskIndex(index) }} onDragEnd={() => setDraggedDraftSubtaskIndex(null)} className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-zinc-500 active:cursor-grabbing"><GripVertical className="size-4" /></span><span className="sr-only">Subtask {index + 1}</span><Input value={subtask} maxLength={80} aria-label={`Subtask ${index + 1}`} onChange={(event) => updateDraftSubtask(index, event.target.value)} placeholder="Describe this subtask" className={cn("h-8 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0", isDark ? "text-white placeholder:text-zinc-600" : "text-slate-900 placeholder:text-slate-400")} /><div className="flex shrink-0 items-center"><Button type="button" variant="ghost" size="icon" title="Insert subtask below" onClick={() => insertDraftSubtask(index + 1)} className="size-7"><Plus className="size-3.5" /></Button><Button type="button" variant="ghost" size="icon" title="Remove subtask" onClick={() => removeDraftSubtask(index)} className="size-7 text-rose-500 hover:text-rose-600"><Trash2 className="size-3.5" /></Button></div></div>)}
+              {draftSubtasks.map((subtask, index) => <div key={index} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedDraftSubtaskIndex !== null) reorderDraftSubtasks(draggedDraftSubtaskIndex, index); setDraggedDraftSubtaskIndex(null) }} className={cn("flex items-center gap-2 rounded-lg border p-2 transition-colors", draggedDraftSubtaskIndex === index && "border-dashed opacity-60", isDark ? "border-zinc-800 bg-zinc-900/70" : "border-slate-200 bg-slate-50")}><span draggable title="Drag to reorder" onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedDraftSubtaskIndex(index) }} onDragEnd={() => setDraggedDraftSubtaskIndex(null)} className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-zinc-500 active:cursor-grabbing"><GripVertical className="size-4" /></span><span className="sr-only">Subtask {index + 1}</span><Input value={subtask.title} maxLength={80} aria-label={`Subtask ${index + 1}`} onChange={(event) => updateDraftSubtask(index, event.target.value)} placeholder="Describe this subtask" className={cn("h-8 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0", isDark ? "text-white placeholder:text-zinc-600" : "text-slate-900 placeholder:text-slate-400")} /><div className="flex shrink-0 items-center"><Button type="button" variant="ghost" size="icon" title="Insert subtask below" onClick={() => insertDraftSubtask(index + 1)} className="size-7"><Plus className="size-3.5" /></Button><Button type="button" variant="ghost" size="icon" title="Remove subtask" onClick={() => removeDraftSubtask(index)} className="size-7 text-rose-500 hover:text-rose-600"><Trash2 className="size-3.5" /></Button></div></div>)}
             </div>
             {createAttempted && draftSubtasks.length === 0 && <p className="mt-2 text-xs text-rose-500">Add at least one subtask before creating a task.</p>}
-            {createAttempted && draftSubtasks.some((subtask) => !subtask.trim()) && <p className="mt-2 text-xs text-rose-500">Complete or remove every blank subtask before saving.</p>}
+            {createAttempted && draftSubtasks.some((subtask) => !subtask.title.trim()) && <p className="mt-2 text-xs text-rose-500">Complete or remove every blank subtask before saving.</p>}
           </div>
         </div>
         <div className={cn("flex justify-end gap-2 border-t px-6 py-4", isDark ? "border-zinc-800" : "border-slate-200")}><Button variant="outline" onClick={() => { setCreateAttempted(false); setEditingTaskId(null); setNewTaskStatus(null) }}>Cancel</Button><Button onClick={createTask} className="bg-blue-600 text-white hover:bg-blue-500">{editingTaskId ? <Pencil className="size-4" /> : <Plus className="size-4" />}{editingTaskId ? "Save changes" : "Create task"}</Button></div>

@@ -31,8 +31,10 @@ def get_db():
 
 
 class SubtaskInput(BaseModel):
+    id: Optional[int] = None
     title: str = Field(..., min_length=1, max_length=80)
     position: Optional[int] = Field(default=None, ge=1)
+    is_completed: Optional[bool] = None
 
     @field_validator("title")
     @classmethod
@@ -198,10 +200,65 @@ def _serialize_task(db: Session, task: Task) -> dict:
 
 def _replace_task_relations(db: Session, task: Task, payload: TaskInput) -> None:
     _validate_assignees(db, task.team_id, payload.assignee_ids)
+    existing_subtasks = db.query(Subtask).filter(Subtask.task_id == task.id).order_by(asc(Subtask.position), asc(Subtask.id)).all()
+    existing_by_id = {s.id: s for s in existing_subtasks}
+    existing_by_pos = {s.position: s for s in existing_subtasks}
+    used_subtask_ids = set()
+
+    subtask_objects = []
+    for index, item in enumerate(payload.subtasks, start=1):
+        pos = item.position or index
+        is_completed = None
+
+        if item.is_completed is not None:
+            is_completed = item.is_completed
+            if item.id is not None and item.id in existing_by_id:
+                used_subtask_ids.add(item.id)
+        elif item.id is not None and item.id in existing_by_id:
+            is_completed = existing_by_id[item.id].is_completed
+            used_subtask_ids.add(item.id)
+        else:
+            title_key = item.title.strip().lower()
+            matching_existing = next(
+                (s for s in existing_subtasks if s.title.strip().lower() == title_key and s.id not in used_subtask_ids),
+                None
+            )
+            if matching_existing:
+                is_completed = matching_existing.is_completed
+                used_subtask_ids.add(matching_existing.id)
+            elif pos in existing_by_pos and existing_by_pos[pos].id not in used_subtask_ids:
+                matching_pos = existing_by_pos[pos]
+                is_completed = matching_pos.is_completed
+                used_subtask_ids.add(matching_pos.id)
+            elif (
+                len(existing_subtasks) == len(payload.subtasks)
+                and index <= len(existing_subtasks)
+                and existing_subtasks[index - 1].id not in used_subtask_ids
+            ):
+                matching_idx = existing_subtasks[index - 1]
+                is_completed = matching_idx.is_completed
+                used_subtask_ids.add(matching_idx.id)
+            elif task.status == "DONE":
+                is_completed = True
+            else:
+                is_completed = False
+
+        if is_completed is None:
+            is_completed = task.status == "DONE"
+
+        subtask_objects.append(
+            Subtask(
+                task_id=task.id,
+                title=item.title,
+                position=pos,
+                is_completed=is_completed,
+            )
+        )
+
     db.query(TaskAssignee).filter(TaskAssignee.task_id == task.id).delete(synchronize_session=False)
     db.query(Subtask).filter(Subtask.task_id == task.id).delete(synchronize_session=False)
     db.add_all([TaskAssignee(task_id=task.id, user_id=user_id) for user_id in payload.assignee_ids])
-    db.add_all([Subtask(task_id=task.id, title=item.title, position=item.position or index) for index, item in enumerate(payload.subtasks, start=1)])
+    db.add_all(subtask_objects)
 
 
 def _notify_new_assignees(db: Session, project_id: int, task: Task, actor_id: int, recipient_ids: set[int]) -> None:
