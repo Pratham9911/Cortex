@@ -749,6 +749,9 @@ async def ask_chat(
         usage_succeeded = False
 
         try:
+            # Immediately flush reverse proxy buffers (Nginx, Render, Cloudflare)
+            yield ": ping\n\n"
+
             # Check and load short-term memory
             history_messages = check_and_summarize_db(db, chat.chat_id)
             prior_history = [
@@ -1064,7 +1067,9 @@ async def ask_chat(
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Type": "text/event-stream; charset=utf-8",
         }
     )

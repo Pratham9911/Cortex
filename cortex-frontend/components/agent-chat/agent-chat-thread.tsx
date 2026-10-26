@@ -1070,7 +1070,25 @@ export function AgentReasoningPanel({
     }
   }, [activities, collapsed, isStreaming])
 
-  if (!activities || activities.length === 0) return null
+  if (!activities || activities.length === 0) {
+    if (!isStreaming) return null
+  }
+
+  const WAITING_AGENT_PHASES = [
+    "Starting request...",
+    "Connecting to Cortex agent...",
+    "Analyzing query and context...",
+    "Thinking and planning steps...",
+    "Working on execution...",
+  ]
+
+  const getWaitingStatus = (elapsed: number): string => {
+    if (elapsed < 3) return WAITING_AGENT_PHASES[0]
+    if (elapsed < 7) return WAITING_AGENT_PHASES[1]
+    if (elapsed < 14) return WAITING_AGENT_PHASES[2]
+    if (elapsed < 24) return WAITING_AGENT_PHASES[3]
+    return WAITING_AGENT_PHASES[4]
+  }
 
   const displayTime = elapsedSeconds != null ? formatSeconds(elapsedSeconds) : ""
 
@@ -1107,7 +1125,6 @@ export function AgentReasoningPanel({
         </button>
       </div>
 
-
       {!collapsed && (
         <div
           ref={panelRef}
@@ -1119,22 +1136,33 @@ export function AgentReasoningPanel({
           )}
           aria-live="polite"
         >
-          {activities.map((act, idx) => (
-            <div key={act.id || idx} className="flex items-start gap-2.5 leading-relaxed">
-              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
-                <AgentIcon agent={act.agent} />
-              </span>
-              <div className={act.kind === "tool" ? "font-medium text-slate-200" : "text-slate-400"}>
-                {act.label && (
-                  <span className="mr-2 text-[10px] uppercase tracking-wider text-slate-500">
-                    {act.label}
-                  </span>
-                )}
-                <span>{act.content}</span>
+          {activities && activities.length > 0 ? (
+            activities.map((act, idx) => (
+              <div key={act.id || idx} className="flex items-start gap-2.5 leading-relaxed">
+                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                  <AgentIcon agent={act.agent} />
+                </span>
+                <div className={act.kind === "tool" ? "font-medium text-slate-200" : "text-slate-400"}>
+                  {act.label && (
+                    <span className="mr-2 text-[10px] uppercase tracking-wider text-slate-500">
+                      {act.label}
+                    </span>
+                  )}
+                  <span>{act.content}</span>
+                </div>
               </div>
+            ))
+          ) : isStreaming ? (
+            <div className="flex items-center gap-2.5 py-1 text-slate-400 dark:text-zinc-400">
+              <span className="flex shrink-0 items-center gap-1">
+                <span className="size-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s] dark:bg-zinc-500" />
+                <span className="size-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s] dark:bg-zinc-500" />
+                <span className="size-1.5 animate-bounce rounded-full bg-slate-400 dark:bg-zinc-500" />
+              </span>
+              <span className="font-medium animate-pulse">{getWaitingStatus(elapsedSeconds || 1)}</span>
             </div>
-          ))}
-          {isStreaming && (
+          ) : null}
+          {isStreaming && activities && activities.length > 0 && (
             <div className="ml-6 h-1.5 w-1.5 animate-pulse rounded-full bg-slate-400" />
           )}
         </div>

@@ -220,6 +220,7 @@ export async function streamChatAsk(
     headers: {
       ...authHeaders(),
       "Content-Type": "application/json",
+      Accept: "text/event-stream",
     },
     body: JSON.stringify({
       query,
@@ -291,6 +292,7 @@ export async function streamResumeAgent(
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       "Content-Type": "application/json",
+      Accept: "text/event-stream",
     },
     signal,
   })

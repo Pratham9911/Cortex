@@ -316,6 +316,8 @@ def ask_route(
     # SSE Event Generator
     # ----------------------------------------
     def event_generator():
+        # Flush reverse proxy buffers immediately (Nginx, Render, Cloudflare)
+        yield ": ping\n\n"
         usage_succeeded = False
         input_tokens = 0
         output_tokens = 0
@@ -376,8 +378,10 @@ def ask_route(
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Type": "text/event-stream; charset=utf-8",
         }
     )
 

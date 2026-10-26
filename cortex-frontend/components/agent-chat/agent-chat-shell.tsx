@@ -248,16 +248,6 @@ export function AgentChatShell() {
   }, [refreshActiveMessages])
 
   useEffect(() => {
-    if (!activeChatId || isThinking) return
-
-    const interval = window.setInterval(() => {
-      void refreshActiveMessages()
-    }, 10000)
-
-    return () => window.clearInterval(interval)
-  }, [activeChatId, isThinking, refreshActiveMessages])
-
-  useEffect(() => {
     setAgentActivities([])
     agentActivitiesRef.current = []
     setThinkingEvents([])
