@@ -54,6 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { InboxDialog, InboxUnreadBadge, useInboxController } from "@/components/inbox/inbox-dialog"
 import { cn } from "@/lib/utils"
+import { wakeBackend } from "@/lib/wake-ingestion-worker"
 
 type Project = {
   project_id: number
@@ -140,8 +141,12 @@ function WorkspaceContent() {
   }
 
   useEffect(() => {
+    // Wake the Render backend on workspace mount (post-login).
+    // Fire-and-forget — polls / every 10 s up to 12 times (2 min max).
+    wakeBackend()
     loadProjects()
   }, [])
+
 
   const inbox = useInboxController({ apiUrl, onInviteHandled: loadProjects })
 

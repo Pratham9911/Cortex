@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -61,12 +62,15 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "https://cortex-agentic-ai.vercel.app",
+        "https://cortexagent.site",
+        "https://www.cortexagent.site",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Has-More"],
 )
+
 
 app.include_router(projects.router)
 app.include_router(account.router)

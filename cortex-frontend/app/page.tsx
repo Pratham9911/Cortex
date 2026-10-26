@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Navigation } from "@/components/landing/navigation";
 import { HeroSection } from "@/components/landing/hero-section";
 import { FeaturesSection } from "@/components/landing/features-section";
@@ -15,12 +15,17 @@ import { PricingSection } from "@/components/landing/pricing-section";
 import { CtaSection } from "@/components/landing/cta-section";
 import { FooterSection } from "@/components/landing/footer-section";
 import { IntroAnimation } from "@/components/intro-animation";
+import { wakeBackend } from "@/lib/wake-ingestion-worker";
 
 export default function Home() {
   const [heroReady, setHeroReady] = useState(false);
   const handleIntroDone = useCallback(() => {
     setHeroReady(true);
   }, []);
+
+  // Wake the Render backend as soon as the landing page loads.
+  // Fire-and-forget — polls / every 10 s up to 12 times (2 min max).
+  useEffect(() => { wakeBackend() }, []);
 
   return (
     <main className="relative min-h-screen overflow-x-hidden noise-overlay">

@@ -1,8 +1,17 @@
 "use client"
 
-import { useEffect, useState, createContext, useContext } from "react"
-import { useRouter } from "next/navigation"
+import { useEffect, useRef, useState, createContext, useContext, useCallback } from "react"
+import { useRouter, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import {
+  getTokenExp,
+  isTokenExpired,
+  wipeLocalSession,
+  handleUnauthorized,
+  refreshSessionSafely,
+  installFetchAuthInterceptor,
+  setupProactiveTokenRefresh,
+} from "@/lib/auth"
 
 interface User {
   user_id: number
@@ -31,115 +40,186 @@ export function useAuth() {
   return useContext(AuthContext)
 }
 
+// ─── Component ───────────────────────────────────────────────────────────────
+
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  const pathname = usePathname()
+
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const activeRef = useRef(true)
 
-  const clearSession = () => {
-    localStorage.removeItem("access_token")
-    localStorage.removeItem("token_type")
+  // Install global fetch 401 interceptor & background token refresher
+  useEffect(() => {
+    installFetchAuthInterceptor()
+    setupProactiveTokenRefresh()
+  }, [])
+
+  // ── clearSession ─────────────────────────────────────────────────────────
+  const clearSession = useCallback(() => {
+    handleUnauthorized()
     setUser(null)
-    router.push("/login")
-  }
+  }, [])
 
-  const logout = async () => {
+  // ── logout ───────────────────────────────────────────────────────────────
+  const logout = useCallback(async () => {
     try {
       await supabase.auth.signOut()
-    } catch (error) {
-      console.error("Error signing out from Supabase:", error)
+    } catch (err) {
+      console.error("Error signing out from Supabase:", err)
     }
     clearSession()
-  }
+  }, [clearSession])
 
-  const syncBackendUser = async (token: string, avatarUrl?: string) => {
+  // ── syncBackendUser ───────────────────────────────────────────────────────
+  const syncBackendUser = useCallback(async (token: string, avatarUrl?: string): Promise<boolean> => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL!
-      const response = await fetch(`${apiUrl}/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const res = await fetch(`${apiUrl}/me`, {
+        headers: { Authorization: `Bearer ${token}` },
       })
 
-      if (response.status === 401) {
-        clearSession()
-        return
+      if (res.status === 401) {
+        // Backend explicitly rejected the token — session is invalid
+        return false
       }
 
-      if (!response.ok) {
-        throw new Error(`Failed to sync backend user: ${response.statusText}`)
+      if (!res.ok) {
+        // Transient server error (Render waking up, 502/503) — keep existing session
+        console.warn("Backend /me returned", res.status, "— keeping existing session")
+        return true
       }
 
-      const data = await response.json()
-      
-      const userData: User = {
-        user_id: data.user_id,
-        name: data.name || "Cortex Explorer",
-        email: data.email || "explorer@cortex.com",
-        created_at: data.created_at,
-        avatar_url: data.avatar_url || avatarUrl,
-        plan_name: data.plan_name || "Free",
+      const data = await res.json()
+      if (activeRef.current) {
+        setUser({
+          user_id: data.user_id,
+          name: data.name || "Cortex Explorer",
+          email: data.email || "explorer@cortex.com",
+          created_at: data.created_at,
+          avatar_url: data.avatar_url || avatarUrl,
+          plan_name: data.plan_name || "Free",
+        })
       }
-      
-      setUser(userData)
-    } catch (error) {
-      console.error("Backend synchronization failed:", error)
+      return true
+    } catch (err) {
+      // Flaky network or cold start — keep session alive optimistically
+      console.warn("Backend sync failed (network):", err)
+      return true
     }
-  }
+  }, [])
 
-  const updateUser = (updates: Partial<User>) => {
-    setUser((currentUser) => currentUser ? { ...currentUser, ...updates } : currentUser)
-  }
+  // ── updateUser ───────────────────────────────────────────────────────────
+  const updateUser = useCallback((updates: Partial<User>) => {
+    setUser(prev => (prev ? { ...prev, ...updates } : prev))
+  }, [])
 
+  // ── Initial session check + Supabase listener ─────────────────────────────
   useEffect(() => {
-    let active = true
+    activeRef.current = true
+
+    // Listen for unauthorized events emitted from fetch interceptor or elsewhere
+    const handleUnauthorizedEvent = () => {
+      if (activeRef.current) {
+        setUser(null)
+        setLoading(false)
+      }
+    }
+    window.addEventListener("cortex-unauthorized", handleUnauthorizedEvent)
 
     const checkInitialSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession()
-        
-        if (!active) return
+
+        if (!activeRef.current) return
 
         if (session) {
-          localStorage.setItem("access_token", session.access_token)
+          let token = session.access_token
+
+          // If current token is already expired or near expiry, refresh immediately
+          if (isTokenExpired(token, 60)) {
+            const refreshed = await refreshSessionSafely()
+            if (refreshed) {
+              token = refreshed
+            }
+          }
+
+          localStorage.setItem("access_token", token)
           localStorage.setItem("token_type", "bearer")
-          await syncBackendUser(session.access_token, session.user?.user_metadata?.avatar_url)
+
+          const ok = await syncBackendUser(token, session.user?.user_metadata?.avatar_url)
+          if (!ok && activeRef.current) {
+            clearSession()
+          }
         } else {
+          // No Supabase session at all → redirect to login
           clearSession()
         }
-      } catch (error) {
-        console.error("Error checking initial session:", error)
-        if (active) clearSession()
+      } catch (err) {
+        console.error("Error checking initial session:", err)
+        if (activeRef.current) clearSession()
       } finally {
-        if (active) setLoading(false)
+        if (activeRef.current) setLoading(false)
       }
     }
 
     checkInitialSession()
 
-    // Listen for auth state changes (login, logout, token refresh, etc.)
+    // Supabase fires SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, USER_UPDATED, etc.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!active) return
+      if (!activeRef.current) return
 
-      if (session) {
-        localStorage.setItem("access_token", session.access_token)
-        localStorage.setItem("token_type", "bearer")
-        await syncBackendUser(session.access_token, session.user?.user_metadata?.avatar_url)
-      } else {
+      if (event === "SIGNED_OUT" || !session) {
         clearSession()
+        return
+      }
+
+      // Update storage with fresh token
+      localStorage.setItem("access_token", session.access_token)
+      localStorage.setItem("token_type", "bearer")
+
+      // Only re-sync backend on meaningful events, not every routine token refresh
+      if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+        const ok = await syncBackendUser(session.access_token, session.user?.user_metadata?.avatar_url)
+        if (!ok && activeRef.current) clearSession()
       }
     })
 
     return () => {
-      active = false
+      activeRef.current = false
+      window.removeEventListener("cortex-unauthorized", handleUnauthorizedEvent)
       subscription.unsubscribe()
     }
-  }, [router])
+  }, [clearSession, syncBackendUser])
 
-  if (loading) {
+  // ── Per-navigation token guard ────────────────────────────────────────────
+  // On route changes, check token expiry and refresh proactively if needed
+  useEffect(() => {
+    if (loading) return
+
+    const token = localStorage.getItem("access_token")
+    if (isTokenExpired(token, 60)) {
+      refreshSessionSafely().then(newToken => {
+        if (!newToken && activeRef.current) {
+          clearSession()
+        }
+      })
+    }
+  }, [pathname, loading, clearSession])
+
+  // ── Guard: redirect unauthenticated users ─────────────────────────────────
+  useEffect(() => {
+    if (!loading && !user) {
+      handleUnauthorized()
+    }
+  }, [loading, user])
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (loading || !user) {
     return (
       <div className="h-screen w-full bg-black flex flex-col items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-t-white border-r-transparent border-b-transparent border-l-transparent"></div>
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-t-white border-r-transparent border-b-transparent border-l-transparent" />
       </div>
     )
   }

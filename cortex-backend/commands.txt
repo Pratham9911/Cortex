@@ -6,3 +6,11 @@ python workers/ingestion_worker.py
 
 cd cortex-frontend
 npm run dev
+
+
+Action	Command
+Start	sudo systemctl start cortex
+Stop	sudo systemctl stop cortex
+Restart	sudo systemctl restart cortex
+Status	sudo systemctl status cortex --no-pager
+Live logs	sudo journalctl -u cortex -f

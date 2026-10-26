@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Mail, Lock, User } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { isTokenExpired, wipeLocalSession } from "@/lib/auth"
 
 interface AuthFormProps extends React.ComponentPropsWithoutRef<"div"> {
   isRegister?: boolean
@@ -35,12 +36,15 @@ export function AuthForm({ className, isRegister = false, ...props }: AuthFormPr
     setMounted(true)
   }, [])
 
-  // Redirect to dashboard if already logged in
+  // Redirect to workspace only if actively logged in with a valid session
   useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (token) {
-      router.push("/workspace")
-    }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.access_token && !isTokenExpired(session.access_token, 30)) {
+        router.push("/workspace")
+      } else {
+        wipeLocalSession()
+      }
+    })
   }, [router])
 
   const [successMsg, setSuccessMsg] = useState("")

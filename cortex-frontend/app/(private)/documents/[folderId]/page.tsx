@@ -50,6 +50,7 @@ import {
   parseDocumentPlanLimit,
   type DocumentPlanLimit,
 } from "@/components/documents/upload-status-dialogs"
+import { wakeIngestionWorker } from "@/lib/wake-ingestion-worker"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -486,6 +487,7 @@ export default function FolderPage() {
 
   const handleUploadVersionSubmit = async () => {
     if (!selectedDoc || !uploadVerFile) return
+    wakeIngestionWorker() // fire-and-forget: wake Render worker from cold start
     setUploadVerLoading(true)
     setUploadVerError("")
     try {
@@ -562,6 +564,7 @@ export default function FolderPage() {
     if (!uploadFile || !uploadTitle.trim()) return
     const chosenTeams = Object.entries(selectedTeams).filter(([,v])=>v).map(([k])=>k)
     if (chosenTeams.length === 0) { setUploadError("Select at least one team."); return }
+    wakeIngestionWorker() // fire-and-forget: wake Render worker from cold start
     setUploadLoading(true); setUploadError("")
     try {
       const token = localStorage.getItem("access_token")
