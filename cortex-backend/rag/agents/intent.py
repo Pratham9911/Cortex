@@ -98,6 +98,15 @@ Query: "Tell me about our plan for project A"
 Output:
 {{"intent":"project_knowledge","query":"Tell me about Plan for Project A "}}
 for KB don't include more irrelevent info , just short proper query or user question as it is ,and don't mention search from kb.
+
+=== REFERENCE RESOLUTION (CRITICAL) ===
+When the user query contains pronouns or references like 'these', 'those', 'it', 'the above',
+'the 2nd point', 'expand on that', etc., you MUST resolve them using the Conversation History below.
+Look at the most recent AI response to identify the exact topics, items, or points being referenced.
+Then generate a `query` that includes those specific, concrete topics — not the vague pronoun.
+Example: If AI previously listed "QA vs QC, Alpha vs Beta Testing, Integration Testing, Performance Testing"
+and user says "answer these from KB", set intent=project_knowledge and query="QA vs QC, Alpha vs Beta Testing, Integration Testing approaches, Performance Testing types".
+
 {history_str}
 User Query:
 {query}

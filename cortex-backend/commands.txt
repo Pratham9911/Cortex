@@ -14,3 +14,10 @@ Stop	sudo systemctl stop cortex
 Restart	sudo systemctl restart cortex
 Status	sudo systemctl status cortex --no-pager
 Live logs	sudo journalctl -u cortex -f
+
+
+fetch and run backend
+cd ~/Cortex
+git pull origin main
+sudo systemctl restart cortex
+sudo systemctl status cortex --no-pager

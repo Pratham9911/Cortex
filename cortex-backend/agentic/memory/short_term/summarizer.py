@@ -26,7 +26,9 @@ _llm = ChatFireworks(
     model=MODEL,
     api_key=os.getenv("FIREWORKS_API_KEY"),
     temperature=0,
-    max_tokens=2048,
+    max_tokens=1536,
+    request_timeout=35,
+    max_retries=2,
     reasoning_effort="none",
     model_kwargs={"response_format": {"type": "json_object"}},
 )
@@ -92,14 +94,15 @@ user_information_and_preferences
 discussion_and_context
   What the user wanted and what was actually discussed.
   Write specific, factual sentences — not just topic names.
-  Bad:  "User asked about RAG."
-  Good: "User requested a detailed RAG overview; follow-up asked for 3rd point which was cut off."
+  Bad:  "User asked about testing."
+  Good: "User requested software testing concepts; follow-up asked for details from KB."
   Keep only the most recent / active topics; drop fully resolved older ones.
 
 assistant_responses_and_progress
-  Key things the assistant already explained, built, suggested, or clarified —
-  only what is useful to know later to avoid repeating the same answer.
-  Skip routine Q&A. Focus on ongoing work, incomplete explanations, or partial code.
+  Key topics, questions answered, solutions, and explanations the assistant provided.
+  Always record specific topics, algorithms, or points listed by the assistant
+  (e.g., "Assistant listed and explained QA vs QC, Alpha vs Beta testing, Integration testing approaches, and Performance testing types").
+  This is critical so future references (e.g. "expand on these", "answer those from KB", "the 2nd point") can be resolved.
   Do not copy full responses verbatim.
 
 decisions_and_current_state
@@ -119,7 +122,7 @@ The conversation may start with a PERSISTENT MEMORY block — a prior summary.
   - For other sections: update stale facts, add new items, remove fully resolved items.
   - Mention each fact only once; no duplicates.
   - Prefer new information over old when they conflict.
-  - try to place imp and relevant items at the top of each section, less important items at the bottom and later can be removed if irrelevent.
+  - Place imp and relevant items at the top of each section, less important items at the bottom and later can be removed if irrelevant.
 
 === QUALITY RULES ===
 
@@ -134,6 +137,22 @@ The conversation may start with a PERSISTENT MEMORY block — a prior summary.
 
 def _empty_summary() -> dict[str, list[str]]:
     return {field: [] for field in _FIELDS}
+
+
+def _fallback_summary(messages: Sequence[BaseMessage]) -> dict[str, list[str]]:
+    """Deterministic fallback summary used when Fireworks API times out or is under heavy load."""
+    data = _empty_summary()
+    for m in messages:
+        snippet = (m.content or "").strip().replace("\n", " ")[:140]
+        if not snippet:
+            continue
+        if m.type == "human":
+            data["discussion_and_context"].append(f"User requested: {snippet}")
+        elif m.type == "ai":
+            data["assistant_responses_and_progress"].append(f"Assistant covered: {snippet}")
+    for field in _FIELDS:
+        data[field] = data[field][-5:]
+    return data
 
 
 def _render_summary(data: dict[str, list[str]]) -> str:
@@ -168,22 +187,19 @@ def summarize_history(messages: Sequence[BaseMessage]) -> BaseMessage:
         HumanMessage(content=formatted),
     ]
 
-    response = _llm.invoke(prompt)
-
     try:
+        response = _llm.invoke(prompt)
         data = json.loads(response.content)
         for field in _FIELDS:
             value = data.get(field)
             if not isinstance(value, list):
                 data[field] = []
             else:
-                # Coerce to non-empty strings, then apply the hard safety cap.
-                # The cap only fires if the model went well over the prompted limit.
                 cleaned = [str(item) for item in value if str(item).strip()]
                 data[field] = cleaned[:_HARD_CAP]
-    except (json.JSONDecodeError, Exception) as exc:
-        print(f"\n--- Summarizer JSON parse failed ({exc}), using empty fallback ---\n")
-        data = _empty_summary()
+    except Exception as exc:
+        print(f"\n--- Summarizer call/parse failed ({exc}), using deterministic fallback ---\n")
+        data = _fallback_summary(messages)
 
     summary_text = _render_summary(data)
     print("\n--- Memory summary ---\n")

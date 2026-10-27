@@ -1,3 +1,4 @@
+import sys
 import os
 import asyncio
 from contextlib import asynccontextmanager
@@ -6,6 +7,9 @@ from sqlalchemy import text
 from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 load_dotenv()
 
@@ -27,7 +31,20 @@ async def init_checkpointer():
 
     async_pool = AsyncConnectionPool(
         conn_string,
-        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        min_size=1,
+        max_size=10,
+        max_idle=45.0,
+        max_lifetime=300.0,
+        check=AsyncConnectionPool.check_connection,
+        kwargs={
+            "autocommit": True,
+            "prepare_threshold": 0,
+            "row_factory": dict_row,
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 3,
+        },
         open=False,
     )
     await async_pool.open()

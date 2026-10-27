@@ -1,5 +1,6 @@
 import time
 import asyncio
+import threading
 from uuid import uuid4
 from typing import Optional
 
@@ -724,6 +725,7 @@ async def ask_chat(
 
         chat.updated_at = func.now()
         db.commit()
+        db.refresh(user_message)  # ensure message_id is populated
     except Exception:
         db.rollback()
         finish_ai_request(
@@ -752,13 +754,18 @@ async def ask_chat(
             # Immediately flush reverse proxy buffers (Nginx, Render, Cloudflare)
             yield ": ping\n\n"
 
-            # Check and load short-term memory
-            history_messages = check_and_summarize_db(db, chat.chat_id)
-            prior_history = [
-                m for m in history_messages
-                if not (isinstance(m, HumanMessage) and m.content == query)
-            ]
+            # Compact history if over token threshold (ensures old turns are summarized
+            # before being sent to the LLM, while keeping the latest turn raw)
+            check_and_summarize_db(db, chat.chat_id)
+
+            # Load short-term memory, excluding the current user message
+            # so prior_history contains: [summary] + [prev_user, prev_assistant]
+            prior_history = load_chat_history(
+                db, chat.chat_id,
+                exclude_message_id=user_message.message_id
+            )
             summary_ctx = extract_summary_text(prior_history)
+
 
             if not is_agent:
                 input_tokens = 0
@@ -826,10 +833,18 @@ async def ask_chat(
                 db.commit()
                 usage_succeeded = True
 
-                # Post-response memory check & compaction
-                check_and_summarize_db(db, chat.chat_id)
-
                 yield "event: done\ndata: complete\n\n"
+
+                # Post-response memory compaction (fire-and-forget in background)
+                _compaction_chat_id = chat.chat_id
+                def _bg_compaction():
+                    try:
+                        _bg_db = SessionLocal()
+                        check_and_summarize_db(_bg_db, _compaction_chat_id)
+                        _bg_db.close()
+                    except Exception as exc:
+                        print(f"Background STM compaction error: {exc}")
+                threading.Thread(target=_bg_compaction, daemon=True).start()
 
             else:
                 stream_db = SessionLocal()
@@ -1003,8 +1018,16 @@ async def ask_chat(
                 db.commit()
                 usage_succeeded = True
 
-                # Post-response memory check & compaction
-                check_and_summarize_db(db, chat.chat_id)
+                # Post-response memory compaction (fire-and-forget in background)
+                _agent_compaction_chat_id = chat.chat_id
+                def _bg_agent_compaction():
+                    try:
+                        _bg_db = SessionLocal()
+                        check_and_summarize_db(_bg_db, _agent_compaction_chat_id)
+                        _bg_db.close()
+                    except Exception as exc:
+                        print(f"Background agent STM compaction error: {exc}")
+                threading.Thread(target=_bg_agent_compaction, daemon=True).start()
 
                 yield _emit_sse(
                     "agent_completed",
