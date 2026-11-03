@@ -1,0 +1,79 @@
+# Cortex AWS Backend Access
+
+## Connect to AWS EC2 (Windows PowerShell)
+
+```powershell
+ssh -i "$HOME\Downloads\cortex-key.pem" ubuntu@32.237.12.119
+```
+
+## Backend location
+
+```bash
+cd ~/Cortex/cortex-backend
+```
+
+## Backend management
+
+Start:
+```bash
+sudo systemctl start cortex
+```
+
+Stop:
+```bash
+sudo systemctl stop cortex
+```
+
+Restart:
+```bash
+sudo systemctl restart cortex
+```
+
+Check status:
+```bash
+sudo systemctl status cortex --no-pager
+```
+
+## Live backend logs
+
+```bash
+sudo journalctl -u cortex -f
+```
+
+Press Ctrl+C to exit live logs. This does not stop Cortex.
+
+Last 100 logs:
+```bash
+sudo journalctl -u cortex -n 100 --no-pager
+```
+
+## Test backend
+
+Local EC2:
+```bash
+curl -i http://127.0.0.1:8000/
+```
+
+Public HTTPS:
+```bash
+curl -i https://api.cortexagent.site/
+```
+
+## Disconnect from AWS
+
+```bash
+exit
+```
+
+## Important details
+
+- Domain: https://cortexagent.site
+- API: https://api.cortexagent.site
+- EC2 Elastic IP: 32.237.12.119
+- SSH user: ubuntu
+- SSH key location: C:\Users\Pratham\Downloads\cortex-key.pem
+- AWS region: ap-southeast-2
+- EC2 instance: i-01c910ad7062cb35a
+- Service name: cortex
+
+Never upload cortex-key.pem, passwords, or .env secrets to GitHub.

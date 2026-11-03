@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import { X, Check } from "lucide-react"
 
@@ -22,6 +23,11 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
   const [loadingIntegrations, setLoadingIntegrations] = useState(true)
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null)
   const [connectorFilter, setConnectorFilter] = useState<"all" | "connected" | "not_connected">("all")
+  const { theme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => { setMounted(true) }, [])
+  const isDark = mounted && theme === "dark"
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL!
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
@@ -166,11 +172,14 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
         </div>
       )}
 
-      <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
-        <h2 className="text-xl font-bold text-white">Connectors</h2>
+      <div className="flex items-center justify-between pb-4 border-b border-border/40">
+        <h2 className={cn("text-xl font-bold", isDark ? "text-white" : "text-slate-900")}>Connectors</h2>
         <button
           onClick={onClose ?? (() => router.push("/settings"))}
-          className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800"
+          className={cn(
+            "p-1.5 rounded-lg transition-colors",
+            isDark ? "text-zinc-400 hover:text-white hover:bg-zinc-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+          )}
           aria-label="Close connector settings"
         >
           <X className="h-4 w-4" />
@@ -178,34 +187,34 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
       </div>
 
       <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Popular</p>
+        <p className={cn("text-xs font-semibold uppercase tracking-wider", isDark ? "text-zinc-400" : "text-slate-500")}>Popular</p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="bg-[#181a24] border border-zinc-800/80 rounded-xl p-4 flex items-center justify-between shadow-sm">
+          <div className={cn("border rounded-xl p-4 flex items-center justify-between shadow-xs", isDark ? "bg-[#181a24] border-zinc-800/80" : "bg-white border-slate-200")}>
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
-                <img src="/icons/github.svg" alt="GitHub" className="w-5 h-5 object-contain invert" />
+              <div className={cn("w-8 h-8 rounded-lg border flex items-center justify-center overflow-hidden shrink-0", isDark ? "bg-zinc-900 border-zinc-800" : "bg-slate-100 border-slate-200")}>
+                <img src="/icons/github.svg" alt="GitHub" className={cn("w-5 h-5 object-contain", isDark && "invert")} />
               </div>
-              <p className="text-sm font-semibold text-white">GitHub</p>
+              <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-900")}>GitHub</p>
             </div>
 
             {isGitHubConnected && (
-              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-semibold flex items-center gap-1 shrink-0">
+              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[10px] font-semibold flex items-center gap-1 shrink-0">
                 <Check className="h-3 w-3" /> Connected
               </span>
             )}
           </div>
 
-          <div className="bg-[#181a24] border border-zinc-800/80 rounded-xl p-4 flex items-center justify-between shadow-sm">
+          <div className={cn("border rounded-xl p-4 flex items-center justify-between shadow-xs", isDark ? "bg-[#181a24] border-zinc-800/80" : "bg-white border-slate-200")}>
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+              <div className={cn("w-8 h-8 rounded-lg border flex items-center justify-center overflow-hidden shrink-0", isDark ? "bg-zinc-900 border-zinc-800" : "bg-slate-100 border-slate-200")}>
                 <img src="/icons/gmail.svg" alt="Gmail" className="w-5 h-5 object-contain" />
               </div>
-              <p className="text-sm font-semibold text-white">Email</p>
+              <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-900")}>Email</p>
             </div>
 
             {isGmailConnected && (
-              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-semibold flex items-center gap-1 shrink-0">
+              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[10px] font-semibold flex items-center gap-1 shrink-0">
                 <Check className="h-3 w-3" /> Connected
               </span>
             )}
@@ -213,7 +222,7 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
         </div>
       </div>
 
-      <div className="flex items-center gap-4 border-b border-zinc-800/80 pb-2">
+      <div className={cn("flex items-center gap-4 border-b pb-2", isDark ? "border-zinc-800/80" : "border-slate-200")}>
         {[
           { id: "all", label: "All" },
           { id: "connected", label: "Connected" },
@@ -223,10 +232,10 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
             key={f.id}
             onClick={() => setConnectorFilter(f.id as typeof connectorFilter)}
             className={cn(
-              "text-xs font-semibold pb-2 border-b-2 transition-all",
+              "text-xs font-semibold pb-2 border-b-2 transition-all cursor-pointer",
               connectorFilter === f.id
-                ? "border-white text-white"
-                : "border-transparent text-zinc-500 hover:text-zinc-300"
+                ? isDark ? "border-white text-white" : "border-slate-900 text-slate-900 font-bold"
+                : isDark ? "border-transparent text-zinc-500 hover:text-zinc-300" : "border-transparent text-slate-400 hover:text-slate-600"
             )}
           >
             {f.label}
@@ -234,16 +243,16 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
         ))}
       </div>
 
-      <div className="border border-zinc-800/80 rounded-xl overflow-hidden bg-[#181a24]">
+      <div className={cn("border rounded-xl overflow-hidden shadow-xs", isDark ? "border-zinc-800/80 bg-[#181a24]" : "border-slate-200 bg-white")}>
         <table className="w-full text-left text-xs">
-          <thead className="bg-[#12141c] text-zinc-400 uppercase font-semibold border-b border-zinc-800/80">
+          <thead className={cn("uppercase font-semibold border-b", isDark ? "bg-[#12141c] text-zinc-400 border-zinc-800/80" : "bg-slate-50 text-slate-500 border-slate-200")}>
             <tr>
               <th className="py-3 px-4">Connector</th>
               <th className="py-3 px-4">Type</th>
               <th className="py-3 px-4 text-right">Status</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800/60">
+          <tbody className={cn("divide-y", isDark ? "divide-zinc-800/60" : "divide-slate-100")}>
             {loadingIntegrations ? (
               <tr>
                 <td colSpan={3} className="py-8 px-4 text-center text-zinc-500">
@@ -252,29 +261,32 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
               </tr>
             ) : (
               filteredConnectors.map((c) => (
-                <tr key={c.id} className="hover:bg-zinc-800/30 transition-colors">
-                  <td className="py-3.5 px-4 font-semibold text-white">
+                <tr key={c.id} className={cn("transition-colors", isDark ? "hover:bg-zinc-800/30" : "hover:bg-slate-50")}>
+                  <td className={cn("py-3.5 px-4 font-semibold", isDark ? "text-white" : "text-slate-900")}>
                     <div className="flex items-center gap-3">
                       <div className="w-6 h-6 rounded flex items-center justify-center overflow-hidden">
-                        <img src={c.icon} alt={c.name} className="w-4 h-4 object-contain" />
+                        <img src={c.icon} alt={c.name} className={cn("w-4 h-4 object-contain", c.id === "github" && isDark && "invert")} />
                       </div>
                       <span>{c.name}</span>
                     </div>
                   </td>
-                  <td className="py-3.5 px-4 text-zinc-400">
+                  <td className={cn("py-3.5 px-4", isDark ? "text-zinc-400" : "text-slate-500")}>
                     {c.type}
                   </td>
                   <td className="py-3.5 px-4 text-right">
                     {c.id === "github" ? (
                       isGitHubConnected ? (
                         <div className="flex items-center justify-end gap-2">
-                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                          <span className="text-emerald-500 font-semibold flex items-center gap-1">
                             <Check className="h-3.5 w-3.5" />
                           </span>
-                          <span className="text-[10px] text-zinc-400 font-mono">{c.email}</span>
+                          <span className={cn("text-[10px] font-mono", isDark ? "text-zinc-400" : "text-slate-500")}>{c.email}</span>
                           <button
                             onClick={handleDisconnectGitHub}
-                            className="px-2 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded text-[10px]"
+                            className={cn(
+                              "px-2 py-1 rounded text-[10px] font-medium transition-colors cursor-pointer",
+                              isDark ? "bg-red-500/20 hover:bg-red-500/30 text-red-300" : "bg-red-50 hover:bg-red-100 text-red-700 border border-red-200"
+                            )}
                           >
                             Disconnect
                           </button>
@@ -282,7 +294,10 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
                       ) : (
                         <button
                           onClick={handleConnectGitHub}
-                          className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-white rounded text-xs font-medium"
+                          className={cn(
+                            "px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer",
+                            isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white" : "bg-slate-900 hover:bg-slate-800 text-white shadow-xs"
+                          )}
                         >
                           Connect
                         </button>
@@ -290,13 +305,16 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
                     ) : c.id === "gmail" ? (
                       isGmailConnected ? (
                         <div className="flex items-center justify-end gap-2">
-                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                          <span className="text-emerald-500 font-semibold flex items-center gap-1">
                             <Check className="h-3.5 w-3.5" />
                           </span>
-                          <span className="text-[10px] text-zinc-400 font-mono">{c.email}</span>
+                          <span className={cn("text-[10px] font-mono", isDark ? "text-zinc-400" : "text-slate-500")}>{c.email}</span>
                           <button
                             onClick={handleDisconnectGmail}
-                            className="px-2 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded text-[10px]"
+                            className={cn(
+                              "px-2 py-1 rounded text-[10px] font-medium transition-colors cursor-pointer",
+                              isDark ? "bg-red-500/20 hover:bg-red-500/30 text-red-300" : "bg-red-50 hover:bg-red-100 text-red-700 border border-red-200"
+                            )}
                           >
                             Disconnect
                           </button>
@@ -304,7 +322,10 @@ export default function ConnectorsSettingsContent({ onClose }: { onClose?: () =>
                       ) : (
                         <button
                           onClick={handleConnectGmail}
-                          className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-white rounded text-xs font-medium"
+                          className={cn(
+                            "px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer",
+                            isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white" : "bg-slate-900 hover:bg-slate-800 text-white shadow-xs"
+                          )}
                         >
                           Connect
                         </button>

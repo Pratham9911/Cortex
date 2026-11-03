@@ -28,7 +28,6 @@ from models import (
 from rag.orchestrator import run_pipeline
 
 import agentic.main_graph as main_graph
-from agentic.checkpointer import delete_checkpoint
 from agentic.tools import set_active_event_callback, set_active_project_context
 from agentic.memory.short_term.stm_db import (
     load_chat_history,
@@ -556,6 +555,8 @@ def list_messages(
     ).limit(limit + 1).all()
     has_more = len(messages) > limit
     response.headers["X-Has-More"] = "true" if has_more else "false"
+    is_processing = chat.chat_id in _ACTIVE_CHAT_EXECUTIONS and not _ACTIVE_CHAT_EXECUTIONS[chat.chat_id].is_completed
+    response.headers["X-Is-Processing"] = "true" if is_processing else "false"
     messages = list(reversed(messages[:limit]))
 
     return [
@@ -613,13 +614,35 @@ def _emit_sse(event_type: str, **data):
     return f"data: {json.dumps(payload)}\n\n"
 
 
-def _emit_interrupt(thread_id: str, interrupt_value):
-    payload = dict(interrupt_value) if isinstance(interrupt_value, dict) else {
-        "details": str(interrupt_value)
-    }
-    payload.pop("thread_id", None)
-    payload.setdefault("agent", "main")
-    return _emit_sse("interrupt", thread_id=thread_id, **payload)
+class ChatExecution:
+    def __init__(self, chat_id: int):
+        self.chat_id = chat_id
+        self.task: Optional[asyncio.Task] = None
+        self.subscribers: set[asyncio.Queue] = set()
+        self.event_buffer: list[str] = []
+        self.done_event = asyncio.Event()
+        self.start_time = time.time()
+        self.is_completed = False
+        self.error: Optional[str] = None
+
+    def emit(self, sse_chunk: str):
+        self.event_buffer.append(sse_chunk)
+        for q in list(self.subscribers):
+            try:
+                q.put_nowait(sse_chunk)
+            except Exception:
+                pass
+
+    def add_subscriber(self) -> asyncio.Queue:
+        q = asyncio.Queue()
+        self.subscribers.add(q)
+        return q
+
+    def remove_subscriber(self, q: asyncio.Queue):
+        self.subscribers.discard(q)
+
+
+_ACTIVE_CHAT_EXECUTIONS: dict[int, ChatExecution] = {}
 
 
 async def _stream_workflow_helper(workflow, input_data, config=None):
@@ -679,6 +702,392 @@ async def _stream_workflow_helper(workflow, input_data, config=None):
             pass
 
 
+async def _run_chat_workflow(
+    execution: ChatExecution,
+    chat_id: int,
+    project_id: int,
+    user_id: int,
+    user_role: str,
+    query: str,
+    is_agent: bool,
+    document_ids: Optional[list[int]],
+    user_message_id: int,
+    usage_date,
+):
+    bg_db = SessionLocal()
+    start_time = time.time()
+    final_answer = None
+    final_intent = None
+    web_sources = []
+    document_chunks = []
+    activities = []
+    usage_input_tokens = 0
+    usage_output_tokens = 0
+    usage_succeeded = False
+
+    try:
+        execution.emit(": ping\n\n")
+
+        # Compact history if over token threshold
+        check_and_summarize_db(bg_db, chat_id)
+
+        # Load short-term memory, excluding current user message
+        prior_history = load_chat_history(
+            bg_db, chat_id,
+            exclude_message_id=user_message_id
+        )
+        summary_ctx = extract_summary_text(prior_history)
+
+        if not is_agent:
+            input_tokens = 0
+            output_tokens = 0
+            total_tokens = 0
+
+            # Run the synchronous pipeline in a thread so it doesn't block
+            # the event loop — allows SSE events to stream to the client live.
+            pipeline_queue: asyncio.Queue = asyncio.Queue()
+            loop = asyncio.get_event_loop()
+
+            def _run_sync_pipeline():
+                try:
+                    for event in run_pipeline(
+                        query=query,
+                        project_id=project_id,
+                        user_id=user_id,
+                        user_role=user_role,
+                        db=bg_db,
+                        history=prior_history,
+                        summary_context=summary_ctx,
+                        document_ids=document_ids
+                    ):
+                        loop.call_soon_threadsafe(pipeline_queue.put_nowait, event)
+                    loop.call_soon_threadsafe(pipeline_queue.put_nowait, None)  # sentinel
+                except Exception as exc:
+                    loop.call_soon_threadsafe(pipeline_queue.put_nowait, exc)
+
+            # Start the pipeline in a background thread — DON'T await it
+            # (run_in_executor would block until the thread finishes).
+            # The drain loop below processes events as they arrive.
+            _pipeline_thread = threading.Thread(target=_run_sync_pipeline, daemon=True)
+            _pipeline_thread.start()
+            # Drain events that were enqueued from the thread
+            while True:
+                event = await pipeline_queue.get()
+                if event is None:
+                    break  # sentinel — pipeline finished
+                if isinstance(event, Exception):
+                    raise event
+
+                if event.get("type") == "debug" and event.get("step") == "intent":
+                    final_intent = event.get("intent")
+
+                if event.get("type") == "sources":
+                    web_sources.extend(event.get("sources", []))
+
+                stream_event = event
+                if event.get("type") == "final":
+                    final_answer = event.get("answer")
+                    final_intent = event.get("intent") or final_intent
+                    input_tokens = event.get("input_tokens", input_tokens) or 0
+                    output_tokens = event.get("output_tokens", output_tokens) or 0
+                    usage_input_tokens = max(usage_input_tokens, int(input_tokens))
+                    usage_output_tokens = max(usage_output_tokens, int(output_tokens))
+                    total_tokens = event.get("total_tokens")
+                    if total_tokens is None:
+                        total_tokens = input_tokens + output_tokens
+                    web_sources.extend(event.get("sources", []))
+                    document_chunks.extend(event.get("chunks", []))
+                    stream_event = {
+                        **event,
+                        "sources": _normalize_web_sources(web_sources),
+                        "chunks": _normalize_document_sources(document_chunks),
+                    }
+
+                execution.emit(f"data: {json.dumps(stream_event)}\n\n")
+
+            if final_answer is None:
+                final_answer = "I could not generate a final answer for this request."
+
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            assistant_message = Message(
+                chat_id=chat_id,
+                role="assistant",
+                content=final_answer,
+                sources={
+                    "intent": final_intent or "unknown",
+                    "mode": "normal",
+                    "latency_ms": latency_ms,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": total_tokens,
+                    "web": _normalize_web_sources(web_sources),
+                    "documents": _normalize_document_sources(document_chunks)
+                }
+            )
+            bg_db.add(assistant_message)
+            chat_obj = bg_db.query(Chat).filter(Chat.chat_id == chat_id).first()
+            if chat_obj:
+                chat_obj.updated_at = func.now()
+            bg_db.commit()
+            usage_succeeded = True
+
+            execution.emit("event: done\ndata: complete\n\n")
+
+            # Post-response memory compaction (fire-and-forget in background)
+            _compaction_chat_id = chat_id
+            def _bg_compaction():
+                try:
+                    _bg_db = SessionLocal()
+                    check_and_summarize_db(_bg_db, _compaction_chat_id)
+                    _bg_db.close()
+                except Exception as exc:
+                    print(f"Background STM compaction error: {exc}")
+            threading.Thread(target=_bg_compaction, daemon=True).start()
+
+        else:
+            stream_db = SessionLocal()
+            thread_id = str(uuid4())
+            config = {"configurable": {"thread_id": thread_id}}
+
+            initial_state = {
+                "messages": [*prior_history, HumanMessage(content=query)],
+                "question": query,
+                "answer": "",
+                "reasoning": "",
+                "tool_calls": [],
+                "sources": [],
+                "chunks": [],
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "iterations": 0,
+            }
+
+            pending_events = []
+            def sub_event_emitter(event_type: str, *args, **data):
+                agent_val = data.pop("agent", None) or (args[0] if args else "main")
+                pending_events.append((event_type, {"agent": agent_val, **data}))
+
+            execution.emit(_emit_sse("agent_started", agent="main", thread_id=thread_id))
+
+            set_active_event_callback(sub_event_emitter)
+            set_active_project_context(
+                project_id=project_id,
+                user_id=user_id,
+                user_role=user_role,
+                db=stream_db,
+                thread_id=thread_id,
+                document_ids=document_ids
+            )
+
+            input_tokens = 0
+            output_tokens = 0
+
+            try:
+                workflow = main_graph.workflow or main_graph.build_workflow()
+                async for stream_kind, stream_value, stream_data in _stream_workflow_helper(
+                    workflow, initial_state, config=config
+                ):
+                    if stream_kind == "event":
+                        sub_type = stream_value
+                        agent_name = stream_data.get("agent", "main")
+                        AGENT_TOOLS = {"web_agent", "retrieval_agent", "github_agent", "gmail_agent"}
+                        def _get_agent_display(name_str: str) -> str:
+                            if name_str == "web_agent": return "Web"
+                            if name_str == "retrieval_agent": return "Project"
+                            if name_str == "github_agent": return "GitHub"
+                            if name_str == "gmail_agent": return "Gmail"
+                            return "Main"
+
+                        if sub_type == "agent_started":
+                            display_name = _get_agent_display(agent_name)
+                            activities.append({
+                                "agent": agent_name,
+                                "kind": "status",
+                                "content": "Planning the request..." if agent_name == "main" else f"{display_name} agent started"
+                            })
+                        elif sub_type == "reasoning":
+                            content_val = stream_data.get("content") or ""
+                            if content_val:
+                                activities.append({"agent": agent_name, "kind": "thought", "content": content_val})
+                        elif sub_type == "tool_started":
+                            tool = stream_data.get("tool") or "unknown"
+                            tool_agent = tool if tool in AGENT_TOOLS else agent_name
+                            label = "Searching web" if tool == "web_agent" else "Searching project" if tool == "retrieval_agent" else "Searching GitHub" if tool == "github_agent" else f"Using {tool}"
+                            args = stream_data.get("args")
+                            args_str = f" {json.dumps(args)}" if args else ""
+                            content = label if tool in AGENT_TOOLS else f"{label}{args_str}"
+                            activities.append({"agent": tool_agent, "kind": "tool", "label": label, "content": content})
+                        elif sub_type == "tool_completed":
+                            tool = stream_data.get("tool") or ""
+                            if tool in AGENT_TOOLS:
+                                display_name = _get_agent_display(tool)
+                                activities.append({"agent": tool, "kind": "status", "content": f"{display_name} search complete"})
+                        elif sub_type == "agent_completed" and agent_name != "main":
+                            display_name = _get_agent_display(agent_name)
+                            activities.append({"agent": agent_name, "kind": "status", "content": f"{display_name} agent finished"})
+
+                        execution.emit(_emit_sse(sub_type, **stream_data))
+                        continue
+
+                    update = stream_value
+                    for node_name, node_update in update.items():
+                        if node_name in ("chat_node", "force_synthesis_node"):
+                            reasoning = node_update.get("reasoning", "")
+                            answer = node_update.get("answer", "")
+                            tool_calls = node_update.get("tool_calls", [])
+                            iteration = node_update.get("iterations")
+
+                            if answer:
+                                final_answer = answer
+                            input_tokens = node_update.get("input_tokens", input_tokens)
+                            output_tokens = node_update.get("output_tokens", output_tokens)
+                            usage_input_tokens = max(usage_input_tokens, int(input_tokens or 0))
+                            usage_output_tokens = max(usage_output_tokens, int(output_tokens or 0))
+
+                            if reasoning:
+                                activities.append({"agent": "main", "kind": "thought", "content": reasoning})
+                                execution.emit(_emit_sse("reasoning", agent="main", iteration=iteration, content=reasoning))
+
+                            for tc in tool_calls:
+                                t_name = tc.get("name", "tool")
+                                t_args = tc.get("args")
+                                t_agent = t_name if t_name in {"web_agent", "retrieval_agent", "github_agent", "gmail_agent"} else "main"
+                                t_label = "Searching web" if t_name == "web_agent" else "Searching project" if t_name == "retrieval_agent" else "Searching GitHub" if t_name == "github_agent" else f"Using {tool}"
+                                t_content = t_label if t_name in {"web_agent", "retrieval_agent"} else f"{t_label}{f' {json.dumps(t_args)}' if t_args else ''}"
+                                activities.append({"agent": t_agent, "kind": "tool", "label": t_label, "content": t_content})
+                                execution.emit(_emit_sse("tool_started", agent="main", iteration=iteration, tool=t_name, args=tc.get("args"), call_id=tc.get("id")))
+
+                        elif node_name == "tool_node":
+                            activities.append({"agent": "main", "kind": "status", "content": "Sub-agent complete"})
+                            execution.emit(_emit_sse("tool_completed", agent="main", tool="sub_agent"))
+
+                        elif node_name == "collect_tool_results":
+                            sources = node_update.get("sources", [])
+                            chunks = node_update.get("chunks", [])
+                            if sources:
+                                web_sources = sources
+                            if chunks:
+                                document_chunks = chunks
+                            input_tokens = node_update.get("input_tokens", input_tokens)
+                            output_tokens = node_update.get("output_tokens", output_tokens)
+                            usage_input_tokens = max(usage_input_tokens, int(input_tokens or 0))
+                            usage_output_tokens = max(usage_output_tokens, int(output_tokens or 0))
+
+            finally:
+                set_active_event_callback(None)
+                set_active_project_context(None)
+                stream_db.close()
+
+            if not final_answer:
+                final_answer = "Agent workflow completed."
+
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            assistant_message = Message(
+                chat_id=chat_id,
+                role="assistant",
+                content=final_answer,
+                sources={
+                    "intent": "cortex-agent",
+                    "mode": "agent",
+                    "latency_ms": latency_ms,
+                    "reasoning": activities,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                    "web": _normalize_web_sources(web_sources),
+                    "documents": _normalize_document_sources(document_chunks)
+                }
+            )
+            bg_db.add(assistant_message)
+            chat_obj = bg_db.query(Chat).filter(Chat.chat_id == chat_id).first()
+            if chat_obj:
+                chat_obj.updated_at = func.now()
+            bg_db.commit()
+            usage_succeeded = True
+
+            # Post-response memory compaction (fire-and-forget in background)
+            _agent_compaction_chat_id = chat_id
+            def _bg_agent_compaction():
+                try:
+                    _bg_db = SessionLocal()
+                    check_and_summarize_db(_bg_db, _agent_compaction_chat_id)
+                    _bg_db.close()
+                except Exception as exc:
+                    print(f"Background agent STM compaction error: {exc}")
+            threading.Thread(target=_bg_agent_compaction, daemon=True).start()
+
+            execution.emit(_emit_sse(
+                "agent_completed",
+                agent="main",
+                thread_id=thread_id,
+                answer=final_answer,
+                sources=_normalize_web_sources(web_sources),
+                chunks=_normalize_document_sources(document_chunks),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+            ))
+            execution.emit("event: done\ndata: complete\n\n")
+
+    except Exception as e:
+        bg_db.rollback()
+        fallback_answer = (
+            "I ran into an error while generating this answer. "
+            "Please try again."
+        )
+
+        try:
+            assistant_message = Message(
+                chat_id=chat_id,
+                role="assistant",
+                content=fallback_answer,
+                sources={
+                    "intent": final_intent or "unknown",
+                    "mode": "agent" if is_agent else "normal",
+                    "latency_ms": int((time.time() - start_time) * 1000),
+                    "web": [],
+                    "documents": []
+                }
+            )
+            bg_db.add(assistant_message)
+            chat_obj = bg_db.query(Chat).filter(Chat.chat_id == chat_id).first()
+            if chat_obj:
+                chat_obj.updated_at = func.now()
+            bg_db.commit()
+        except Exception:
+            bg_db.rollback()
+
+        error_event = {
+            "type": "error",
+            "message": str(e)
+        }
+        execution.emit(f"data: {json.dumps(error_event)}\n\n")
+        execution.emit("event: done\ndata: complete\n\n")
+
+    finally:
+        finish_ai_request(
+            bg_db,
+            user_id,
+            project_id,
+            usage_date,
+            succeeded=usage_succeeded,
+            input_tokens=usage_input_tokens,
+            output_tokens=usage_output_tokens,
+        )
+        bg_db.close()
+        execution.is_completed = True
+        execution.done_event.set()
+
+        # Keep in memory briefly so any reconnecting client can receive the final frame, then clean up
+        async def _delayed_cleanup():
+            await asyncio.sleep(15)
+            _ACTIVE_CHAT_EXECUTIONS.pop(chat_id, None)
+
+        asyncio.create_task(_delayed_cleanup())
+
+
 @router.post("/chats/{chat_id}/ask")
 async def ask_chat(
     chat_id: int,
@@ -697,6 +1106,14 @@ async def ask_chat(
         project_id=chat.project_id,
         user_id=user_id
     )
+
+    # Reject duplicate requests if a response is actively generating
+    existing_exec = _ACTIVE_CHAT_EXECUTIONS.get(chat_id)
+    if existing_exec and not existing_exec.is_completed:
+        raise HTTPException(
+            status_code=409,
+            detail="Chat is already generating a response. Please wait for it to complete."
+        )
 
     query = request.query.strip()
     if not query:
@@ -725,7 +1142,7 @@ async def ask_chat(
 
         chat.updated_at = func.now()
         db.commit()
-        db.refresh(user_message)  # ensure message_id is populated
+        db.refresh(user_message)
     except Exception:
         db.rollback()
         finish_ai_request(
@@ -738,356 +1155,38 @@ async def ask_chat(
         raise
 
     is_agent = bool(request.is_agent)
-    start_time = time.time()
 
-    async def event_generator():
-        final_answer = None
-        final_intent = None
-        web_sources = []
-        document_chunks = []
-        activities = []
-        usage_input_tokens = 0
-        usage_output_tokens = 0
-        usage_succeeded = False
+    execution = ChatExecution(chat_id=chat.chat_id)
+    _ACTIVE_CHAT_EXECUTIONS[chat.chat_id] = execution
 
+    execution.task = asyncio.create_task(
+        _run_chat_workflow(
+            execution=execution,
+            chat_id=chat.chat_id,
+            project_id=chat.project_id,
+            user_id=user_id,
+            user_role=membership.role,
+            query=query,
+            is_agent=is_agent,
+            document_ids=request.document_ids,
+            user_message_id=user_message.message_id,
+            usage_date=usage_date,
+        )
+    )
+
+    async def client_event_stream():
+        q = execution.add_subscriber()
         try:
-            # Immediately flush reverse proxy buffers (Nginx, Render, Cloudflare)
-            yield ": ping\n\n"
-
-            # Compact history if over token threshold (ensures old turns are summarized
-            # before being sent to the LLM, while keeping the latest turn raw)
-            check_and_summarize_db(db, chat.chat_id)
-
-            # Load short-term memory, excluding the current user message
-            # so prior_history contains: [summary] + [prev_user, prev_assistant]
-            prior_history = load_chat_history(
-                db, chat.chat_id,
-                exclude_message_id=user_message.message_id
-            )
-            summary_ctx = extract_summary_text(prior_history)
-
-
-            if not is_agent:
-                input_tokens = 0
-                output_tokens = 0
-                total_tokens = 0
-                for event in run_pipeline(
-                    query=query,
-                    project_id=chat.project_id,
-                    user_id=user_id,
-                    user_role=membership.role,
-                    db=db,
-                    history=prior_history,
-                    summary_context=summary_ctx,
-                    document_ids=request.document_ids
-                ):
-                    if event.get("type") == "debug" and event.get("step") == "intent":
-                        final_intent = event.get("intent")
-
-                    if event.get("type") == "sources":
-                        web_sources.extend(event.get("sources", []))
-
-                    stream_event = event
-                    if event.get("type") == "final":
-                        final_answer = event.get("answer")
-                        final_intent = event.get("intent") or final_intent
-                        input_tokens = event.get("input_tokens", input_tokens) or 0
-                        output_tokens = event.get("output_tokens", output_tokens) or 0
-                        usage_input_tokens = max(usage_input_tokens, int(input_tokens))
-                        usage_output_tokens = max(usage_output_tokens, int(output_tokens))
-                        total_tokens = event.get("total_tokens")
-                        if total_tokens is None:
-                            total_tokens = input_tokens + output_tokens
-                        web_sources.extend(event.get("sources", []))
-                        document_chunks.extend(event.get("chunks", []))
-                        stream_event = {
-                            **event,
-                            "sources": _normalize_web_sources(web_sources),
-                            "chunks": _normalize_document_sources(document_chunks),
-                        }
-
-                    yield f"data: {json.dumps(stream_event)}\n\n"
-
-                if final_answer is None:
-                    final_answer = "I could not generate a final answer for this request."
-
-                latency_ms = int((time.time() - start_time) * 1000)
-
-                assistant_message = Message(
-                    chat_id=chat.chat_id,
-                    role="assistant",
-                    content=final_answer,
-                    sources={
-                        "intent": final_intent or "unknown",
-                        "mode": "normal",
-                        "latency_ms": latency_ms,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "total_tokens": total_tokens,
-                        "web": _normalize_web_sources(web_sources),
-                        "documents": _normalize_document_sources(document_chunks)
-                    }
-                )
-                db.add(assistant_message)
-                chat.updated_at = func.now()
-                db.commit()
-                usage_succeeded = True
-
-                yield "event: done\ndata: complete\n\n"
-
-                # Post-response memory compaction (fire-and-forget in background)
-                _compaction_chat_id = chat.chat_id
-                def _bg_compaction():
-                    try:
-                        _bg_db = SessionLocal()
-                        check_and_summarize_db(_bg_db, _compaction_chat_id)
-                        _bg_db.close()
-                    except Exception as exc:
-                        print(f"Background STM compaction error: {exc}")
-                threading.Thread(target=_bg_compaction, daemon=True).start()
-
-            else:
-                stream_db = SessionLocal()
-                thread_id = str(uuid4())
-                config = {"configurable": {"thread_id": thread_id}}
-
-                initial_state = {
-                    "messages": [*prior_history, HumanMessage(content=query)],
-                    "question": query,
-                    "answer": "",
-                    "reasoning": "",
-                    "tool_calls": [],
-                    "sources": [],
-                    "chunks": [],
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "iterations": 0,
-                }
-
-                pending_events = []
-                def sub_event_emitter(event_type: str, *args, **data):
-                    agent_val = data.pop("agent", None) or (args[0] if args else "main")
-                    pending_events.append((event_type, {"agent": agent_val, **data}))
-
-                yield _emit_sse("agent_started", agent="main", thread_id=thread_id)
-
-                set_active_event_callback(sub_event_emitter)
-                set_active_project_context(
-                    project_id=chat.project_id,
-                    user_id=user_id,
-                    user_role=membership.role,
-                    db=stream_db,
-                    thread_id=thread_id,
-                    document_ids=request.document_ids
-                )
-
-                is_interrupted = False
-                input_tokens = 0
-                output_tokens = 0
-
-                try:
-                    workflow = main_graph.workflow or main_graph.build_workflow()
-                    async for stream_kind, stream_value, stream_data in _stream_workflow_helper(
-                        workflow, initial_state, config=config
-                    ):
-                        if stream_kind == "event":
-                            sub_type = stream_value
-                            agent_name = stream_data.get("agent", "main")
-                            AGENT_TOOLS = {"web_agent", "retrieval_agent", "github_agent", "gmail_agent"}
-                            def _get_agent_display(name_str: str) -> str:
-                                if name_str == "web_agent": return "Web"
-                                if name_str == "retrieval_agent": return "Project"
-                                if name_str == "github_agent": return "GitHub"
-                                if name_str == "gmail_agent": return "Gmail"
-                                return "Main"
-
-                            if sub_type == "agent_started":
-                                display_name = _get_agent_display(agent_name)
-                                activities.append({
-                                    "agent": agent_name,
-                                    "kind": "status",
-                                    "content": "Planning the request..." if agent_name == "main" else f"{display_name} agent started"
-                                })
-                            elif sub_type == "reasoning":
-                                content_val = stream_data.get("content") or ""
-                                if content_val:
-                                    activities.append({"agent": agent_name, "kind": "thought", "content": content_val})
-                            elif sub_type == "tool_started":
-                                tool = stream_data.get("tool") or "unknown"
-                                tool_agent = tool if tool in AGENT_TOOLS else agent_name
-                                label = "Searching web" if tool == "web_agent" else "Searching project" if tool == "retrieval_agent" else "Searching GitHub" if tool == "github_agent" else f"Using {tool}"
-                                args = stream_data.get("args")
-                                args_str = f" {json.dumps(args)}" if args else ""
-                                content = label if tool in AGENT_TOOLS else f"{label}{args_str}"
-                                activities.append({"agent": tool_agent, "kind": "tool", "label": label, "content": content})
-                            elif sub_type == "tool_completed":
-                                tool = stream_data.get("tool") or ""
-                                if tool in AGENT_TOOLS:
-                                    display_name = _get_agent_display(tool)
-                                    activities.append({"agent": tool, "kind": "status", "content": f"{display_name} search complete"})
-                            elif sub_type == "agent_completed" and agent_name != "main":
-                                display_name = _get_agent_display(agent_name)
-                                activities.append({"agent": agent_name, "kind": "status", "content": f"{display_name} agent finished"})
-
-                            yield _emit_sse(sub_type, **stream_data)
-                            continue
-
-                        update = stream_value
-                        for node_name, node_update in update.items():
-                            if node_name == "__interrupt__":
-                                is_interrupted = True
-                                interrupt_val = node_update[0].value if node_update else {}
-                                yield _emit_interrupt(thread_id, interrupt_val)
-                                break
-
-                            if node_name in ("chat_node", "force_synthesis_node"):
-                                reasoning = node_update.get("reasoning", "")
-                                answer = node_update.get("answer", "")
-                                tool_calls = node_update.get("tool_calls", [])
-                                iteration = node_update.get("iterations")
-
-                                if answer:
-                                    final_answer = answer
-                                input_tokens = node_update.get("input_tokens", input_tokens)
-                                output_tokens = node_update.get("output_tokens", output_tokens)
-                                usage_input_tokens = max(usage_input_tokens, int(input_tokens or 0))
-                                usage_output_tokens = max(usage_output_tokens, int(output_tokens or 0))
-
-                                if reasoning:
-                                    activities.append({"agent": "main", "kind": "thought", "content": reasoning})
-                                    yield _emit_sse("reasoning", agent="main", iteration=iteration, content=reasoning)
-
-                                for tc in tool_calls:
-                                    t_name = tc.get("name", "tool")
-                                    t_args = tc.get("args")
-                                    t_agent = t_name if t_name in {"web_agent", "retrieval_agent", "github_agent", "gmail_agent"} else "main"
-                                    t_label = "Searching web" if t_name == "web_agent" else "Searching project" if t_name == "retrieval_agent" else "Searching GitHub" if t_name == "github_agent" else f"Using {t_name}"
-                                    t_content = t_label if t_name in {"web_agent", "retrieval_agent"} else f"{t_label}{f' {json.dumps(t_args)}' if t_args else ''}"
-                                    activities.append({"agent": t_agent, "kind": "tool", "label": t_label, "content": t_content})
-                                    yield _emit_sse("tool_started", agent="main", iteration=iteration, tool=t_name, args=tc.get("args"), call_id=tc.get("id"))
-
-                            elif node_name == "tool_node":
-                                activities.append({"agent": "main", "kind": "status", "content": "Sub-agent complete"})
-                                yield _emit_sse("tool_completed", agent="main", tool="sub_agent")
-
-                            elif node_name == "collect_tool_results":
-                                sources = node_update.get("sources", [])
-                                chunks = node_update.get("chunks", [])
-                                if sources:
-                                    web_sources = sources
-                                if chunks:
-                                    document_chunks = chunks
-                                input_tokens = node_update.get("input_tokens", input_tokens)
-                                output_tokens = node_update.get("output_tokens", output_tokens)
-                                usage_input_tokens = max(usage_input_tokens, int(input_tokens or 0))
-                                usage_output_tokens = max(usage_output_tokens, int(output_tokens or 0))
-
-                        if is_interrupted:
-                            return
-
-                    delete_checkpoint(thread_id, stream_db)
-
-                finally:
-                    set_active_event_callback(None)
-                    set_active_project_context(None)
-                    stream_db.close()
-
-                if not final_answer:
-                    final_answer = "Agent workflow completed."
-
-                latency_ms = int((time.time() - start_time) * 1000)
-
-                assistant_message = Message(
-                    chat_id=chat.chat_id,
-                    role="assistant",
-                    content=final_answer,
-                    sources={
-                        "intent": "cortex-agent",
-                        "mode": "agent",
-                        "latency_ms": latency_ms,
-                        "reasoning": activities,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "total_tokens": input_tokens + output_tokens,
-                        "web": _normalize_web_sources(web_sources),
-                        "documents": _normalize_document_sources(document_chunks)
-                    }
-                )
-                db.add(assistant_message)
-                chat.updated_at = func.now()
-                db.commit()
-                usage_succeeded = True
-
-                # Post-response memory compaction (fire-and-forget in background)
-                _agent_compaction_chat_id = chat.chat_id
-                def _bg_agent_compaction():
-                    try:
-                        _bg_db = SessionLocal()
-                        check_and_summarize_db(_bg_db, _agent_compaction_chat_id)
-                        _bg_db.close()
-                    except Exception as exc:
-                        print(f"Background agent STM compaction error: {exc}")
-                threading.Thread(target=_bg_agent_compaction, daemon=True).start()
-
-                yield _emit_sse(
-                    "agent_completed",
-                    agent="main",
-                    thread_id=thread_id,
-                    answer=final_answer,
-                    sources=_normalize_web_sources(web_sources),
-                    chunks=_normalize_document_sources(document_chunks),
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    total_tokens=input_tokens + output_tokens,
-                )
-                yield "event: done\ndata: complete\n\n"
-
-        except Exception as e:
-            db.rollback()
-
-            fallback_answer = (
-                "I ran into an error while generating this answer. "
-                "Please try again."
-            )
-
-            try:
-                assistant_message = Message(
-                    chat_id=chat.chat_id,
-                    role="assistant",
-                    content=fallback_answer,
-                    sources={
-                        "intent": final_intent or "unknown",
-                        "mode": "agent" if is_agent else "normal",
-                        "latency_ms": int((time.time() - start_time) * 1000),
-                        "web": [],
-                        "documents": []
-                    }
-                )
-                db.add(assistant_message)
-                chat.updated_at = func.now()
-                db.commit()
-            except Exception:
-                db.rollback()
-
-            error_event = {
-                "type": "error",
-                "message": str(e)
-            }
-
-            yield f"data: {json.dumps(error_event)}\n\n"
+            while True:
+                chunk = await q.get()
+                yield chunk
+                if "data: complete" in chunk:
+                    break
         finally:
-            finish_ai_request(
-                db,
-                user_id,
-                chat.project_id,
-                usage_date,
-                succeeded=usage_succeeded,
-                input_tokens=usage_input_tokens,
-                output_tokens=usage_output_tokens,
-            )
+            execution.remove_subscriber(q)
 
     return StreamingResponse(
-        event_generator(),
+        client_event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -1096,3 +1195,86 @@ async def ask_chat(
             "Content-Type": "text/event-stream; charset=utf-8",
         }
     )
+
+
+@router.get("/chats/{chat_id}/stream")
+async def stream_active_chat(
+    chat_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Reconnect to an ongoing chat response stream if user refreshed or navigated back.
+    """
+    chat = _get_owned_chat(
+        db=db,
+        chat_id=chat_id,
+        user_id=user_id
+    )
+
+    execution = _ACTIVE_CHAT_EXECUTIONS.get(chat.chat_id)
+    if not execution:
+        async def empty_stream():
+            yield ": ping\n\n"
+            yield "event: done\ndata: complete\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
+
+    async def reconnect_event_stream():
+        q = execution.add_subscriber()
+        try:
+            yield ": ping\n\n"
+
+            # 1. Replay buffered events up to this moment
+            for past_chunk in list(execution.event_buffer):
+                yield past_chunk
+                if "data: complete" in past_chunk:
+                    return
+
+            # If task completed while reading buffer, finish
+            if execution.is_completed:
+                yield "event: done\ndata: complete\n\n"
+                return
+
+            # 2. Stream remaining live events
+            while True:
+                chunk = await q.get()
+                yield chunk
+                if "data: complete" in chunk:
+                    break
+        finally:
+            execution.remove_subscriber(q)
+
+    return StreamingResponse(
+        reconnect_event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Type": "text/event-stream; charset=utf-8",
+        }
+    )
+
+
+@router.get("/chats/{chat_id}/status")
+def get_chat_status(
+    chat_id: int,
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Check if a chat is currently processing an answer in the background."""
+    chat = _get_owned_chat(
+        db=db,
+        chat_id=chat_id,
+        user_id=user_id
+    )
+
+    execution = _ACTIVE_CHAT_EXECUTIONS.get(chat.chat_id)
+    is_processing = bool(execution and not execution.is_completed)
+    elapsed = int(time.time() - execution.start_time) if execution and is_processing else 0
+
+    return {
+        "chat_id": chat.chat_id,
+        "is_processing": is_processing,
+        "elapsed_seconds": elapsed,
+    }

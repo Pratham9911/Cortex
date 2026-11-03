@@ -6,6 +6,7 @@ from agentic.nodes import (
     collect_tool_results,
     force_synthesis_node,
     route_after_chat,
+    route_after_tools,
 )
 from agentic.state.main_state import AnswerState
 
@@ -30,7 +31,14 @@ graph.add_conditional_edges(
 )
 
 graph.add_edge("tool_node", "collect_tool_results")
-graph.add_edge("collect_tool_results", "chat_node")
+graph.add_conditional_edges(
+    "collect_tool_results",
+    route_after_tools,
+    {
+        "chat_node": "chat_node",
+        "force_synthesis_node": "force_synthesis_node",
+    },
+)
 graph.add_edge("force_synthesis_node", END)
 
 workflow = graph.compile()

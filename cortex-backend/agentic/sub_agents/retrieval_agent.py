@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from dotenv import load_dotenv
 
 from langchain_core.messages import ToolMessage, AIMessage, HumanMessage, SystemMessage
@@ -13,7 +14,7 @@ from agentic.sub_agents.base import SubAgentResult, SubAgentEventCallback
 
 load_dotenv()
 
-MAX_ITERATIONS = 8
+MAX_ITERATIONS = 6
 
 SYSTEM_PROMPT = SystemMessage(
     content=(
@@ -21,14 +22,13 @@ SYSTEM_PROMPT = SystemMessage(
         "using the project_search tool to answer all parts of the user's project research query efficiently.\n\n"
         "RULES:\n"
         "1. Perform ONE targeted search at a time. Never issue multiple tool calls in a single step.\n"
-        "2. You will get a sentence which may contains seperate Topics like find A and B , Identify them and use Search for Individual Topics don't mix.\n"
-        "3. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and answer in clear and facts only text.\n"
-        "4. If Searching Fails to retreive relevent info , more then once for a Query, STOP calling tools and answer the query with the information you have gathered so far as Info may not be present in Project.\n"
-        "5. Output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it\n"
-        "6. Citation Rule: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
-        "CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine \n"
-        "Always use Project_search with clear query with sentence which make sense like sending task and not just simple keywords.\n"
-
+        "2. You will get a sentence which may contain separate topics like find A and B. Identify them and search for individual topics without mixing.\n"
+        "3. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and answer in clear and facts-only text.\n"
+        "4. If searching fails to retrieve relevant info more than once for a query, STOP calling tools and answer with the information gathered so far.\n"
+        "5. Output the info from KB as it is with citations (e.g. [cite: doc_12:p4]) included if available.\n"
+        "6. Citation Rule: if project info contains citations use them as-is, otherwise don't invent citations.\n"
+        "CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine.\n"
+        "Always use project_search with clear queries and descriptive sentences, not just simple keywords.\n"
     )
 )
 
@@ -51,6 +51,19 @@ retrieval_llm = retrieval_llm_with_tools.bind_tools(tools)
 retrieval_tool_node = ToolNode(tools)
 
 
+def clean_agent_output(text: str) -> str:
+    """Strip reasoning artifacts, unclosed think tags, and DeepSeek DSML tool syntax."""
+    if not text:
+        return ""
+    text = re.sub(r"</?｜DSML｜[^>]*>", "", text)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r"</?think>", "", text)
+    text = text.strip()
+    if re.fullmatch(r"[#\-\*\s]+", text):
+        return ""
+    return text
+
+
 def sanitize_retrieval_messages(messages: list) -> list:
     sanitized = []
     for msg in messages:
@@ -66,7 +79,7 @@ def sanitize_retrieval_messages(messages: list) -> list:
             ]
             sanitized.append(
                 AIMessage(
-                    content=msg.content or "",
+                    content=clean_agent_output(msg.content or ""),
                     tool_calls=tool_calls,
                     id=getattr(msg, "id", None),
                 )
@@ -122,11 +135,6 @@ def print_retrieval_messages(node_name: str, messages: list, iteration: int):
 async def retrieval_chat_node(state: RetrievalState) -> dict:
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_retrieval_messages(raw_messages)
-
-    # Do not pass an unexecuted tool request into the final synthesis call.
-    if clean_messages and isinstance(clean_messages[-1], AIMessage):
-        if getattr(clean_messages[-1], "tool_calls", None):
-            clean_messages = clean_messages[:-1]
     current_iteration = state.get("iterations", 0)
 
     if not clean_messages or not isinstance(clean_messages[0], SystemMessage):
@@ -153,6 +161,11 @@ async def retrieval_chat_node(state: RetrievalState) -> dict:
         for call in getattr(response, "tool_calls", [])
     ]
 
+    has_tools = bool(tool_calls)
+    clean_content = clean_agent_output(response.content or "")
+    # When issuing a tool call, preamble text is NOT the final answer.
+    answer = "" if has_tools else clean_content
+
     if reasoning:
         print(f"[RETRIEVAL AGENT REASONING]: {reasoning}")
     if tool_calls:
@@ -162,7 +175,7 @@ async def retrieval_chat_node(state: RetrievalState) -> dict:
 
     return {
         "messages": [response],
-        "answer": response.content or "",
+        "answer": answer,
         "reasoning": reasoning,
         "tool_calls": tool_calls,
         "input_tokens": state.get("input_tokens", 0) + usage.get("input_tokens", 0),
@@ -173,7 +186,7 @@ async def retrieval_chat_node(state: RetrievalState) -> dict:
 
 async def collect_retrieval_tool_results(state: RetrievalState) -> dict:
     chunks = list(state.get("chunks", []))
-    existing_chunk_ids = {
+    existing_chunk_keys = {
         (c.get("document", {}).get("document_id"), c.get("chunk", {}).get("page_number"))
         for c in chunks
         if isinstance(c, dict)
@@ -195,25 +208,24 @@ async def collect_retrieval_tool_results(state: RetrievalState) -> dict:
             if isinstance(parsed, dict):
                 new_chunks = parsed.get("chunks", [])
                 if isinstance(new_chunks, list):
-                    # Keep the top five project passages from each search call.
-                    for chk in new_chunks[:5]:
+                    for chk in new_chunks:
                         if isinstance(chk, dict):
                             doc_id = chk.get("document", {}).get("document_id")
                             page_no = chk.get("chunk", {}).get("page_number")
                             key = (doc_id, page_no)
-                            if key in existing_chunk_ids:
+                            if key in existing_chunk_keys:
                                 continue
                             chunks.append(chk)
-                            existing_chunk_ids.add(key)
+                            existing_chunk_keys.add(key)
 
-                clean_answer = parsed.get("answer", "")
+                clean_answer = parsed.get("answer", content)
                 if isinstance(clean_answer, (dict, list)):
                     clean_answer = json.dumps(clean_answer)
                 else:
                     clean_answer = str(clean_answer)
 
                 if not clean_answer.strip():
-                    clean_answer = "Project retrieval tool execution completed."
+                    clean_answer = content if isinstance(content, str) else json.dumps(parsed)
 
                 msg_id = getattr(message, "id", None)
                 if clean_answer != content and msg_id:
@@ -236,29 +248,52 @@ async def force_synthesis_node(state: RetrievalState) -> dict:
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_retrieval_messages(raw_messages)
 
+    clean_messages_for_synthesis = list(clean_messages)
+    while clean_messages_for_synthesis and isinstance(clean_messages_for_synthesis[-1], AIMessage):
+        clean_messages_for_synthesis.pop()
+
     synthesis_prompt = SystemMessage(
         content=(
-            "You have completed all allowed project document searches. "
-            "Using ONLY the information gathered so far, write a complete, clear, facts-only final answer. "
-            "Do not ask for more information or suggest further searches."
+            "You are a specialized Retrieval Sub-Agent. You have completed all allowed project document searches.\n"
+            "Using ONLY the information gathered so far, write a complete, clear, facts-only final answer.\n"
+            "Include citations if available. Do not ask for more information or suggest further searches."
         )
     )
 
-    messages_to_send = [synthesis_prompt] + clean_messages
+    messages_to_send = [synthesis_prompt] + clean_messages_for_synthesis + [
+        HumanMessage(
+            content="Synthesize all the gathered project search results above and provide a complete final answer now."
+        )
+    ]
     print_retrieval_messages("force_synthesis_node", messages_to_send, state.get("iterations", 0) + 1)
 
     response = await retrieval_llm_base.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
+    answer_text = clean_agent_output(response.content or "")
+
+    if not answer_text:
+        findings = []
+        for msg in clean_messages_for_synthesis:
+            if isinstance(msg, ToolMessage) and msg.content:
+                text = msg.content.strip()
+                if text and text != "Tool execution completed.":
+                    findings.append(text)
+        if findings:
+            answer_text = "Summary of gathered project documents:\n\n" + "\n\n---\n\n".join(findings)
+        elif state.get("chunks"):
+            answer_text = f"Retrieved {len(state['chunks'])} relevant project document passages."
+        else:
+            answer_text = "No relevant information found in the project documents for the given query."
 
     if reasoning:
         print(f"[RETRIEVAL AGENT FORCE SYNTHESIS REASONING]: {reasoning}")
-    if response.content:
-        print(f"[RETRIEVAL AGENT FORCE SYNTHESIS RESPONSE PREVIEW]: {repr(response.content[:200])}...")
+    if answer_text:
+        print(f"[RETRIEVAL AGENT FORCE SYNTHESIS RESPONSE PREVIEW]: {repr(answer_text[:200])}...")
 
     return {
         "messages": [response],
-        "answer": response.content or "",
+        "answer": answer_text,
         "reasoning": reasoning,
         "tool_calls": [],
         "input_tokens": state.get("input_tokens", 0) + usage.get("input_tokens", 0),
@@ -281,6 +316,13 @@ def retrieval_route_after_chat(state: RetrievalState):
     return "retrieval_tool_node"
 
 
+def retrieval_route_after_tools(state: RetrievalState):
+    iterations = state.get("iterations", 0)
+    if iterations >= MAX_ITERATIONS - 1:
+        return "force_synthesis_node"
+    return "retrieval_chat_node"
+
+
 builder = StateGraph(RetrievalState)
 builder.add_node("retrieval_chat_node", retrieval_chat_node)
 builder.add_node("retrieval_tool_node", retrieval_tool_node)
@@ -298,7 +340,14 @@ builder.add_conditional_edges(
     },
 )
 builder.add_edge("retrieval_tool_node", "collect_retrieval_tool_results")
-builder.add_edge("collect_retrieval_tool_results", "retrieval_chat_node")
+builder.add_conditional_edges(
+    "collect_retrieval_tool_results",
+    retrieval_route_after_tools,
+    {
+        "retrieval_chat_node": "retrieval_chat_node",
+        "force_synthesis_node": "force_synthesis_node",
+    },
+)
 builder.add_edge("force_synthesis_node", END)
 
 retrieval_subgraph = builder.compile()
@@ -333,11 +382,14 @@ async def run_retrieval_agent(query: str, event_callback: SubAgentEventCallback 
         for node_name, node_update in update.items():
             if node_name in ("retrieval_chat_node", "force_synthesis_node"):
                 reasoning = node_update.get("reasoning", "")
-                answer = node_update.get("answer", "")
+                raw_ans = node_update.get("answer", "")
+                answer = clean_agent_output(raw_ans)
                 tool_calls = node_update.get("tool_calls", [])
                 iteration = node_update.get("iterations", 1)
 
-                if answer:
+                if node_name == "force_synthesis_node" and answer:
+                    final_answer = answer
+                elif node_name == "retrieval_chat_node" and not tool_calls and answer:
                     final_answer = answer
 
                 input_tokens = node_update.get("input_tokens", input_tokens)
@@ -371,7 +423,8 @@ async def run_retrieval_agent(query: str, event_callback: SubAgentEventCallback 
                 if chunks:
                     final_chunks = chunks
 
-    if not final_answer.strip():
+    final_answer = clean_agent_output(final_answer)
+    if not final_answer:
         if final_chunks:
             final_answer = (
                 "Project document search completed. Retrieved relevant passages from project files."

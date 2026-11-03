@@ -438,7 +438,6 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 import agentic.main_graph as main_graph
-from agentic.checkpointer import delete_checkpoint
 
 from typing import Optional
 from agentic.tools import set_active_event_callback, set_active_project_context
@@ -595,13 +594,6 @@ async def run_agent(
                 update = stream_value
 
                 for node_name, node_update in update.items():
-
-                    if node_name == "__interrupt__":
-                        is_interrupted = True
-                        interrupt_val = node_update[0].value if node_update else {}
-                        yield emit_interrupt(thread_id, interrupt_val)
-                        break
-
                     if node_name in ("chat_node", "force_synthesis_node"):
                         reasoning = node_update.get("reasoning", "")
                         answer = node_update.get("answer", "")
@@ -633,12 +625,6 @@ async def run_agent(
                         input_tokens = node_update.get("input_tokens", input_tokens)
                         output_tokens = node_update.get("output_tokens", output_tokens)
 
-                if is_interrupted:
-                    usage_succeeded = True
-                    return
-
-            # Workflow completed without interruption -> cleanup checkpoint
-            delete_checkpoint(thread_id, stream_db)
             usage_succeeded = True
 
         finally:
@@ -698,124 +684,29 @@ async def resume_agent(
     if not membership:
         raise HTTPException(status_code=403, detail="Access denied to this project")
 
-    usage_date = reserve_ai_request(db, user_id, project_id)
-    user_role = membership.role
-    config = {"configurable": {"thread_id": thread_id}}
-    resume_payload = {"action": decision, "feedback": feedback or ""}
-
     async def event_generator():
-        stream_db = SessionLocal()
-        final_answer = ""
-        final_sources = []
-        final_chunks = []
-        input_tokens = 0
-        output_tokens = 0
-        pending_events = []
-        is_interrupted = False
-        usage_succeeded = False
-
-        def sub_event_emitter(event_type: str, *args, **data):
-            agent_val = data.pop("agent", None) or (args[0] if args else "main")
-            pending_events.append((event_type, {"agent": agent_val, **data}))
-
-        try:
-            yield emit("agent_resumed", agent="main", thread_id=thread_id, decision=decision, feedback=feedback)
-
-            set_active_event_callback(sub_event_emitter)
-            set_active_project_context(
-                project_id=project_id,
-                user_id=user_id,
-                user_role=user_role,
-                db=stream_db,
-                thread_id=thread_id,
-                resume_action=decision,
-                resume_feedback=feedback or "",
-            )
-
-            workflow = main_graph.workflow or main_graph.build_workflow()
-            async for stream_kind, stream_value, stream_data in _stream_workflow(
-                workflow, Command(resume=resume_payload), config=config
-            ):
-                if stream_kind == "event":
-                    yield emit(stream_value, **stream_data)
-                    continue
-
-                update = stream_value
-
-                for node_name, node_update in update.items():
-
-                    if node_name == "__interrupt__":
-                        is_interrupted = True
-                        interrupt_val = node_update[0].value if node_update else {}
-                        yield emit_interrupt(thread_id, interrupt_val)
-                        break
-
-                    if node_name in ("chat_node", "force_synthesis_node"):
-                        reasoning = node_update.get("reasoning", "")
-                        answer = node_update.get("answer", "")
-                        tool_calls = node_update.get("tool_calls", [])
-                        iteration = node_update.get("iterations")
-
-                        if answer:
-                            final_answer = answer
-                        input_tokens = node_update.get("input_tokens", input_tokens)
-                        output_tokens = node_update.get("output_tokens", output_tokens)
-
-                        if reasoning:
-                            yield emit("reasoning", agent="main", iteration=iteration, content=reasoning)
-
-                        for tc in tool_calls:
-                            yield emit("tool_started", agent="main", iteration=iteration,
-                                       tool=tc["name"], args=tc["args"], call_id=tc.get("id"))
-
-                    elif node_name == "tool_node":
-                        yield emit("tool_completed", agent="main", tool="sub_agent")
-
-                    elif node_name == "collect_tool_results":
-                        sources = node_update.get("sources", [])
-                        chunks = node_update.get("chunks", [])
-                        if sources:
-                            final_sources = sources
-                        if chunks:
-                            final_chunks = chunks
-                        input_tokens = node_update.get("input_tokens", input_tokens)
-                        output_tokens = node_update.get("output_tokens", output_tokens)
-
-                if is_interrupted:
-                    usage_succeeded = True
-                    return
-
-            # Workflow completed -> cleanup checkpointer
-            delete_checkpoint(thread_id, stream_db)
-            usage_succeeded = True
-
-        finally:
-            set_active_event_callback(None)
-            set_active_project_context(None)
-            try:
-                finish_ai_request(
-                    stream_db,
-                    user_id,
-                    project_id,
-                    usage_date,
-                    succeeded=usage_succeeded,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                )
-            finally:
-                stream_db.close()
-
+        yield emit("agent_resumed", agent="main", thread_id=thread_id, decision=decision, feedback=feedback)
         yield emit(
             "agent_completed",
             agent="main",
             thread_id=thread_id,
-            answer=final_answer,
-            sources=final_sources,
-            chunks=final_chunks,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=input_tokens + output_tokens,
+            answer="HITL has been retired. Agent workflows now run non-blocking and in-memory.",
+            sources=[],
+            chunks=[],
+            input_tokens=0,
+            output_tokens=0,
+            total_tokens=0,
         )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
     return StreamingResponse(
         event_generator(),

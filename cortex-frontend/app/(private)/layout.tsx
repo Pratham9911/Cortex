@@ -3,18 +3,10 @@
 import { useEffect, useRef, useState } from "react"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { BookOpen, Code2, Cog, Keyboard, Menu, Plus, Wrench } from "lucide-react"
+import { Menu } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { Sidebar } from "@/components/layout/sidebar"
-import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandShortcut,
-} from "@/components/ui/command"
+import { CortexCommandSearch } from "@/components/search/cortex-command-search"
 import { InboxControllerProvider, useInboxController } from "@/components/inbox/inbox-dialog"
 import { cn } from "@/lib/utils"
 
@@ -174,51 +166,11 @@ export default function PrivateLayout({ children }: { children: React.ReactNode 
             {children}
           </main>
 
-          <CommandDialog
+          <CortexCommandSearch
             open={commandOpen}
             onOpenChange={setCommandOpen}
-            className={cn("sm:max-w-[860px] font-quicksand", isDark ? "border-zinc-700 bg-[#1b1d23] text-zinc-100" : "bg-white")}
-            title="Search Commands"
-            description="Run a command or search..."
-          >
-            <CommandInput placeholder="Run a command or search..." />
-            <CommandList className="max-h-[560px]">
-              <CommandEmpty>No results found.</CommandEmpty>
-              <CommandGroup heading="SHORTCUTS">
-                <CommandItem>
-                  <Keyboard className="h-4 w-4" />
-                  <span>Show all keyboard shortcuts</span>
-                  <CommandShortcut>Ctrl /</CommandShortcut>
-                </CommandItem>
-              </CommandGroup>
-              <CommandGroup heading="QUERIES">
-                <CommandItem>
-                  <Code2 className="h-4 w-4" />
-                  <span>Run SQL</span>
-                </CommandItem>
-              </CommandGroup>
-              <CommandGroup heading="ACTIONS">
-                <CommandItem>
-                  <Plus className="h-4 w-4" />
-                  <span>Create...</span>
-                </CommandItem>
-                <CommandItem>
-                  <Cog className="h-4 w-4" />
-                  <span>Configure organization...</span>
-                </CommandItem>
-                <CommandItem>
-                  <Wrench className="h-4 w-4" />
-                  <span>Switch project...</span>
-                </CommandItem>
-              </CommandGroup>
-              <CommandGroup heading="DOCS">
-                <CommandItem>
-                  <BookOpen className="h-4 w-4" />
-                  <span>Search the docs</span>
-                </CommandItem>
-              </CommandGroup>
-            </CommandList>
-          </CommandDialog>
+            onOpenInbox={inbox.openInbox}
+          />
 
         </div>
       </div>

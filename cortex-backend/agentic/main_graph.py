@@ -6,6 +6,7 @@ from agentic.nodes import (
     collect_tool_results,
     force_synthesis_node,
     route_after_chat,
+    route_after_tools,
 )
 from agentic.state.main_state import AnswerState
 
@@ -31,7 +32,14 @@ def _build_graph():
     )
 
     graph.add_edge("tool_node", "collect_tool_results")
-    graph.add_edge("collect_tool_results", "chat_node")
+    graph.add_conditional_edges(
+        "collect_tool_results",
+        route_after_tools,
+        {
+            "chat_node": "chat_node",
+            "force_synthesis_node": "force_synthesis_node",
+        },
+    )
     graph.add_edge("force_synthesis_node", END)
 
     return graph
@@ -39,11 +47,10 @@ def _build_graph():
 
 def build_workflow():
     """
-    Compile the graph with the async checkpointer.
-    Must be called after init_checkpointer() has run at app startup.
+    Compile the graph purely in-memory without checkpointer.
+    Runs fast and fully asynchronous without database checkpointer overhead.
     """
-    from agentic.checkpointer import postgres_checkpointer
-    return _build_graph().compile(checkpointer=postgres_checkpointer)
+    return _build_graph().compile()
 
 
 # Module-level sentinel — replaced at startup by agents.py

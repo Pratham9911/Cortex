@@ -416,14 +416,34 @@ function SidebarContent({
         </div>
 
         {/* Quick search */}
-        <button onClick={onOpenSearch} className={cn(
-          "flex h-9 items-center gap-3 rounded-lg border px-2.5 text-xs font-medium transition-colors",
-          isDark
-            ? "bg-[#26262b] border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-[#2d2d33]"
-            : "bg-zinc-50 border-zinc-200 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100"
-        )}>
-          <Search className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Quick search</span>
+        <button
+          onClick={onOpenSearch}
+          title="Quick search (Ctrl+K)"
+          className={cn(
+            "flex h-9 items-center justify-between rounded-lg border px-2.5 text-xs font-medium transition-colors",
+            isDark
+              ? "bg-[#26262b] border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-[#2d2d33]"
+              : "bg-zinc-50 border-zinc-200 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100"
+          )}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Search className="w-3.5 h-3.5 shrink-0" />
+            <span className={cn("truncate transition-opacity", isCollapsed ? "opacity-0 w-0" : "opacity-100")}>
+              Quick search
+            </span>
+          </div>
+          {!isCollapsed && (
+            <kbd
+              className={cn(
+                "hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono border",
+                isDark
+                  ? "bg-zinc-800/80 border-zinc-700 text-zinc-400"
+                  : "bg-white border-zinc-200 text-zinc-500"
+              )}
+            >
+              Ctrl K
+            </kbd>
+          )}
         </button>
 
         {/* Inbox + Notifications */}

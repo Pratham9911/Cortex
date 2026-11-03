@@ -5,11 +5,7 @@ import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import {
-  BookOpen,
-  Code2,
-  Cog,
   EllipsisVertical,
-  Keyboard,
   Grid3X3,
   HelpCircle,
   Inbox,
@@ -18,7 +14,6 @@ import {
   Plus,
   Search,
   Settings,
-  Wrench,
   FlaskConical,
   ScrollText,
   FolderLock,
@@ -27,15 +22,7 @@ import { ProtectedRoute, useAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandShortcut,
-} from "@/components/ui/command"
+import { CortexCommandSearch } from "@/components/search/cortex-command-search"
 import {
   Dialog,
   DialogContent,
@@ -573,51 +560,14 @@ function WorkspaceContent() {
         </DialogContent>
       </Dialog>
 
-      <CommandDialog
+      <CortexCommandSearch
         open={commandOpen}
         onOpenChange={setCommandOpen}
-        className={cn("sm:max-w-[860px] font-quicksand", isDark ? "border-zinc-700 bg-[#1b1d23] text-zinc-100" : "bg-white")}
-        title="Search Commands"
-        description="Run a command or search..."
-      >
-        <CommandInput placeholder="Run a command or search..." />
-        <CommandList className="max-h-[560px]">
-          <CommandEmpty>No results found.</CommandEmpty>
-          <CommandGroup heading="SHORTCUTS">
-            <CommandItem>
-              <Keyboard className="h-4 w-4" />
-              <span>Show all keyboard shortcuts</span>
-              <CommandShortcut>Ctrl /</CommandShortcut>
-            </CommandItem>
-          </CommandGroup>
-          <CommandGroup heading="QUERIES">
-            <CommandItem>
-              <Code2 className="h-4 w-4" />
-              <span>Run SQL</span>
-            </CommandItem>
-          </CommandGroup>
-          <CommandGroup heading="ACTIONS">
-            <CommandItem>
-              <Plus className="h-4 w-4" />
-              <span>Create...</span>
-            </CommandItem>
-            <CommandItem>
-              <Cog className="h-4 w-4" />
-              <span>Configure organization...</span>
-            </CommandItem>
-            <CommandItem>
-              <Wrench className="h-4 w-4" />
-              <span>Switch project...</span>
-            </CommandItem>
-          </CommandGroup>
-          <CommandGroup heading="DOCS">
-            <CommandItem>
-              <BookOpen className="h-4 w-4" />
-              <span>Search the docs</span>
-            </CommandItem>
-          </CommandGroup>
-        </CommandList>
-      </CommandDialog>
+        projects={projects}
+        onProjectSelect={openProject}
+        onCreateProject={() => setCreateOpen(true)}
+        onOpenInbox={inbox.openInbox}
+      />
       <InboxDialog controller={inbox} isDark={isDark} />
     </main>
   )

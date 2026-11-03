@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 from langchain_core.messages import ToolMessage, AIMessage, HumanMessage, SystemMessage
 from langchain_fireworks import ChatFireworks
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import interrupt
 
 from database import SessionLocal
 from agentic.github.github_service import (
@@ -253,86 +252,12 @@ async def run_github_agent(
                     )
 
                 # Check tool risk: if risk is NOT read -> PUT HITL IN FRONT OF USER!
+                # Check tool risk: write operations are disabled in Cortex
                 if risk_level != "read":
-
-                    # Trigger Human-in-The-Loop interrupt for permission approval
-                    approval_request = {
-                        "action": "tool_approval",
-                        "agent": "github_agent",
-                        "tool": tool_name,
-                        "args": tool_args,
-                        "risk": risk_level,
-                        "description": tool_config.get(clean_name, {}).get(
-                            "description", tool_config.get(tool_name, {}).get("description", "GitHub action request")
-                        ),
-                    }
-                    if pending_key:
-                        _PENDING_GITHUB_RUNS[pending_key] = {
-                            "messages": messages,
-                            "input_tokens": input_tokens,
-                            "output_tokens": output_tokens,
-                            "final_answer": final_answer,
-                            "iteration": iteration,
-                            "pending_call": call,
-                            "tool_map": tool_map,
-                            "tool_config": tool_config,
-                            "tool_risk_map": tool_risk_map,
-                            "llm": llm,
-                        }
-
-                    approval_res = interrupt(approval_request)
-
-                    decision = ""
-                    feedback = ""
-                    if isinstance(approval_res, dict):
-                        decision = str(
-                            approval_res.get("action")
-                            or approval_res.get("decision")
-                            or approval_res.get("approval")
-                            or ""
-                        ).lower()
-                        feedback = str(approval_res.get("feedback", "")).strip()
-                    elif isinstance(approval_res, str):
-                        decision = str(approval_res).lower()
-
-                    recognized_decisions = {
-                        "yes", "approve", "approved", "accept", "true",
-                        "no", "reject", "rejected", "false", "tell_agent",
-                    }
-                    if decision not in recognized_decisions and resume_action_for_interrupt:
-                        decision = resume_action_for_interrupt
-                        feedback = resume_feedback_for_interrupt
-                    resume_action_for_interrupt = None
-
-                    approved = decision in ["yes", "approve", "approved", "accept", "true"]
-                    is_rejection = decision in ["no", "reject", "rejected", "false"]
-
-                    if approved:
-                        # Executed by system upon approval
-                        try:
-                            mcp_tool = tool_map.get(tool_name)
-                            if mcp_tool:
-                                res = await mcp_tool.ainvoke(tool_args)
-                                res_text = f"Tool executed successfully. Result:\n{str(res)}"
-                                final_answer = f"GitHub action '{tool_name}' executed successfully:\n{str(res)}"
-                            else:
-                                res_text = f"Error: Tool '{tool_name}' not found."
-                                final_answer = res_text
-                        except Exception as ex:
-                            res_text = f"Error executing tool '{tool_name}': {str(ex)}"
-                            final_answer = res_text
-                    elif is_rejection:
-                        res_text = (
-                            f"Execution of tool '{tool_name}' was REJECTED by the user. "
-                            "Do NOT retry calling this tool. Adapt your response accordingly."
-                        )
-                    else:
-                        # User provided feedback / instructions without approving the tool call
-                        res_text = (
-                            f"Tool '{tool_name}' was not approved. "
-                            f"The user provided this instruction instead: '{feedback or decision}'. "
-                            "Do not retry the tool unless the user explicitly asks for it."
-                        )
+                    res_text = (
+                        f"Execution of tool '{tool_name}' was blocked. "
+                        "Write operations are disabled in Cortex. GitHub agent operates in read-only mode."
+                    )
 
                 else:
                     # Read tool: execute automatically
