@@ -2,6 +2,7 @@ import asyncio
 from typing import Callable, Optional
 from sqlalchemy.orm import Session
 
+from models import User
 from agentic.tools import set_active_project_context, set_active_event_callback
 from agentic.teams.short_term_memory import (
     get_team_document_ids,
@@ -10,6 +11,7 @@ from agentic.teams.short_term_memory import (
 )
 from agentic.teams.discussion_agent.graph import discussion_graph
 from agentic.teams.discussion_agent.state import DiscussionAgentState
+from agentic.teams.discussion_agent.nodes import DISCUSSION_SYSTEM_PROMPT
 
 
 async def run_discussion_agent(
@@ -22,13 +24,15 @@ async def run_discussion_agent(
     db: Session,
     selected_document_ids: Optional[list[int]] = None,
     event_callback: Optional[Callable] = None,
+    current_message_id: Optional[int] = None,
 ) -> dict:
     """
     Execute Discussion Supervisory Agent:
     1. Scope document search to explicit selected_document_ids (if provided) or team documents.
     2. Maintain and check Discussion STM (1000 tokens threshold + 5-section summarizer).
-    3. Stream sub-agent progress updates via event_callback (excluding CoT reasoning).
-    4. Return final formatted answer, sources, and chunks.
+    3. Feed clean sequence to Agent: System prompt + History + Latest user query.
+    4. Stream sub-agent progress updates via event_callback (excluding CoT reasoning).
+    5. Return final formatted answer, sources, and chunks.
     """
     if selected_document_ids and len(selected_document_ids) > 0:
         target_doc_ids = selected_document_ids
@@ -55,13 +59,24 @@ async def run_discussion_agent(
     set_active_event_callback(filtered_callback)
 
     # 3. Maintain Discussion STM (summarizes if active context exceeds 1000 tokens)
-    history = check_and_summarize_discussion_db(db, discussion_id)
+    # Exclude current message from history to prevent duplicate injection
+    history = check_and_summarize_discussion_db(
+        db, discussion_id, exclude_message_id=current_message_id
+    )
 
-    # 4. Build LLM message sequence: [History (Summary + prior turns)] + [_HISTORY_BRIDGE] + [HumanMessage(question)]
-    messages = build_discussion_llm_messages(history, latest_query=question)
+    # 4. Format the latest query with speaker context so it matches conversation history
+    user = db.query(User).filter(User.user_id == user_id).first() if user_id else None
+    sender_name = user.name if user else f"User #{user_id}"
+    if not (question.startswith("[") and " (ID: " in question):
+        formatted_query = f"[{sender_name} (ID: {user_id})]: {question}"
+    else:
+        formatted_query = question
+
+    # 5. Build clean LLM message sequence: [History] + [HumanMessage(latest_query)]
+    messages = build_discussion_llm_messages(history, latest_query=formatted_query)
 
     initial_state: DiscussionAgentState = {
-        "messages": messages,
+        "messages": [DISCUSSION_SYSTEM_PROMPT] + messages,
         "question": question,
         "answer": "",
         "reasoning": "",

@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from dotenv import load_dotenv
 
 from langchain_core.messages import ToolMessage, AIMessage, HumanMessage, SystemMessage
@@ -13,20 +14,20 @@ from agentic.sub_agents.base import SubAgentResult, SubAgentEventCallback
 
 load_dotenv()
 
-MAX_ITERATIONS = 8
+MAX_ITERATIONS = 6
 
 SYSTEM_PROMPT = SystemMessage(
     content=(
         "You are a specialized Web Search Sub-Agent. Your task is to perform targeted web searches "
         "using the web_search tool to answer all parts of the user's research query efficiently.\n\n"
         "RULES:\n"
-        "1. Perform ONE targeted search at a time. Never issue multiple tool calls in a single step.\n"
-        "2. Use Web Search with clear sentence and not just simple keywords.\n"
-        "3. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately.\n"
+        "1. Perform ONE targeted search at a time. Formulate clear, descriptive search queries.\n"
+        "2. Prioritize covering all aspects of the user's query across your searches.\n"
+        "3. As soon as you have gathered sufficient information to answer the query, STOP calling tools immediately and write a complete final answer.\n"
         "HOW TO ANSWER:\n"
-        " - Only use the information gathered without adding any external knowledge.\n"
-        " - Only answer what is important to the user's query. Do not include irrelevant information.\n"
-        "Rejection Rules: If the context is insufficient to answer the question or Not Matching, respond with: The provided context does not contain enough information to answer the question."
+        " - Base your answer strictly on the gathered search results without adding unverified external claims.\n"
+        " - Include concrete details: numbers, pricing, free-tier limits, features, and sources found in the results.\n"
+        " - If some requested items could not be found, report all verified facts for the items found, and explicitly state which specific items were not found. Never return an empty answer."
     )
 )
 
@@ -50,6 +51,22 @@ web_llm = web_llm_with_tools.bind_tools(tools)
 web_tool_node = ToolNode(tools)
 
 
+def clean_agent_output(text: str) -> str:
+    """Strip reasoning artifacts, unclosed think tags, and DeepSeek DSML tool syntax."""
+    if not text:
+        return ""
+    # Strip DeepSeek tool call syntax artifacts
+    text = re.sub(r"</?｜DSML｜[^>]*>", "", text)
+    # Strip think tags and thinking blocks if present
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r"</?think>", "", text)
+    text = text.strip()
+    # Strip lone markdown headers or empty punctuation artifacts like "# " or "---"
+    if re.fullmatch(r"[#\-\*\s]+", text):
+        return ""
+    return text
+
+
 def sanitize_web_messages(messages: list) -> list:
     sanitized = []
     for msg in messages:
@@ -65,7 +82,7 @@ def sanitize_web_messages(messages: list) -> list:
             ]
             sanitized.append(
                 AIMessage(
-                    content=msg.content or "",
+                    content=clean_agent_output(msg.content or ""),
                     tool_calls=tool_calls,
                     id=getattr(msg, "id", None),
                 )
@@ -121,13 +138,6 @@ def print_web_messages(node_name: str, messages: list, iteration: int):
 async def web_chat_node(state: WebSearchState) -> dict:
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_web_messages(raw_messages)
-
-    # The last assistant message can contain a tool request that was not
-    # executed because the iteration limit was reached. Synthesis should use
-    # the results already collected, not a dangling tool call.
-    if clean_messages and isinstance(clean_messages[-1], AIMessage):
-        if getattr(clean_messages[-1], "tool_calls", None):
-            clean_messages = clean_messages[:-1]
     current_iteration = state.get("iterations", 0)
 
     if not clean_messages or not isinstance(clean_messages[0], SystemMessage):
@@ -154,6 +164,12 @@ async def web_chat_node(state: WebSearchState) -> dict:
         for call in getattr(response, "tool_calls", [])
     ]
 
+    has_tools = bool(tool_calls)
+    clean_content = clean_agent_output(response.content or "")
+    # When issuing a tool call, preamble like "Now let me research..." is NOT the final answer.
+    # Only treat content as answer when no tools are called.
+    answer = "" if has_tools else clean_content
+
     if reasoning:
         print(f"[WEB AGENT REASONING]: {reasoning}")
     if tool_calls:
@@ -163,13 +179,14 @@ async def web_chat_node(state: WebSearchState) -> dict:
 
     return {
         "messages": [response],
-        "answer": response.content or "",
+        "answer": answer,
         "reasoning": reasoning,
         "tool_calls": tool_calls,
         "input_tokens": state.get("input_tokens", 0) + usage.get("input_tokens", 0),
         "output_tokens": state.get("output_tokens", 0) + usage.get("output_tokens", 0),
         "iterations": current_iteration + 1,
     }
+
 
 async def collect_web_tool_results(state: WebSearchState) -> dict:
     sources = list(state.get("sources", []))
@@ -230,38 +247,68 @@ async def collect_web_tool_results(state: WebSearchState) -> dict:
 
 async def force_synthesis_node(state: WebSearchState) -> dict:
     """
-    Graph-enforced synthesis node — called when MAX_ITERATIONS-1 is reached.
+    Graph-enforced synthesis node — called when MAX_ITERATIONS-1 searches are completed,
+    or if iteration limit is reached.
     Uses the base LLM (NO tools bound) so the model physically cannot call
-    any tool regardless of what it wants to do.
+    any tool and is forced to summarize all collected results.
     """
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_web_messages(raw_messages)
 
+    # CRITICAL: Strip any trailing assistant messages (especially unexecuted tool calls or preamble)
+    # so the synthesis LLM is presented with clean message history ending with tool results.
+    clean_messages_for_synthesis = list(clean_messages)
+    while clean_messages_for_synthesis and isinstance(clean_messages_for_synthesis[-1], AIMessage):
+        clean_messages_for_synthesis.pop()
+
     synthesis_prompt = SystemMessage(
         content=(
-            "You have completed all allowed web searches. "
-            "Using ONLY the information gathered so far, write a complete, clear, facts-only final answer. "
-            "Do not ask for more information or suggest further searches."
+            "You are a specialized Web Search Sub-Agent. You have completed all allowed web searches.\n"
+            "Using the gathered web search results provided above, write a comprehensive, factual final answer addressing all parts of the user's research query.\n\n"
+            "RULES:\n"
+            "1. Synthesize all concrete details, features, pricing, free tiers, and usage limits found across all searches.\n"
+            "2. If some requested items could not be found, report all verified information for the items found, and explicitly state which specific items were not found. Never return an empty answer.\n"
+            "3. Do not ask for more information or suggest further searches. Do not mention iteration limits."
         )
     )
 
-    messages_to_send = [synthesis_prompt] + clean_messages
+    messages_to_send = [synthesis_prompt] + clean_messages_for_synthesis + [
+        HumanMessage(
+            content="Synthesize all the gathered web search results above and provide a complete, well-structured final answer to the research query now."
+        )
+    ]
     print_web_messages("force_synthesis_node", messages_to_send, state.get("iterations", 0) + 1)
 
     # web_llm_base has NO tools bound — LLM cannot call tools even if it tries
     response = await web_llm_base.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")
+    answer_text = clean_agent_output(response.content or "")
+
+    # Robust fallback: if LLM returned empty or whitespace, synthesize directly from ToolMessages
+    if not answer_text:
+        findings = []
+        for msg in clean_messages_for_synthesis:
+            if isinstance(msg, ToolMessage) and msg.content:
+                text = msg.content.strip()
+                if text and text != "Tool execution completed.":
+                    findings.append(text)
+        if findings:
+            answer_text = "Summary of gathered web research:\n\n" + "\n\n---\n\n".join(findings)
+        elif state.get("sources"):
+            urls = [s.get("url") for s in state["sources"] if s.get("url")]
+            answer_text = "Web research gathered sources: " + ", ".join(urls[:5])
+        else:
+            answer_text = "No relevant web results were found for the query."
 
     if reasoning:
         print(f"[WEB AGENT FORCE SYNTHESIS REASONING]: {reasoning}")
-    if response.content:
-        print(f"[WEB AGENT FORCE SYNTHESIS RESPONSE PREVIEW]: {repr(response.content[:200])}...")
-
+    if answer_text:
+        print(f"[WEB AGENT FORCE SYNTHESIS RESPONSE PREVIEW]: {repr(answer_text[:200])}...")
 
     return {
         "messages": [response],
-        "answer": response.content or "",
+        "answer": answer_text,
         "reasoning": reasoning,
         "tool_calls": [],
         "input_tokens": state.get("input_tokens", 0) + usage.get("input_tokens", 0),
@@ -275,17 +322,25 @@ def web_route_after_chat(state: WebSearchState):
     last_message = state["messages"][-1]
     has_tool_calls = bool(getattr(last_message, "tool_calls", None))
 
-    # A normal answer is complete, regardless of the iteration count.
+    # A normal answer without tool calls is complete.
     if not has_tool_calls:
         return END
 
-    # Let the current tool call run. If another tool is requested at the
-    # limit, synthesize from the results already collected.
+    # Safety net: If iteration limit reached while requesting a tool, route to synthesis
     if iterations >= MAX_ITERATIONS:
         return "force_synthesis_node"
 
     return "web_tool_node"
 
+
+def web_route_after_tools(state: WebSearchState):
+    iterations = state.get("iterations", 0)
+    # If we have reached MAX_ITERATIONS - 1, we have performed the maximum allowed searches.
+    # Do NOT go back to web_chat_node (which has tools bound and would waste a turn requesting another search).
+    # Instead, route directly to force_synthesis_node so the base LLM synthesizes all gathered results!
+    if iterations >= MAX_ITERATIONS - 1:
+        return "force_synthesis_node"
+    return "web_chat_node"
 
 
 builder = StateGraph(WebSearchState)
@@ -305,7 +360,14 @@ builder.add_conditional_edges(
     },
 )
 builder.add_edge("web_tool_node", "collect_web_tool_results")
-builder.add_edge("collect_web_tool_results", "web_chat_node")
+builder.add_conditional_edges(
+    "collect_web_tool_results",
+    web_route_after_tools,
+    {
+        "web_chat_node": "web_chat_node",
+        "force_synthesis_node": "force_synthesis_node",
+    },
+)
 builder.add_edge("force_synthesis_node", END)
 
 web_subgraph = builder.compile()
@@ -340,11 +402,15 @@ async def run_web_agent(query: str, event_callback: SubAgentEventCallback = None
         for node_name, node_update in update.items():
             if node_name in ("web_chat_node", "force_synthesis_node"):
                 reasoning = node_update.get("reasoning", "")
-                answer = node_update.get("answer", "")
+                raw_ans = node_update.get("answer", "")
+                answer = clean_agent_output(raw_ans)
                 tool_calls = node_update.get("tool_calls", [])
                 iteration = node_update.get("iterations", 1)
 
-                if answer:
+                # Only accept final_answer if from force_synthesis_node or if chat node finished without tools
+                if node_name == "force_synthesis_node" and answer:
+                    final_answer = answer
+                elif node_name == "web_chat_node" and not tool_calls and answer:
                     final_answer = answer
 
                 input_tokens = node_update.get("input_tokens", input_tokens)
@@ -378,13 +444,14 @@ async def run_web_agent(query: str, event_callback: SubAgentEventCallback = None
                 if sources:
                     final_sources = sources
 
-    # Fallback: if web agent never emitted a text answer, use a placeholder
-    # so the ToolMessage is never empty and the main agent doesn't loop again
-    if not final_answer.strip():
+    # Final fallback if no answer was emitted
+    final_answer = clean_agent_output(final_answer)
+    if not final_answer:
         if final_sources:
+            urls = [s.get("url", "") for s in final_sources if s.get("url")]
             final_answer = (
-                "Web research completed. Gathered sources are listed. "
-                "Please synthesize the answer from the collected sources."
+                "Web research completed. Relevant sources gathered: "
+                + ", ".join(urls[:5])
             )
         else:
             final_answer = "No relevant web results were found for the given query."

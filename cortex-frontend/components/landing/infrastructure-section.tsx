@@ -60,7 +60,7 @@ function Tag({ children }: { children: React.ReactNode }) {
 
 export function InfrastructureSection() {
   return (
-    <section id="security" className="py-32 px-6 md:px-12 lg:px-20 border-t border-border/40">
+    <section id="audit" className="py-32 px-6 md:px-12 lg:px-20 border-t border-border/40">
       <div className="max-w-6xl mx-auto">
         <div className="mb-16">
           <div className="w-10 h-10 flex items-center justify-center border border-border/40 rounded-xl mb-4 bg-background">

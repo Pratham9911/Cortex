@@ -98,20 +98,24 @@ export function HeroSection({ isReady = true }: { isReady?: boolean }) {
               isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
-            <Button 
-              size="lg" 
-              className="bg-foreground hover:bg-foreground/90 text-background px-8 h-14 text-base rounded-full group"
-            >
-              Start free trial
-              <ArrowRight className="w-4 h-4 ml-2 transition-transform group-hover:translate-x-1" />
-            </Button>
-            <Button 
-              size="lg" 
-              variant="outline" 
-              className="h-14 px-8 text-base rounded-full border-foreground/20 hover:bg-foreground/5"
-            >
-              Watch demo
-            </Button>
+            <a href="/register">
+              <Button 
+                size="lg" 
+                className="bg-foreground hover:bg-foreground/90 text-background px-8 h-14 text-base rounded-full group"
+              >
+                Get started free
+                <ArrowRight className="w-4 h-4 ml-2 transition-transform group-hover:translate-x-1" />
+              </Button>
+            </a>
+            <a href="#features">
+              <Button 
+                size="lg" 
+                variant="outline" 
+                className="h-14 px-8 text-base rounded-full border-foreground/20 hover:bg-foreground/5"
+              >
+                Explore features
+              </Button>
+            </a>
           </div>
         </div>
         

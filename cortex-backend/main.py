@@ -42,20 +42,14 @@ async def lifespan(app: FastAPI):
     init_project_task_activity_daily()
     reconcile_today_global_metrics()
 
-    from agentic.checkpointer import init_checkpointer
-    await init_checkpointer()
-
     from agentic.main_graph import build_workflow
     import agentic.main_graph as mg
 
     mg.workflow = build_workflow()
 
-    print("[Startup] Async workflow compiled successfully.")
+    print("[Startup] In-memory agent workflow compiled successfully.")
 
     yield
-
-    from agentic.checkpointer import close_checkpointer
-    await close_checkpointer()
 app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware
@@ -74,7 +68,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Has-More"],
+    expose_headers=["X-Has-More", "X-Is-Processing"],
 )
 
 

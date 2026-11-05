@@ -10,7 +10,7 @@ Responsibilities
 - Persist a rolling compressed summary (DiscussionSTM) in the database when
   the active context exceeds TOKEN_THRESHOLD.
 - Build the final ordered message list that is handed to the Discussion Agent:
-    [Summary SystemMessage] → [unsummarized turns] → [bridge separator] → [latest query]
+    [History (Summary + prior turns)] + [latest query]
 
 The summarizer used here is the TEAM-AWARE one from
 ``agentic.teams.short_term_memory.summarizer`` — it understands participants,
@@ -39,8 +39,7 @@ from agentic.teams.short_term_memory.summarizer import summarize_history
 # We use a lightweight character-based estimate (len / 4) so this is free.
 TOKEN_THRESHOLD = 1000
 
-# Bridge message injected between the history block and the latest user query
-# so the LLM knows where the "memory" ends and the live query begins.
+# Retained for backward-compatibility if imported elsewhere
 _HISTORY_BRIDGE = SystemMessage(
     content=(
         "── Above is the team discussion memory and conversation history. ──\n"
@@ -90,14 +89,18 @@ def _lookup_sender_name(db: Session, sender_id: Optional[int]) -> str:
     return user.name if user else f"User #{sender_id}"
 
 
-def load_discussion_chat_history(db: Session, discussion_id: int) -> List[BaseMessage]:
+def load_discussion_chat_history(
+    db: Session,
+    discussion_id: int,
+    exclude_message_id: Optional[int] = None,
+) -> List[BaseMessage]:
     """Load the LangChain message list for *discussion_id*.
 
     Layout:
       1. A single ``SystemMessage`` containing the current compressed summary
          (if a ``DiscussionSTM`` row exists for this discussion).
       2. Every ``DiscussionMessage`` that was created *after* the last
-         summarised message, formatted as:
+         summarised message (excluding *exclude_message_id* if provided), formatted as:
            - AI turns  → ``AIMessage``  tagged ``[Cortex AI]:``
            - User turns → ``HumanMessage`` tagged ``[Name (ID: X)]:``
 
@@ -121,6 +124,9 @@ def load_discussion_chat_history(db: Session, discussion_id: int) -> List[BaseMe
         query = query.filter(
             DiscussionMessage.id > stm_entry.last_summarized_message_id
         )
+
+    if exclude_message_id is not None:
+        query = query.filter(DiscussionMessage.id != exclude_message_id)
 
     db_messages = query.all()
 
@@ -156,34 +162,36 @@ def check_and_summarize_discussion_db(
     db: Session,
     discussion_id: int,
     threshold: int = TOKEN_THRESHOLD,
+    exclude_message_id: Optional[int] = None,
 ) -> List[BaseMessage]:
     """Summarise and persist discussion history when the token budget is exceeded.
 
     Flow
     ----
-    1. Load current history (summary + unsummarised turns).
+    1. Load current history (summary + unsummarised turns, excluding current message).
     2. If token count ≤ threshold → return as-is (no-op).
     3. If fewer than 3 messages exist → return as-is (nothing meaningful to compress).
     4. Summarise everything *except the latest 2 turns* using the team-aware summarizer.
     5. Upsert the result into ``DiscussionSTM``.
     6. Reload and return the fresh history (summary + last 2 turns only).
-
-    Why keep the last 2 turns verbatim?
-    The most recent human message and AI response are the most important for
-    follow-up continuity; compressing them immediately would lose that context.
     """
-    lc_messages = load_discussion_chat_history(db, discussion_id)
+    lc_messages = load_discussion_chat_history(
+        db, discussion_id, exclude_message_id=exclude_message_id
+    )
 
     if estimate_token_count(lc_messages) <= threshold:
         return lc_messages
 
     # Fetch raw DB messages to determine the boundary message ID
-    db_messages = (
+    db_messages_query = (
         db.query(DiscussionMessage)
         .filter(DiscussionMessage.discussion_id == discussion_id)
         .order_by(DiscussionMessage.id.asc())
-        .all()
     )
+    if exclude_message_id is not None:
+        db_messages_query = db_messages_query.filter(DiscussionMessage.id != exclude_message_id)
+
+    db_messages = db_messages_query.all()
 
     if len(db_messages) <= 2:
         # Not enough history to safely compress anything
@@ -221,7 +229,9 @@ def check_and_summarize_discussion_db(
     db.commit()
 
     # Reload so the returned list reflects the freshly compressed state
-    return load_discussion_chat_history(db, discussion_id)
+    return load_discussion_chat_history(
+        db, discussion_id, exclude_message_id=exclude_message_id
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -235,20 +245,25 @@ def build_discussion_llm_messages(
     """Assemble the ordered message list to hand to the Discussion Agent LLM.
 
     Order:
-      [History block (summary + unsummarised turns)]
-      [_HISTORY_BRIDGE separator]          ← only if history is non-empty
-      [HumanMessage(latest_query)]         ← only if a query is provided
+      [History block (summary + unsummarised prior turns)]
+      [HumanMessage(latest_query)]
 
-    The bridge separator tells the model where the "memory" ends so it does
-    not treat the summary as part of the live conversation.
+    Ensures only clean history and the latest message are passed to the agent,
+    without duplicate query messages or arbitrary separators.
     """
     result: List[BaseMessage] = []
 
     if history:
         result.extend(history)
-        result.append(_HISTORY_BRIDGE)
 
     if latest_query:
+        # Prevent accidental duplicate if latest query already exists at the end of history
+        if result and isinstance(result[-1], HumanMessage):
+            last_content = (result[-1].content or "").strip()
+            clean_q = latest_query.strip()
+            if clean_q in last_content or last_content in clean_q:
+                result.pop()
+
         result.append(HumanMessage(content=latest_query))
 
     return result

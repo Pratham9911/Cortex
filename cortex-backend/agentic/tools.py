@@ -245,67 +245,12 @@ async def calculator(num1: float, num2: float, operator: str) -> float:
 @tool
 async def send_email(to: str, subject: str, body: str) -> dict:
     """
-    Call this tool immediately when user requests to send an email.
-    Drafts an email to recipient ('to') with 'subject' and 'body' and requests human confirmation automatically.
+    Sending emails is disabled. Cortex operates in read-only mode for email.
     """
-    from langgraph.types import interrupt
-
-    draft = {"to": to, "subject": subject, "body": body}
-    response = interrupt({"action": "email_approval", "draft": draft})
-
-    action = ""
-    feedback = ""
-
-    if isinstance(response, dict):
-        action = str(response.get("action", "")).lower()
-        feedback = str(response.get("feedback", "")).strip()
-    elif isinstance(response, str):
-        action = str(response).lower()
-
-    approved = action in ["yes", "approve", "approved", "true"]
-
-    if approved:
-        ctx = get_active_project_context()
-        user_id = ctx.get("user_id") or 1
-        db = ctx.get("db")
-
-        try:
-            from agentic.email.gmail_service import send_email_via_gmail
-            gmail_res = send_email_via_gmail(user_id=user_id, to=to, subject=subject, body=body, db=db)
-            if feedback:
-                gmail_res["feedback"] = feedback
-                gmail_res["message"] += f" (Note: User included comment: '{feedback}')"
-            return gmail_res
-        except ValueError as ve:
-            return {
-                "status": "not_connected",
-                "to": to,
-                "subject": subject,
-                "body": body,
-                "message": str(ve),
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "to": to,
-                "subject": subject,
-                "body": body,
-                "message": f"Failed to send email via Gmail API: {str(e)}",
-            }
-    else:
-        msg = f"Email sending rejected by user."
-        if feedback:
-            msg += f" User instructions for changes or cancellation: '{feedback}'"
-        else:
-            msg += " User provided no additional feedback."
-        return {
-            "status": "cancelled",
-            "to": to,
-            "subject": subject,
-            "body": body,
-            "feedback": feedback,
-            "message": msg,
-        }
+    return {
+        "status": "disabled",
+        "message": "Direct email sending is disabled. Use gmail_agent for searching and reading emails."
+    }
 
 
 

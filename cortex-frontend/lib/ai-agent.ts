@@ -138,7 +138,7 @@ export async function updateChatTitle(
   return toChatSession(data.chat)
 }
 
-export type MessagePage = { messages: Message[]; hasMore: boolean }
+export type MessagePage = { messages: Message[]; hasMore: boolean; isProcessing?: boolean }
 
 export async function listMessages(
   chatId: number,
@@ -154,6 +154,20 @@ export async function listMessages(
   return {
     messages: messages.map((message) => toMessage(message)),
     hasMore: response.headers.get("X-Has-More") === "true",
+    isProcessing: response.headers.get("X-Is-Processing") === "true",
+  }
+}
+
+export async function getChatStatus(chatId: number): Promise<{ is_processing: boolean; elapsed_seconds: number }> {
+  try {
+    const response = await fetch(`${apiUrl}/chats/${chatId}/status`, {
+      headers: authHeaders(),
+      cache: "no-store",
+    })
+    if (!response.ok) return { is_processing: false, elapsed_seconds: 0 }
+    return await response.json()
+  } catch {
+    return { is_processing: false, elapsed_seconds: 0 }
   }
 }
 
@@ -240,6 +254,55 @@ export async function streamChatAsk(
           ? detail.message
           : response.statusText
     )
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split("\n\n")
+    buffer = frames.pop() || ""
+
+    for (const frame of frames) {
+      const dataLine = frame
+        .split("\n")
+        .find((line) => line.startsWith("data: "))
+
+      if (!dataLine) continue
+
+      const payload = dataLine.slice("data: ".length)
+      if (payload === "complete") continue
+
+      try {
+        onEvent?.(JSON.parse(payload))
+      } catch {
+        // Ignore malformed SSE frames.
+      }
+    }
+  }
+}
+
+export async function streamChatReconnect(
+  chatId: number,
+  options: { signal?: AbortSignal } & StreamCallbacks = {}
+): Promise<void> {
+  const { signal, onEvent } = options
+  const response = await fetch(`${apiUrl}/chats/${chatId}/stream`, {
+    method: "GET",
+    headers: {
+      ...authHeaders(),
+      Accept: "text/event-stream",
+    },
+    signal,
+  })
+
+  if (!response.ok || !response.body) {
+    return
   }
 
   const reader = response.body.getReader()

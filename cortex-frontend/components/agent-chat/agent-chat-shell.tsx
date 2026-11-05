@@ -11,6 +11,7 @@ import {
   listMessages,
   stopChatExecution,
   streamChatAsk,
+  streamChatReconnect,
   streamResumeAgent,
   updateChatTitle,
 } from "@/lib/ai-agent"
@@ -211,6 +212,154 @@ export function AgentChatShell() {
     }
   }, [])
 
+  const reconnectToOngoingChat = useCallback(
+    async (chat: ChatSession) => {
+      if (isThinking && executionChatId === chat.id) return
+
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      setIsThinking(true)
+      setExecutionChatId(chat.id)
+      setThinkingEvents([])
+      agentActivitiesRef.current = []
+      setAgentActivities([])
+      setHitlPermission(null)
+      setStartedAt(Date.now())
+      setElapsedSeconds(1)
+
+      const AGENT_TOOLS = new Set(["web_agent", "retrieval_agent", "github_agent", "gmail_agent"])
+      const getAgentDisplayName = (agent: string) => {
+        if (agent === "web_agent") return "Web"
+        if (agent === "retrieval_agent") return "Project"
+        if (agent === "github_agent") return "GitHub"
+        if (agent === "gmail_agent") return "Gmail"
+        return "Main"
+      }
+
+      const addActivity = (item: Omit<ActivityItem, "id">) => {
+        if (!item.content.trim()) return
+        const newItem: ActivityItem = { ...item, id: `act-${Date.now()}-${Math.random().toString(36).slice(2)}` }
+        agentActivitiesRef.current = [...agentActivitiesRef.current, newItem]
+        setAgentActivities([...agentActivitiesRef.current])
+      }
+
+      try {
+        await streamChatReconnect(chat.chatId, {
+          signal: controller.signal,
+          onEvent: (event) => {
+            const agentName = event.agent || "main"
+
+            if (event.type === "status" && event.message) {
+              setThinkingEvents((prev) => [
+                ...prev,
+                {
+                  id: `${Date.now()}-${prev.length}`,
+                  step: event.step,
+                  message: event.message,
+                },
+              ])
+            }
+
+            if (event.type === "activity" && event.content) {
+              addActivity({
+                agent: agentName,
+                kind: event.kind || "thought",
+                label: event.label,
+                content: event.content,
+              })
+            } else if (event.type === "agent_started") {
+              addActivity({
+                agent: agentName,
+                kind: "status",
+                content: agentName === "main" ? "Planning the request..." : `${getAgentDisplayName(agentName)} agent started`,
+              })
+            } else if (event.type === "reasoning") {
+              addActivity({
+                agent: agentName,
+                kind: "thought",
+                content: event.content || "",
+              })
+            } else if (event.type === "tool_started") {
+              const tool = event.tool || "unknown"
+              const toolAgent = AGENT_TOOLS.has(tool) ? tool : agentName
+              const label = tool === "web_agent" ? "Searching web" : tool === "retrieval_agent" ? "Searching project" : tool === "github_agent" ? "Searching GitHub" : `Using ${tool}`
+              addActivity({
+                agent: toolAgent,
+                kind: "tool",
+                label,
+                content: AGENT_TOOLS.has(tool) ? label : `${label}${event.args ? ` ${JSON.stringify(event.args)}` : ""}`,
+              })
+            } else if (event.type === "tool_completed") {
+              const tool = event.tool || ""
+              if (AGENT_TOOLS.has(tool)) {
+                addActivity({
+                  agent: tool,
+                  kind: "status",
+                  content: `${getAgentDisplayName(tool)} search complete`,
+                })
+              }
+            } else if (event.type === "agent_completed" && agentName !== "main") {
+              addActivity({
+                agent: agentName,
+                kind: "status",
+                content: `${getAgentDisplayName(agentName)} agent finished`,
+              })
+            }
+
+            // Dismiss thinking immediately when final answer arrives during live reconnect
+            if ((event.type === "final" || event.type === "agent_completed") && (agentName === "main" || event.type === "final")) {
+              setIsThinking(false)
+              setExecutionChatId(null)
+              setThinkingEvents([])
+              setAgentActivities([])
+              agentActivitiesRef.current = []
+            }
+
+            if (event.type === "sources" && Array.isArray(event.sources)) {
+              const count = event.sources.length
+              if (count > 0) {
+                setThinkingEvents((prev) => [
+                  ...prev,
+                  {
+                    id: `${Date.now()}-${prev.length}`,
+                    step: event.step,
+                    message: `Found ${count} web source${count === 1 ? "" : "s"}.`,
+                  },
+                ])
+              }
+            }
+          },
+        })
+
+        const updatedPage = await listMessages(chat.chatId)
+        replaceChatMessages(chat.chatId, updatedPage.messages)
+        // Clear thinking state BEFORE async refreshes to avoid intermediate
+        // React renders that show the answer with "Thinking..." still visible
+        setIsThinking(false)
+        setExecutionChatId(null)
+        setThinkingEvents([])
+        setAgentActivities([])
+        agentActivitiesRef.current = []
+        await refreshChats()
+        await refreshAiQuota()
+      } catch {
+        try {
+          const updatedPage = await listMessages(chat.chatId)
+          replaceChatMessages(chat.chatId, updatedPage.messages)
+        } catch {}
+      } finally {
+        // Safety net — always ensure thinking state is cleared
+        setIsThinking(false)
+        setExecutionChatId(null)
+        setThinkingEvents([])
+        setAgentActivities([])
+        agentActivitiesRef.current = []
+      }
+    },
+    [isThinking, executionChatId, replaceChatMessages, refreshChats, refreshAiQuota]
+  )
+
   const refreshActiveMessages = useCallback(async () => {
     if (!activeChatId || isThinking) return
     // Suppress polling briefly after stop so DB save can complete
@@ -221,7 +370,11 @@ export function AgentChatShell() {
 
     const page = await listMessages(chat.chatId)
     mergeChatMessages(chat.chatId, page.messages, page.hasMore)
-  }, [activeChatId, chats, isThinking, mergeChatMessages])
+
+    if (page.isProcessing) {
+      void reconnectToOngoingChat(chat)
+    }
+  }, [activeChatId, chats, isThinking, mergeChatMessages, reconnectToOngoingChat])
 
   useEffect(() => {
     void refreshChats()
@@ -280,12 +433,15 @@ export function AgentChatShell() {
             ? { ...item, messages: page.messages, hasMoreMessages: page.hasMore }
             : item
           ))
+          if (page.isProcessing) {
+            void reconnectToOngoingChat(chat)
+          }
         })
         .finally(() => {
           setLoadingChatId(null)
         })
     },
-    [chats]
+    [chats, reconnectToOngoingChat]
   )
 
   const handleRenameChat = useCallback(
@@ -797,12 +953,13 @@ export function AgentChatShell() {
         }
         console.error("HITL resume error", e)
       } finally {
-        await refreshAiQuota()
+        // Clear thinking state BEFORE async refresh to avoid intermediate renders
         setIsThinking(false)
         setExecutionChatId(null)
         setThinkingEvents([])
         setAgentActivities([])
         agentActivitiesRef.current = []
+        await refreshAiQuota()
       }
     },
     [activeChat, aiQuota, hitlPermission, refreshAiQuota, refreshChats, replaceChatMessages]

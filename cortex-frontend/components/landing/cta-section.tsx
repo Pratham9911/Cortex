@@ -51,37 +51,56 @@ export function CtaSection() {
             <div className="flex flex-col lg:flex-row items-center justify-between gap-12">
               {/* Left content */}
               <div className="flex-1">
+                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono tracking-widest text-muted-foreground bg-foreground/[0.04] mb-6 border border-foreground/10">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  INTERNAL AI KNOWLEDGE & DECISION SYSTEM
+                </span>
+
                 <h2 className="text-4xl lg:text-7xl font-display tracking-tight mb-8 leading-[0.95]">
-                  Ready to build
+                  Ready to unify your
                   <br />
-                  something great?
+                  team&apos;s knowledge?
                 </h2>
 
-                <p className="text-xl text-muted-foreground mb-12 leading-relaxed max-w-xl">
-                  Join thousands of teams shipping faster with Optimus. 
-                  Start free, scale infinitely.
+                <p className="text-xl text-muted-foreground mb-10 leading-relaxed max-w-xl">
+                  Bring together documents, discussions, hybrid search, and source-grounded AI agents in one unified workspace. Start exploring Cortex today.
                 </p>
 
-                <div className="flex flex-col sm:flex-row items-start gap-4">
-                  <Button
-                    size="lg"
-                    className="bg-foreground hover:bg-foreground/90 text-background px-8 h-14 text-base rounded-full group"
-                  >
-                    Start building free
-                    <ArrowRight className="w-4 h-4 ml-2 transition-transform group-hover:translate-x-1" />
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="h-14 px-8 text-base rounded-full border-foreground/20 hover:bg-foreground/5"
-                  >
-                    Talk to sales
-                  </Button>
+                <div className="flex flex-col sm:flex-row items-start gap-4 mb-8">
+                  <a href="/register">
+                    <Button
+                      size="lg"
+                      className="bg-foreground hover:bg-foreground/90 text-background px-8 h-14 text-base rounded-full group"
+                    >
+                      Get started free
+                      <ArrowRight className="w-4 h-4 ml-2 transition-transform group-hover:translate-x-1" />
+                    </Button>
+                  </a>
+                  <a href="/login">
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="h-14 px-8 text-base rounded-full border-foreground/20 hover:bg-foreground/5"
+                    >
+                      Sign in to workspace
+                    </Button>
+                  </a>
                 </div>
 
-                <p className="text-sm text-muted-foreground mt-8 font-mono">
-                  No credit card required
-                </p>
+                <div className="flex flex-wrap items-center gap-6 text-xs text-muted-foreground font-mono">
+                  <span className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-foreground/40" />
+                    Source-aware AI answers
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-foreground/40" />
+                    Role-based project isolation
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-foreground/40" />
+                    No credit card required
+                  </span>
+                </div>
               </div>
 
               {/* Right animation */}

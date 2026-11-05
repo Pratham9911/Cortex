@@ -44,9 +44,6 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
-from langchain_fireworks import ChatFireworks
-from langgraph.errors import GraphInterrupt
-from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from agentic.gmail.gmail_service import get_gmail_service, load_gmail_tool_config
@@ -667,117 +664,11 @@ async def run_gmail_agent(
                 replacement_messages = None
 
                 if need_approval:
-                    hitl_payload = _build_hitl_payload(
-                        tool_name=tool_name,
-                        tool_args=tool_args,
-                        sender_email=sender_email,
-                        user_id=user_id,
-                        thread_id=thread_id,
-                    )
-
-                    if pending_key:
-                        _PENDING_GMAIL_RUNS[pending_key] = {
-                            "messages": messages,
-                            "input_tokens": input_tokens,
-                            "output_tokens": output_tokens,
-                            "final_answer": final_answer,
-                            "iteration": iteration,
-                            "pending_call": call,
-                            "gmail_service": gmail_service,
-                            "sender_email": sender_email,
-                            "tool_config": tool_config,
-                            "llm": llm,
-                        }
-
-                    if event_callback:
-                        event_callback(
-                            "gmail_hitl_required",
-                            **{k: v for k, v in hitl_payload.items() if k != "user_id"},
-                        )
-
-                    approval_res = interrupt(hitl_payload)
-                    decision = ""
-                    feedback = ""
-                    if isinstance(approval_res, dict):
-                        decision = str(
-                            approval_res.get("action")
-                            or approval_res.get("decision")
-                            or approval_res.get("approval")
-                            or ""
-                        ).lower()
-                        feedback = str(approval_res.get("feedback", "")).strip()
-                    elif isinstance(approval_res, str):
-                        decision = approval_res.strip().lower()
-
-                    recognized = {
-                        "yes", "approve", "approved", "accept", "true",
-                        "no", "reject", "rejected", "false", "tell_agent",
+                    result = {
+                        "status": "disabled",
+                        "tool": tool_name,
+                        "message": f"Write operation '{tool_name}' is disabled in Cortex. Gmail agent operates in read-only mode.",
                     }
-                    if decision not in recognized and resume_action_once:
-                        decision = resume_action_once
-                        feedback = resume_feedback_once
-                    resume_action_once = None
-                    if pending_key:
-                        _PENDING_GMAIL_RUNS.pop(pending_key, None)
-
-                    approved = decision in {"yes", "approve", "approved", "accept", "true"}
-                    rejected = decision in {"no", "reject", "rejected", "false"}
-
-                    if rejected:
-                        if event_callback:
-                            event_callback(
-                                "gmail_approval_rejected",
-                                agent="gmail_agent",
-                                tool=tool_name,
-                                approval_id=hitl_payload.get("approval_id"),
-                            )
-                        result = {
-                            "status": "cancelled",
-                            "tool": tool_name,
-                            "message": f"The user rejected {tool_name}.",
-                            "feedback": feedback,
-                        }
-                        final_answer = f"The user rejected {tool_name}; it was not executed."
-                        run_status = "rejected"
-                        stop_after_rejection = True
-                    elif not approved:
-                        result = {
-                            "status": "instruction_provided",
-                            "tool": tool_name,
-                            "user_instruction": feedback or decision,
-                            "message": "The user changed or redirected the pending action.",
-                        }
-                        final_answer = ""
-                        run_status = "changed"
-                        replacement_messages = [
-                            GMAIL_SYSTEM_PROMPT,
-                            HumanMessage(
-                                content=(
-                                    "Current Gmail action: "
-                                    f"{tool_name} with arguments {json.dumps(tool_args)}.\n"
-                                    "Latest user instruction: "
-                                    f"{feedback or decision}\n"
-                                    "Choose the next Gmail action from the available tools. "
-                                    "A read action needs no approval; a write action needs approval."
-                                )
-                            ),
-                        ]
-                    elif impl is None:
-                        result = {"status": "error", "error": f"No implementation for '{tool_name}'."}
-                    else:
-                        if event_callback:
-                            event_callback(
-                                "gmail_approval_received",
-                                agent="gmail_agent",
-                                tool=tool_name,
-                                approval_id=hitl_payload.get("approval_id"),
-                            )
-                        try:
-                            result = await impl(gmail_service, **tool_args, need_approval=False)
-                        except GraphInterrupt:
-                            raise
-                        except Exception as exc:
-                            result = {"status": "error", "error": f"Error executing '{tool_name}': {exc}"}
                 elif impl is None:
                     result = {"status": "error", "error": f"No implementation for '{tool_name}'."}
                 else:
