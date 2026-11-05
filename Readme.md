@@ -12,16 +12,7 @@
   <em>"Your team's knowledge should never be lost."</em>
 </p>
 
-<p align="center">
-  <a href="https://cortexagent.site"><img src="https://img.shields.io/badge/Live%20Demo-cortexagent.site-2563EB?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo"></a>
-  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12">
-  <img src="https://img.shields.io/badge/Next.js-14-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js 14">
-  <img src="https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL & pgvector">
-  <img src="https://img.shields.io/badge/LangGraph-Agentic-FF6F00?style=for-the-badge&logo=langchain&logoColor=white" alt="LangGraph">
-  <img src="https://img.shields.io/badge/AWS-EC2%20ap--south--1-FF9900?style=for-the-badge&logo=amazon-aws&logoColor=white" alt="AWS EC2">
-</p>
 
-<br>
 
 <p align="center">
   <img src="demos/pics/Cortex_LandingPage.png" width="950" alt="Cortex Landing Page">
