@@ -36,7 +36,7 @@ flowchart LR
   
   subgraph Processing["Document Processing Stage"]
     Worker --> Extract["1. Text & Metadata Extraction\n(PDF, Markdown, Plain Text)"]
-    Extract --> Chunk["2. Recursive Token Chunking\n(800-1200 chars with overlap)"]
+    Extract --> Chunk["2. Token Chunking\n(400 tokens with 80 overlap)"]
     Chunk --> Embed["3. Dense Embedding Model\n(High-dimensional vectors)"]
     Embed --> Batch["4. Batch SQL Insert\n(Documents & Chunks)"]
     Batch --> FTS["5. tsvector GIN Indexing\n(Full-Text Search Lexical)"]
@@ -48,7 +48,7 @@ flowchart LR
 #### Pipeline Stages:
 1. **Upload & Storage:** Raw files are validated and stored in Supabase Storage with unique file hashes to detect duplicate uploads.
 2. **Asynchronous Dispatch:** Ingestion jobs containing document IDs and tenant/project metadata are pushed to a Redis task queue.
-3. **Chunking Strategy:** Documents are parsed into structured text and segmented using a recursive character chunker with overlap (typically 800–1200 characters with 150-character overlap) to preserve contextual boundaries across sentences and paragraphs.
+3. **Chunking Strategy:** Documents are parsed into structured text and segmented using token-based chunking configured at **400 tokens per chunk with an 80-token overlap** to maintain optimal semantic context boundaries without truncation.
 4. **Embedding Generation:** Chunks are vectorized using high-dimensional dense embedding models and written into PostgreSQL using `pgvector`.
 5. **Lexical Indexing:** In parallel, chunks are tokenized into PostgreSQL `tsvector` columns, enabling native BM25-equivalent full-text search indexing on the exact same chunks.
 
@@ -176,85 +176,7 @@ To ensure user requests are never lost due to network fluctuations or tab closur
 
 ---
 
-### 5. Database Schema & Data Models
-
-Cortex utilizes PostgreSQL 16 with the `pgvector` extension. The schema is organized into distinct logical domains:
-
-```mermaid
-erDiagram
-    PROJECTS ||--o{ TEAMS : contains
-    PROJECTS ||--o{ DOCUMENTS : owns
-    PROJECTS ||--o{ DISCUSSIONS : tracks
-    TEAMS ||--o{ USERS : includes
-    TEAMS ||--o{ DOCUMENT_TEAM_ACCESS : grants
-    DOCUMENTS ||--o{ DOCUMENT_VERSIONS : tracks_history
-    DOCUMENTS ||--o{ DOCUMENT_TEAM_ACCESS : associates
-    DOCUMENT_VERSIONS ||--o{ DOCUMENT_CHUNKS : splits_into
-    USERS ||--o{ AUDIT_LOGS : performs
-    DISCUSSIONS ||--o{ DECISIONS : formalizes
-
-    PROJECTS {
-        int id PK
-        string name
-        datetime created_at
-    }
-    TEAMS {
-        int id PK
-        int project_id FK
-        string name
-    }
-    USERS {
-        int id PK
-        string email
-        string role
-    }
-    DOCUMENTS {
-        int id PK
-        int project_id FK
-        string title
-        string access_level
-        int current_version
-    }
-    DOCUMENT_VERSIONS {
-        int id PK
-        int document_id FK
-        int version_number
-        string file_path
-        datetime created_at
-    }
-    DOCUMENT_CHUNKS {
-        int id PK
-        int version_id FK
-        int chunk_index
-        text content
-        vector embedding
-        tsvector tsv
-    }
-    AUDIT_LOGS {
-        int id PK
-        int user_id FK
-        string action
-        string entity_type
-        datetime created_at
-    }
-    DECISIONS {
-        int id PK
-        int discussion_id FK
-        string status
-        string rationale
-    }
-```
-
-#### Core Entities:
-- **Projects & Teams:** Define organizational boundaries and multi-tenant isolation.
-- **Documents & Document Versions:** Track the complete revision history of files without overwriting previous versions.
-- **Document Chunks:** Store text passages alongside `vector(1536)` embeddings and PostgreSQL `tsvector` columns with GIN indexes.
-- **Discussions & Decisions:** Structured records of architectural decisions (`ADR`), capturing status, rationale, and linked documents.
-- **Audit Logs:** Immutable audit trail recording user operations, downloads, permission modifications, and AI interactions.
-
----
-
-### 6. Production Cloud & Infrastructure Architecture
+### 5. Production Cloud & Infrastructure Architecture
 
 Cortex is architected for high availability, security, and low latency across the stack:
 
@@ -263,7 +185,7 @@ flowchart TD
   Client(("Client / Web Browser")) -->|"HTTPS (Port 443)"| Vercel["Vercel Edge Platform\nhttps://cortexagent.site\n(Next.js App Router)"]
   Vercel -->|"REST API & SSE Event Stream"| Nginx["Nginx Reverse Proxy\n(Port 443 with Certbot SSL)"]
 
-  subgraph AWS["AWS EC2 Instance (ap-south-1 Mumbai)"]
+  subgraph AWS["AWS EC2 Cloud Instance"]
     Nginx -->|"Proxy Buffering Off (127.0.0.1:8000)"| FastAPI["FastAPI Application\n(Managed via Systemd: cortex.service)"]
     FastAPI --> LangGraph["LangGraph Multi-Agent Engine"]
     FastAPI --> Buffer["In-Memory Circular Event Buffer"]
@@ -274,7 +196,7 @@ flowchart TD
 ```
 
 #### Infrastructure Specifications:
-- **Backend Host:** AWS EC2 `t3.small` instance located in the **ap-south-1 (Mumbai)** region running Ubuntu Server 24.04 LTS.
+- **Backend Host:** AWS EC2 `t3.small` instance running Ubuntu Server 24.04 LTS.
 - **Service Management:** The FastAPI application is daemonized using a systemd service (`cortex.service`) with automatic restart policies and resource limits.
 - **Nginx Reverse Proxy:** Terminates TLS 1.3 encryption, forwards HTTP requests to Uvicorn, and explicitly disables buffering (`proxy_buffering off;`) to deliver zero-latency SSE tokens to the frontend.
 - **Frontend Hosting:** Global edge deployment on Vercel with automatic asset optimization, server-side rendering, and responsive UI caching.
