@@ -28,25 +28,21 @@ The system isolates resource-intensive ingestion from real-time API traffic, enf
 
 Document ingestion in Cortex is asynchronous to prevent large document parsing, chunking, and vector embedding from blocking user API requests.
 
-```
-Upload Request (FastAPI) ──► File Saved to Supabase Storage
-                                     │
-                                     ▼
-                            Redis Job Queue (Task)
-                                     │
-                                     ▼
-                          Worker Service (cortex-worker)
-                         ┌─────────────────────────────┐
-                         │ 1. Text & Metadata Extract  │
-                         │    (PDF, Markdown, Text)    │
-                         │ 2. Recursive Token Chunking │
-                         │ 3. Dense Embedding Model    │
-                         │ 4. PostgreSQL Batch Insert  │
-                         │    (Document & Chunks)      │
-                         │ 5. Full-Text Search Index   │
-                         └──────────────┬──────────────┘
-                                        ▼
-                          PostgreSQL (pgvector + FTS)
+```mermaid
+flowchart LR
+  Upload["Upload Request\n(FastAPI Gateway)"] --> Storage[("Supabase File Storage")]
+  Upload --> Queue[("Redis Task Queue")]
+  Queue --> Worker["Worker Service\n(cortex-worker)"]
+  
+  subgraph Processing["Document Processing Stage"]
+    Worker --> Extract["1. Text & Metadata Extraction\n(PDF, Markdown, Plain Text)"]
+    Extract --> Chunk["2. Recursive Token Chunking\n(800-1200 chars with overlap)"]
+    Chunk --> Embed["3. Dense Embedding Model\n(High-dimensional vectors)"]
+    Embed --> Batch["4. Batch SQL Insert\n(Documents & Chunks)"]
+    Batch --> FTS["5. tsvector GIN Indexing\n(Full-Text Search Lexical)"]
+  end
+
+  FTS --> Postgres[("PostgreSQL\n(pgvector + FTS)")]
 ```
 
 #### Pipeline Stages:
@@ -64,16 +60,20 @@ A core requirement of Cortex is ensuring that confidential organizational knowle
 
 Rather than relying solely on API endpoint authorization checks, Cortex implements **dual-layer defense-in-depth**:
 
-```
-                       User Query Request
-                              │
-               ┌──────────────┴──────────────┐
-               ▼                             ▼
-       [Layer 1: API Router]       [Layer 2: Database Query]
-       Validates user identity,    Injects SQL ACL predicates directly
-       project membership, and     into pgvector and full-text searches.
-       active role (Owner, Admin,   Unauthorized chunks are excluded
-       Member, Viewer).            before ranking and cannot reach the LLM.
+```mermaid
+flowchart TD
+  Query["User Query / Action Request"] --> Router["Layer 1: API Router Authorization"]
+  Router --> AuthCheck{"Is User Authenticated\n& Project Member?"}
+  AuthCheck -- "No" --> Reject["403 Forbidden / Access Denied"]
+  AuthCheck -- "Yes" --> SQLGen["Layer 2: SQL Query Generation\nwith Mandatory ACL Predicates"]
+  
+  subgraph DatabaseLayer["Database Retrieval Layer"]
+    SQLGen --> QueryExec["PostgreSQL Query Execution"]
+    QueryExec --> Filter["Security Predicate:\nOwner OR Public OR Team-Access"]
+    Filter --> SafeChunks["Safe, Verified Document Chunks"]
+  end
+
+  SafeChunks --> LLM["LLM Context Window\n(Zero Cross-Tenant Leakage)"]
 ```
 
 #### Database-Level Security Predicates:
@@ -100,29 +100,18 @@ Pure semantic search and pure keyword search each possess fundamental limitation
 
 Cortex combines both approaches via **Reciprocal Rank Fusion (RRF)** followed by a **Cross-Encoder Reranker**.
 
-```
-                           User Query
-                               │
-            ┌──────────────────┴──────────────────┐
-            ▼                                     ▼
-   Dense Vector Search                    PostgreSQL FTS
-   (pgvector Cosine Sim)                 (to_tsquery Lexical)
-   Ranked Candidates: D₁...Dₖ             Ranked Candidates: K₁...Kₖ
-            │                                     │
-            └──────────────────┬──────────────────┘
-                               ▼
-                  Reciprocal Rank Fusion (RRF)
-                  Score(d) = ∑ [ 1 / (60 + rank_i(d)) ]
-                               │
-                               ▼
-                   Top Candidates (e.g. 20)
-                               │
-                               ▼
-                     Cross-Encoder Reranker
-                 (Full Cross-Attention Scoring)
-                               │
-                               ▼
-                   Top-K Grounded Context Chunks
+```mermaid
+flowchart TD
+  UserQuery["Natural Language User Query"] --> Dense["Dense Vector Search\n(pgvector Cosine Similarity)"]
+  UserQuery --> Lexical["Lexical Keyword Search\n(PostgreSQL tsvector / to_tsquery)"]
+
+  Dense --> RankedDense["Ranked Candidates D₁...Dₖ"]
+  Lexical --> RankedLexical["Ranked Candidates K₁...Kₖ"]
+
+  RankedDense & RankedLexical --> RRF["Reciprocal Rank Fusion (RRF)\nScore(d) = ∑ 1 / (60 + rank_i(d))"]
+  RRF --> Candidates["Top Candidate Chunks (e.g. Top 20)"]
+  Candidates --> Reranker["Cross-Encoder Neural Reranker\n(Full Cross-Attention Scoring)"]
+  Reranker --> TopK["Top-K Grounded Context Chunks"]
 ```
 
 #### Reciprocal Rank Fusion (RRF) Formula:
@@ -141,38 +130,31 @@ Candidate chunks from RRF are passed into a cross-encoder model that scores the 
 
 Cortex leverages **LangGraph** to coordinate complex, multi-step agent workflows that exceed the capabilities of single-turn LLM calls.
 
-```
-                          ┌─────────────────┐
-                          │   START NODE    │
-                          └────────┬────────┘
-                                   │
-                                   ▼
-                       ┌──────────────────────┐
-                       │  Main Planner Agent  │◄─────────────────┐
-                       └───────────┬──────────┘                  │
-                                   │                             │
-          ┌────────────────────────┼────────────────────────┐    │
-          ▼                        ▼                        ▼    │
-┌──────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│ Retrieval Agent  │     │  Web Search Agent│     │  GitHub Agent   │
-│ (Internal RAG)   │     │  (Tavily / SERP) │     │  (Read-only)    │
-└─────────┬────────┘     └─────────┬────────┘     └────────┬────────┘
-          │                        │                       │
-          └────────────────────────┼───────────────────────┘
-                                   ▼
-                       ┌──────────────────────┐
-                       │ State Synthesis Node ├──────────────────┘
-                       └───────────┬──────────┘  (Iterate if needed)
-                                   │
-                                   ▼
-                       ┌──────────────────────┐
-                       │ Final Answer & Source│
-                       │ Attribution Node     │
-                       └───────────┬──────────┘
-                                   ▼
-                          ┌─────────────────┐
-                          │    END NODE     │
-                          └─────────────────┘
+```mermaid
+flowchart TD
+  StartNode(("START")) --> Planner["Main Planner Agent\n(Intent & Plan Breakdown)"]
+  
+  Planner --> SubAgents{"Task Delegation"}
+  SubAgents -->|"Internal Knowledge"| RetAgent["Retrieval Agent\n(ACL-Filtered RAG Chunks)"]
+  SubAgents -->|"Real-Time Web"| WebAgent["Web Agent\n(External Web Search)"]
+  SubAgents -->|"Repository Context"| GitAgent["GitHub Agent\n(Read-only Repo Inspection)"]
+  SubAgents -->|"Communication Context"| MailAgent["Gmail Agent\n(Read-only Email Threads)"]
+
+  RetAgent & WebAgent & GitAgent & MailAgent --> Synth["State Synthesis & Aggregation"]
+  Synth --> CheckNeeds{"Need More Context?"}
+  CheckNeeds -- "Yes" --> Planner
+  CheckNeeds -- "No" --> FinalAnswer["Final Answer & Source Attribution"]
+  
+  FinalAnswer --> Stream["Server-Sent Events (SSE) Stream\n(Live Thoughts & Activities)"]
+  FinalAnswer --> EndNode(("END"))
+
+  subgraph MemorySystem["Memory & Task Resilience"]
+    STM["Short-Term Memory\n(Sliding Window + Rolling Summary)"]
+    RingBuf["In-Memory Event Ring Buffer\n(Background Task Execution)"]
+  end
+
+  Planner <--> STM
+  Stream --- RingBuf
 ```
 
 #### Sub-Agent Responsibilities:
@@ -198,38 +180,69 @@ To ensure user requests are never lost due to network fluctuations or tab closur
 
 Cortex utilizes PostgreSQL 16 with the `pgvector` extension. The schema is organized into distinct logical domains:
 
-```
-┌────────────────────┐       ┌────────────────────┐       ┌────────────────────┐
-│      projects      │1     *│       teams        │*     *│       users        │
-│────────────────────┼───────┼────────────────────┼───────┼────────────────────│
-│ id (PK)            │       │ id (PK)            │       │ id (PK)            │
-│ name               │       │ project_id (FK)    │       │ email              │
-│ created_at         │       │ name               │       │ role               │
-└─────────┬──────────┘       └─────────┬──────────┘       └─────────┬──────────┘
-          │1                           │1                           │1
-          │                            │                            │
-          │*                           │*                           │*
-┌─────────┴──────────┐       ┌─────────┴──────────┐       ┌─────────┴──────────┐
-│     documents      │1     *│document_team_access│       │    audit_logs      │
-│────────────────────┼───────┼────────────────────│       │────────────────────│
-│ id (PK)            │       │ document_id (FK)   │       │ id (PK)            │
-│ project_id (FK)    │       │ team_id (FK)       │       │ user_id (FK)       │
-│ title              │       └────────────────────┘       │ action             │
-│ access_level       │                                    │ entity_type        │
-│ current_version    │1                                   │ created_at         │
-└─────────┬──────────┘                                    └────────────────────┘
-          │1
-          │*
-┌─────────┴──────────┐       ┌────────────────────┐
-│ document_versions  │1     *│  document_chunks   │
-│────────────────────┼───────┼────────────────────│
-│ id (PK)            │       │ id (PK)            │
-│ document_id (FK)   │       │ version_id (FK)    │
-│ version_number     │       │ chunk_index        │
-│ file_path          │       │ content (text)     │
-│ created_at         │       │ embedding (vector) │
-└────────────────────┘       │ tsv (tsvector)     │
-                             └────────────────────┘
+```mermaid
+erDiagram
+    PROJECTS ||--o{ TEAMS : contains
+    PROJECTS ||--o{ DOCUMENTS : owns
+    PROJECTS ||--o{ DISCUSSIONS : tracks
+    TEAMS ||--o{ USERS : includes
+    TEAMS ||--o{ DOCUMENT_TEAM_ACCESS : grants
+    DOCUMENTS ||--o{ DOCUMENT_VERSIONS : tracks_history
+    DOCUMENTS ||--o{ DOCUMENT_TEAM_ACCESS : associates
+    DOCUMENT_VERSIONS ||--o{ DOCUMENT_CHUNKS : splits_into
+    USERS ||--o{ AUDIT_LOGS : performs
+    DISCUSSIONS ||--o{ DECISIONS : formalizes
+
+    PROJECTS {
+        int id PK
+        string name
+        datetime created_at
+    }
+    TEAMS {
+        int id PK
+        int project_id FK
+        string name
+    }
+    USERS {
+        int id PK
+        string email
+        string role
+    }
+    DOCUMENTS {
+        int id PK
+        int project_id FK
+        string title
+        string access_level
+        int current_version
+    }
+    DOCUMENT_VERSIONS {
+        int id PK
+        int document_id FK
+        int version_number
+        string file_path
+        datetime created_at
+    }
+    DOCUMENT_CHUNKS {
+        int id PK
+        int version_id FK
+        int chunk_index
+        text content
+        vector embedding
+        tsvector tsv
+    }
+    AUDIT_LOGS {
+        int id PK
+        int user_id FK
+        string action
+        string entity_type
+        datetime created_at
+    }
+    DECISIONS {
+        int id PK
+        int discussion_id FK
+        string status
+        string rationale
+    }
 ```
 
 #### Core Entities:
@@ -245,37 +258,19 @@ Cortex utilizes PostgreSQL 16 with the `pgvector` extension. The schema is organ
 
 Cortex is architected for high availability, security, and low latency across the stack:
 
-```
-                            INTERNET
-                               │
-            ┌──────────────────┴──────────────────┐
-            ▼                                     ▼
-┌──────────────────────┐              ┌──────────────────────┐
-│  cortexagent.site    │              │  api.cortexagent.site│
-│  (Next.js on Vercel) │              │  (AWS EC2 Instance)  │
-└──────────────────────┘              └──────────┬───────────┘
-                                                 │
-                                                 ▼
-                                     ┌───────────────────────┐
-                                     │  Nginx Reverse Proxy  │
-                                     │  - SSL (Certbot)      │
-                                     │  - Rate Limiting      │
-                                     │  - SSE Stream Buffer  │
-                                     └───────────┬───────────┘
-                                                 │ 127.0.0.1:8000
-                                                 ▼
-                                     ┌───────────────────────┐
-                                     │  FastAPI (Uvicorn)    │
-                                     │  Managed by Systemd   │
-                                     │  (cortex.service)     │
-                                     └───────────┬───────────┘
-                                                 │
-                        ┌────────────────────────┴────────────────────────┐
-                        ▼                                                 ▼
-            ┌──────────────────────┐                          ┌──────────────────────┐
-            │  Managed PostgreSQL  │                          │  Supabase Storage    │
-            │  (pgvector + FTS)    │                          │  (Raw File Buckets)  │
-            └──────────────────────┘                          └──────────────────────┘
+```mermaid
+flowchart TD
+  Client(("Client / Web Browser")) -->|"HTTPS (Port 443)"| Vercel["Vercel Edge Platform\nhttps://cortexagent.site\n(Next.js App Router)"]
+  Vercel -->|"REST API & SSE Event Stream"| Nginx["Nginx Reverse Proxy\n(Port 443 with Certbot SSL)"]
+
+  subgraph AWS["AWS EC2 Instance (ap-south-1 Mumbai)"]
+    Nginx -->|"Proxy Buffering Off (127.0.0.1:8000)"| FastAPI["FastAPI Application\n(Managed via Systemd: cortex.service)"]
+    FastAPI --> LangGraph["LangGraph Multi-Agent Engine"]
+    FastAPI --> Buffer["In-Memory Circular Event Buffer"]
+  end
+
+  FastAPI -->|"Postgres Connection Pool"| DB[("Managed PostgreSQL Database\n(pgvector + Lexical FTS Index)")]
+  FastAPI -->|"Secure File Transfers"| Storage[("Supabase Object Storage\n(Encrypted Raw Documents)")]
 ```
 
 #### Infrastructure Specifications:

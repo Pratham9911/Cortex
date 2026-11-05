@@ -14,7 +14,6 @@
 
 <p align="center">
   <a href="https://cortexagent.site"><img src="https://img.shields.io/badge/Live%20Demo-cortexagent.site-2563EB?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo"></a>
-  <a href="https://api.cortexagent.site"><img src="https://img.shields.io/badge/API-api.cortexagent.site-10B981?style=for-the-badge&logo=fastapi&logoColor=white" alt="API Status"></a>
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12">
   <img src="https://img.shields.io/badge/Next.js-14-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js 14">
   <img src="https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL & pgvector">
@@ -106,70 +105,45 @@ Cortex connects secure document management, asynchronous ingestion, hybrid retri
   <img src="architecture/Cortex_Architecture.png" width="950" alt="Cortex Architecture Overview">
 </p>
 
-### End-to-End Information Flow
+### Interactive Architecture Workflow
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        1. DOCUMENT INGESTION                           │
-│                                                                        │
-│  User Upload ──► FastAPI Gateway ──► Supabase Storage                  │
-│                        │                                               │
-│                        ▼                                               │
-│                Redis Task Queue                                        │
-│                        │                                               │
-│                        ▼                                               │
-│             Asynchronous Worker Node                                   │
-│            ┌──────────────────────────┐                                │
-│            │ Text Extraction (PDF/MD) │                                │
-│            │ Recursive Chunking       │                                │
-│            │ Embedding Generation     │                                │
-│            └────────────┬─────────────┘                                │
-│                         ▼                                              │
-│          PostgreSQL Database (pgvector + FTS)                          │
-│          + Document ACL Security Attributes                            │
-└────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  subgraph Ingestion["1. Asynchronous Ingestion & Document ACL"]
+    Upload["User Document Upload"] --> Gateway["FastAPI API Gateway"]
+    Gateway --> Storage[("Supabase Storage")]
+    Gateway --> Queue[("Redis Task Queue")]
+    Queue --> Worker["Asynchronous Ingestion Worker"]
+    Worker --> Extract["Text Extraction (PDF / MD / TXT)"]
+    Extract --> Chunk["Recursive Overlapping Chunking"]
+    Chunk --> Embed["Dense Vector Embedding"]
+    Embed --> DBInsert[("PostgreSQL\n(pgvector + Full-Text Search)")]
+    DBInsert --- ACL["Document Access Control List (ACL)"]
+  end
 
-┌────────────────────────────────────────────────────────────────────────┐
-│                   2. HYBRID RETRIEVAL & RERANKING                      │
-│                                                                        │
-│  Natural Language Query ──► Query Normalization & Filter Formulation   │
-│                                      │                                 │
-│            ┌─────────────────────────┴────────────────────────┐        │
-│            ▼                                                  ▼        │
-│    pgvector Semantic Search                      PostgreSQL Lexical    │
-│    (Cosine Similarity)                           Full-Text Search      │
-│            │                                                  │        │
-│            └─────────────────────────┬────────────────────────┘        │
-│                                      ▼                                 │
-│                        Reciprocal Rank Fusion (RRF)                    │
-│                                      │                                 │
-│                                      ▼                                 │
-│                         Cross-Encoder Reranker                         │
-│                                      │                                 │
-│                                      ▼                                 │
-│                   ACL-Filtered Top-K Relevant Chunks                   │
-└────────────────────────────────────────────────────────────────────────┘
+  subgraph Retrieval["2. Smart Hybrid Retrieval & Reranking"]
+    Query["User Natural Language Query"] --> FTS["PostgreSQL Full-Text Search\n(BM25-Equivalent Lexical)"]
+    Query --> Dense["pgvector Semantic Search\n(Cosine Similarity)"]
+    FTS & Dense --> RRF["Reciprocal Rank Fusion (RRF)"]
+    RRF --> Reranker["Cross-Encoder Neural Reranker"]
+    Reranker --> ACLFilter{"Database-Level\nACL Security Filter"}
+    ACLFilter --> TopChunks["Grounded, Filtered Context Chunks"]
+  end
 
-┌────────────────────────────────────────────────────────────────────────┐
-│                 3. LANGGRAPH MULTI-AGENT EXECUTION                     │
-│                                                                        │
-│  User Prompt ──► Main Orchestrator Agent (LangGraph StateGraph)        │
-│                         │                                              │
-│        ┌────────────────┼────────────────┬──────────────┐              │
-│        ▼                ▼                ▼              ▼              │
-│  Retrieval Agent    Web Agent      GitHub Agent    Gmail Agent         │
-│  (Internal Chunks)  (Tavily / SERP) (Repository)    (Read-only)        │
-│        │                │                │              │              │
-│        └────────────────┼────────────────┴──────────────┘              │
-│                         ▼                                              │
-│               Rolling Short-Term Memory                                │
-│                         │                                              │
-│                         ▼                                              │
-│           Grounded Response + Precise Citations                        │
-│                         │                                              │
-│                         ▼                                              │
-│           SSE Stream to Next.js UI (Live Activities)                   │
-└────────────────────────────────────────────────────────────────────────┘
+  subgraph Agents["3. LangGraph Multi-Agent Orchestration"]
+    UserAsk["User Chat Prompt"] --> Planner["Main Planner Agent\n(LangGraph StateGraph)"]
+    Planner --> SubAgents["Specialized Sub-Agents"]
+    SubAgents --> RetAgent["Retrieval Agent (Internal Docs)"]
+    SubAgents --> WebAgent["Web Agent (Real-time Search)"]
+    SubAgents --> GitAgent["GitHub Agent (Read-only)"]
+    SubAgents --> MailAgent["Gmail Agent (Read-only)"]
+    RetAgent & WebAgent & GitAgent & MailAgent --> Synth["State Synthesis & Rolling STM"]
+    Synth --> Stream["Real-time SSE Event Stream\n(Live Activity & Thoughts)"]
+    Synth --> Final["Context-Grounded Answer\n+ Precise Citations"]
+  end
+
+  Ingestion -.-> Retrieval
+  TopChunks -.-> RetAgent
 ```
 
 > 📖 **Want to explore the internal design of each module?**  
@@ -222,42 +196,20 @@ To ensure high retrieval quality and avoid hallucinations, Cortex was benchmarke
 
 Cortex is split into a modern edge frontend and a hardened cloud backend:
 
-```
-                  ┌────────────────────────┐
-                  │      End User          │
-                  └───────────┬────────────┘
-                              │
-               HTTPS / WSS    │
-                              ▼
-                ┌───────────────────────────┐
-                │    Next.js on Vercel      │
-                │  https://cortexagent.site │
-                └─────────────┬─────────────┘
-                              │
-               API Calls & SSE Stream
-                              ▼
-    ┌──────────────────────────────────────────────────┐
-    │          AWS EC2 Instance (ap-south-1)           │
-    │            https://api.cortexagent.site          │
-    │                                                  │
-    │   ┌──────────────────────────────────────────┐   │
-    │   │  Nginx Reverse Proxy (Port 80/443, SSL)  │   │
-    │   └────────────────────┬─────────────────────┘   │
-    │                        ▼ (127.0.0.1:8000)        │
-    │   ┌──────────────────────────────────────────┐   │
-    │   │  FastAPI (Uvicorn via Systemd Service)   │   │
-    │   │  - Auth & RBAC Verification              │   │
-    │   │  - LangGraph Agentic Pipeline            │   │
-    │   │  - SSE Streaming & Reconnection Registry │   │
-    │   └────────────────────┬─────────────────────┘   │
-    └────────────────────────┼─────────────────────────┘
-                             │
-            ┌────────────────┴────────────────┐
-            ▼                                 ▼
-┌──────────────────────────┐     ┌──────────────────────────┐
-│   Managed PostgreSQL     │     │   Supabase File Storage  │
-│   (pgvector + Full-Text) │     │   (Secure Raw Documents) │
-└──────────────────────────┘     └──────────────────────────┘
+```mermaid
+flowchart TD
+  User(("Client / Web Browser")) -->|"HTTPS / WSS"| Vercel["Next.js Web Application\n(Vercel Global Edge)"]
+  Vercel -->|"REST API / SSE Events"| Nginx["Nginx Reverse Proxy\n(AWS EC2, Port 443 / SSL)"]
+  
+  subgraph EC2["AWS EC2 Host (ap-south-1 Mumbai)"]
+    Nginx -->|"Proxy Buffering Off (127.0.0.1:8000)"| FastAPI["FastAPI Application\n(Systemd: cortex.service)"]
+    FastAPI --> Auth["RBAC & ACL Validation"]
+    FastAPI --> Engine["LangGraph Multi-Agent Engine"]
+    FastAPI --> Registry["In-Memory SSE Reconnect Registry"]
+  end
+
+  FastAPI -->|"HNSW Vector & SQL Queries"| Postgres[("Managed PostgreSQL\n(pgvector + Full-Text Search)")]
+  FastAPI -->|"Direct Secure Uploads"| Supabase[("Supabase Object Storage\n(Raw Encrypted Documents)")]
 ```
 
 - **Frontend:** Hosted on [Vercel](https://cortexagent.site) with edge optimization.
