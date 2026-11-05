@@ -25,15 +25,13 @@ DISCUSSION_SYSTEM_PROMPT = SystemMessage(
         "1. discussion_retrieval_agent: Only Use When user asks for internal Team Knowledge, ask it exact what to get and always cite the facts\n"
         "2. discussion_web_agent: Only Use When user asks for External Web Knowledge\n"
         "3. discussion_decision_agent: Only Use When user asks to store/record a new team decision or search past team decisions (action='store' or action='search'). When storing a decision, pass participants list if specified in context (e.g. participants=[{'user_id': 1, 'role': 'Lead'}] or list of user IDs).\n"
-        "USE Sub-Agents only when really needed and tell them properly what to look, use them as search bar with clear query.\n"
-         
-          "=== PROJECT KNOWLEDGE (retrieval_agent) ===\n"
-               "ALways Site facts and statements with documents so it can be verified .\n"
-               "Treat KB info as Highest valid information and output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it.\n"
-               "Citation Rule only for Project Knowledge: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
-               "- CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newLine \n."
-               "Place every citation at the end of it's relevent paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line character."
-
+        "USE Sub-Agents only when really needed and tell them properly what to look, use them as search bar with clear query.\n\n"
+        "=== PROJECT KNOWLEDGE (retrieval_agent) ===\n"
+        "Always cite facts and statements with documents so it can be verified.\n"
+        "Treat KB info as Highest valid information and output the info from KB as it is with citations (eg: [cite: doc_12:p4]) included if subagent provides it.\n"
+        "Citation Rule only for Project Knowledge: if Project Info contains Citations then use them as it is otherwise don't invent citations.\n"
+        "- CRITICAL: Never wrap citation tags in backticks (do NOT write `[cite: doc_12:p4]`). Write plain [cite: doc_12:p4] and then newline.\n"
+        "Place every citation at the end of its relevant paragraph, sentence, bullet, or point, so that the citation is immediately followed by a new line character.\n\n"
         "Now important: Never search in web or Kb unless user asks, understand the conversation and answer based on it (NEVER ASSUME ANYTHING, ASK USER IF UNSURE).\n"
         "Your main task is to be an Assistant to Team and handle decisions with providing corrected information that user can verify."
     )
@@ -113,10 +111,12 @@ async def discussion_chat_node(state: DiscussionAgentState) -> dict:
     raw_messages = state.get("messages", [])
     clean_messages = sanitize_discussion_messages(raw_messages)
 
-    if not clean_messages or not isinstance(clean_messages[0], SystemMessage):
-        messages_to_send = [DISCUSSION_SYSTEM_PROMPT] + clean_messages
-    else:
-        messages_to_send = clean_messages
+    # Ensure DISCUSSION_SYSTEM_PROMPT is ALWAYS at index 0 and never omitted
+    other_messages = [
+        msg for msg in clean_messages
+        if not (isinstance(msg, SystemMessage) and msg.content == DISCUSSION_SYSTEM_PROMPT.content)
+    ]
+    messages_to_send = [DISCUSSION_SYSTEM_PROMPT] + other_messages
 
     current_iteration = state.get("iterations", 0)
     response = await discussion_llm.ainvoke(messages_to_send)
@@ -249,11 +249,16 @@ async def discussion_force_synthesis_node(state: DiscussionAgentState) -> dict:
     synthesis_prompt = SystemMessage(
         content=(
             "You have completed all allowed sub-agent searches. "
-            "Using ONLY the information gathered so far in the conversation, provide a clear, final answer."
+            "Using ONLY the information gathered so far in the conversation, provide a clear, final answer. "
+            "Maintain all citation rules exactly as defined in the system prompt."
         )
     )
 
-    messages_to_send = [synthesis_prompt] + clean_messages
+    other_messages = [
+        msg for msg in clean_messages
+        if not (isinstance(msg, SystemMessage) and msg.content in (DISCUSSION_SYSTEM_PROMPT.content, synthesis_prompt.content))
+    ]
+    messages_to_send = [DISCUSSION_SYSTEM_PROMPT, synthesis_prompt] + other_messages
     response = await discussion_llm_base.ainvoke(messages_to_send)
     usage = response.usage_metadata or {}
     reasoning = response.additional_kwargs.get("reasoning_content", "")

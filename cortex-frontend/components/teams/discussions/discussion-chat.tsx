@@ -352,81 +352,119 @@ export function DiscussionChat({
     }
   }, [messages])
 
-  // WebSocket Connection Lifecycle
+  // WebSocket Connection Lifecycle — with auto-reconnect
+  const reconnectAttemptsRef = useRef(0)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const MAX_RECONNECT_ATTEMPTS = 5
+
   useEffect(() => {
     if (!activeDiscussion) return
 
-    const token = getAuthToken()
-    if (!token) return
+    let cancelled = false
+    reconnectAttemptsRef.current = 0
 
-    const rawApiUrl = process.env.NEXT_PUBLIC_API_URL!
-    const wsUrl =
-      rawApiUrl.replace(/^http/, "ws") +
-      `/ws/discussions/${activeDiscussion.id}?token=${encodeURIComponent(token)}`
+    const connectWebSocket = () => {
+      if (cancelled) return
 
-    setSocketStatus("connecting")
-    const socket = new WebSocket(wsUrl)
-    socketRef.current = socket
+      // Always read the latest token on each (re)connect attempt
+      const token = getAuthToken()
+      if (!token) {
+        setSocketStatus("error")
+        return
+      }
 
-    socket.onopen = () => setSocketStatus("connected")
+      const rawApiUrl = process.env.NEXT_PUBLIC_API_URL!
+      const wsUrl =
+        rawApiUrl.replace(/^http/, "ws") +
+        `/ws/discussions/${activeDiscussion.id}?token=${encodeURIComponent(token)}`
 
-    socket.onmessage = (event) => {
-      try {
-        const payload: WsChatEvent = JSON.parse(event.data)
-        if (payload && payload.event) {
-          if (payload.event === "ai_quota_error") {
-            const message =
-              typeof payload.detail === "string"
-                ? payload.detail
-                : payload.detail.message || "Your daily AI limit has been reached."
-            setAiQuotaError(message)
-            void refreshAiQuota()
-            return
-          }
-          if (payload.event === "cortex_thinking") {
-            if (payload.status) {
-              setCortexThinkingStatus(payload.status)
-              setCortexAgentName(payload.agent_name || null)
-            } else {
-              setCortexThinkingStatus(null)
-              setCortexAgentName(null)
+      setSocketStatus("connecting")
+      const socket = new WebSocket(wsUrl)
+      socketRef.current = socket
+
+      socket.onopen = () => {
+        if (cancelled) { socket.close(); return }
+        reconnectAttemptsRef.current = 0
+        setSocketStatus("connected")
+      }
+
+      socket.onmessage = (event) => {
+        try {
+          const payload: WsChatEvent = JSON.parse(event.data)
+          if (payload && payload.event) {
+            if (payload.event === "ai_quota_error") {
+              const message =
+                typeof payload.detail === "string"
+                  ? payload.detail
+                  : payload.detail.message || "Your daily AI limit has been reached."
+              setAiQuotaError(message)
               void refreshAiQuota()
+              return
             }
-            return
-          }
-
-          if (payload.message) {
-            const incoming = payload.message
-            if (incoming.discussion_id !== activeDiscussion.id) return
-
-            if (incoming.is_ai_message || incoming.sender_id === null || incoming.sender_id === -1) {
-              setCortexThinkingStatus(null)
-              setCortexAgentName(null)
-              void refreshAiQuota()
+            if (payload.event === "cortex_thinking") {
+              if (payload.status) {
+                setCortexThinkingStatus(payload.status)
+                setCortexAgentName(payload.agent_name || null)
+              } else {
+                setCortexThinkingStatus(null)
+                setCortexAgentName(null)
+                void refreshAiQuota()
+              }
+              return
             }
 
-            setMessages((prev) => {
-              if (payload.event === "new_message") {
-                if (prev.some((m) => m.id === incoming.id)) return prev
-                return [...prev, incoming]
+            if (payload.message) {
+              const incoming = payload.message
+              if (incoming.discussion_id !== activeDiscussion.id) return
+
+              if (incoming.is_ai_message || incoming.sender_id === null || incoming.sender_id === -1) {
+                setCortexThinkingStatus(null)
+                setCortexAgentName(null)
+                void refreshAiQuota()
               }
-              if (payload.event === "edit_message" || payload.event === "delete_message" || payload.event === "reaction_update" || payload.event === "proposal_updated") {
-                return prev.map((m) => (m.id === incoming.id ? incoming : m))
-              }
-              return prev
-            })
+
+              setMessages((prev) => {
+                if (payload.event === "new_message") {
+                  if (prev.some((m) => m.id === incoming.id)) return prev
+                  return [...prev, incoming]
+                }
+                if (payload.event === "edit_message" || payload.event === "delete_message" || payload.event === "reaction_update" || payload.event === "proposal_updated") {
+                  return prev.map((m) => (m.id === incoming.id ? incoming : m))
+                }
+                return prev
+              })
+            }
           }
+        } catch (err) {
+          console.error("WS Parse error:", err)
         }
-      } catch (err) {
-        console.error("WS Parse error:", err)
+      }
+
+      socket.onerror = () => {
+        if (!cancelled) setSocketStatus("error")
+      }
+
+      socket.onclose = (event) => {
+        if (cancelled) return
+        setSocketStatus("disconnected")
+
+        // Auto-reconnect with exponential backoff (skip for auth failures)
+        const isAuthFailure = event.code === 4001 || event.code === 4003
+        if (!isAuthFailure && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 15000)
+          reconnectAttemptsRef.current += 1
+          console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current})`)
+          reconnectTimerRef.current = setTimeout(connectWebSocket, delay)
+        }
       }
     }
 
-    socket.onerror = () => setSocketStatus("error")
-    socket.onclose = () => setSocketStatus("disconnected")
+    connectWebSocket()
 
     return () => {
-      socket.close()
+      cancelled = true
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      socketRef.current?.close()
     }
   }, [activeDiscussion?.id, refreshAiQuota])
 

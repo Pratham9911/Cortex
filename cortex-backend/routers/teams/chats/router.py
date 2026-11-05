@@ -292,7 +292,16 @@ async def discussion_websocket(
     discussion_id: int,
     token: Optional[str] = Query(None),
 ):
+    # ── IMPORTANT ──────────────────────────────────────────────────
+    # In Starlette/FastAPI, calling websocket.close() BEFORE
+    # websocket.accept() sends an HTTP 403 Forbidden instead of a
+    # proper WebSocket close frame.  We MUST accept first, then
+    # close with an application-level error code so the JS client
+    # receives a clean onclose event with a reason it can display.
+    # ───────────────────────────────────────────────────────────────
+
     if not token:
+        await websocket.accept()
         await websocket.close(code=4001, reason="Missing auth token")
         return
 
@@ -300,29 +309,45 @@ async def discussion_websocket(
     try:
         from supabase_client import supabase
 
-        res = supabase.auth.get_user(token)
+        try:
+            res = supabase.auth.get_user(token)
+        except Exception as auth_err:
+            print(f"[WS Auth] Supabase get_user failed for discussion {discussion_id}: {auth_err}")
+            await websocket.accept()
+            await websocket.close(code=4001, reason="Token validation failed")
+            return
+
         if not res or not res.user or not res.user.email:
+            await websocket.accept()
             await websocket.close(code=4001, reason="Invalid token")
             return
 
         user = db.query(User).filter(User.email == res.user.email).first()
         if not user:
+            await websocket.accept()
             await websocket.close(code=4001, reason="User not found")
             return
 
         discussion = db.query(TeamDiscussion).filter(TeamDiscussion.id == discussion_id).first()
         if not discussion:
+            await websocket.accept()
             await websocket.close(code=4004, reason="Discussion not found")
             return
 
         # Check membership
         team = db.query(Team).filter(Team.team_id == discussion.team_id).first()
+        if not team:
+            await websocket.accept()
+            await websocket.close(code=4004, reason="Team not found")
+            return
+
         membership = (
             db.query(ProjectMember)
             .filter(ProjectMember.project_id == team.project_id, ProjectMember.user_id == user.user_id)
             .first()
         )
         if not membership:
+            await websocket.accept()
             await websocket.close(code=4003, reason="Access denied")
             return
 
@@ -500,6 +525,7 @@ async def _trigger_cortex_discussion_agent_ws(
             db=db,
             selected_document_ids=selected_document_ids,
             event_callback=ws_event_callback,
+            current_message_id=parent_message_id,
         )
         usage_input_tokens = int(result.get("input_tokens") or 0)
         usage_output_tokens = int(result.get("output_tokens") or 0)
